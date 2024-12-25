@@ -9,7 +9,7 @@ import Basemodel from "./basemodel.js";
 
 class Event extends Basemodel {
     // Name of the MongoDB collection associated with this model
-    collection = "events";
+    static collection = "events";
 
     /**
      * Constructs a new Event instance.

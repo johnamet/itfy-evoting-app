@@ -9,7 +9,7 @@ import Basemodel from "./basemodel.js";
 
 class Role extends Basemodel {
     // Name of the MongoDB collection associated with this model
-    collection = "roles";
+    static collection = "roles";
 
     /**
      * Constructs a new Role instance.

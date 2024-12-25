@@ -202,9 +202,8 @@ class StorageEngine {
      * @returns {Promise<number>} - The count of matching documents.
      */
     async count(collectionName, query = {}) {
-        console.log(collectionName);
         return this.execute(() =>
-            this.getCollection(collectionName).countDocuments(query)
+            this.getCollection('base').countDocuments(query)
         );
     }
 
@@ -241,4 +240,7 @@ class StorageEngine {
     }
 }
 
-export default StorageEngine;
+const storage = new StorageEngine();
+await storage.connect();
+
+export default storage;

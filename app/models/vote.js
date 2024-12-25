@@ -5,7 +5,7 @@ import Basemodel from "./basemodel.js";
 
 class Vote extends Basemodel{
 
-    collection = "votes";
+    static collection = "votes";
 
     constructor(candidate_id, event_id,
                 category_id, number_of_votes,

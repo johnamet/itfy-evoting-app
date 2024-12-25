@@ -8,7 +8,8 @@
 import Basemodel from "./basemodel.js";
 
 class Nomination extends Basemodel {
-    collection = "nominations";
+
+    static collection = "nominations";
 
     /**
      * Constructs a new Nomination instance.
@@ -24,6 +25,7 @@ class Nomination extends Basemodel {
         this.candidate_id = candidate_id; // Assign the candidate ID
         this.event_id = event_id; // Assign the event ID
         this.category_id = category_id; // Assign the category ID
+
     }
 }
 

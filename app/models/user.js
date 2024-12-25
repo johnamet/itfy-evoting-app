@@ -8,7 +8,7 @@ import bcrypt from "bcrypt"; // Import bcrypt for password hashing
 
 class User extends Basemodel {
 
-    collection = "users";
+    static collection = "users";
     /**
      * Constructor to initialize a new User instance.
      *

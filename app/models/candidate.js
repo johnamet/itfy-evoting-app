@@ -9,7 +9,7 @@ import Basemodel from "./basemodel.js";
 
 class Candidate extends Basemodel {
     // Name of the MongoDB collection associated with this model
-    collection = "candidates";
+    static collection = "candidates";
 
     /**
      * Constructs a new Candidate instance.
@@ -25,6 +25,7 @@ class Candidate extends Basemodel {
         this.name = name; // Assign the candidate's name
         this.event_id = event_id; // Assign the event ID
         this.category_ids = category_ids; // Assign the list of category IDs
+        this._collection = "candidates"
     }
 }
 

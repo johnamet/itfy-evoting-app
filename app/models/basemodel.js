@@ -12,7 +12,7 @@ await storage.connect();
 
 class Basemodel {
 
-    collection = "base";
+    static collection = "base";
 
     constructor(...kwargs) {
         this.id = new ObjectId(); // Generate a new ObjectId
@@ -80,7 +80,7 @@ class Basemodel {
         try {
             return await operation();
         } catch (e) {
-            console.error(`Error executing operation on collection: ${this.collection}`, e);
+            console.error(`Error executing operation on collection: ${this.constructor.collection}`, e);
             throw e;
         }
     }
@@ -91,7 +91,7 @@ class Basemodel {
      */
     async save() {
         return this.execute(() => {
-            return storage.insert(this.collection, this.to_object());
+            return storage.insert(this.constructor.collection, this.to_object());
         });
     }
 
@@ -102,7 +102,7 @@ class Basemodel {
      */
     async saveAll(objects) {
         return this.execute(() => {
-            return storage.insertMany(this.collection, objects.map(obj => obj.to_object()));
+            return storage.insertMany(this.constructor.collection, objects.map(obj => obj.to_object()));
         });
     }
 
@@ -113,7 +113,7 @@ class Basemodel {
      */
     async updateInstance(updateObject) {
         return this.execute(() => {
-            return storage.update(this.collection, { id: this.id }, updateObject);
+            return storage.update(this.constructor.collection, { id: this.id }, updateObject);
         });
     }
 
@@ -124,7 +124,7 @@ class Basemodel {
      * @returns {Promise<any>} - The result of the update operation.
      */
     static async update(query, update) {
-        return storage.update(this.prototype.collection, query, update); // Fixed: access the collection via prototype
+        return storage.update(this.collection, query, update); // Fixed: access the collection via prototype
     }
 
     /**
@@ -133,7 +133,7 @@ class Basemodel {
      */
     async delete() {
         return this.execute(() => {
-            return storage.delete(this.collection, { id: this.id });
+            return storage.delete(this.constructor.collection, { id: this.id });
         });
     }
 
@@ -143,7 +143,7 @@ class Basemodel {
      * @returns {Promise<any>} - The result of the delete operation.
      */
     static async deleteAll(query) {
-        return storage.deleteMany(this.prototype.collection, query);
+        return storage.deleteMany(this.collection, query);
     }
 
     /**
@@ -152,7 +152,7 @@ class Basemodel {
      * @returns {Promise<any>} - The found object.
      */
     static async get(query) {
-        return storage.findOne(this.prototype.collection, query);
+        return storage.findOne(this.collection, query);
     }
 
     /**
@@ -162,8 +162,8 @@ class Basemodel {
      */
     static async all(query = null) {
         return query
-            ? storage.query(this.prototype.collection, query)
-            : storage.all(this.prototype.collection);
+            ? storage.query(this.collection, query)
+            : storage.all(this.collection);
     }
 
     /**
@@ -173,7 +173,7 @@ class Basemodel {
      * @returns {Promise<any[]>} - The found objects.
      */
     static async allWithOptions(query, options) {
-        return storage.queryWithOptions(this.prototype.collection, query, options);
+        return storage.queryWithOptions(this.collection, query, options);
     }
 
 
@@ -183,8 +183,9 @@ class Basemodel {
      * @returns {Promise<number>} - The number of documents in a collection
      */
     static async count(query ={}){
+        const collection = this.collection;
        return this.prototype.execute(() => {
-            storage.count(this.prototype.collection, query);
+            storage.count(collection, query);
         })
     }
 

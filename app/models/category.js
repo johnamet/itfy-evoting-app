@@ -10,7 +10,7 @@ import Basemodel from "./basemodel.js";
 
 class Category extends Basemodel {
     // Name of the MongoDB collection associated with this model
-    collection = "categories";
+    static collection = "categories";
 
     /**
      * Constructs a new Category instance.
