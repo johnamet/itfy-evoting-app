@@ -10,7 +10,7 @@ import Users from "../models/basemodel.js";
 import Vote from "../models/vote.js";
 import Event from "../models/event.js";
 import storage from "../utils/engine/StorageEngine.js";
-import cacheEngine from "../utils/engine/CacheEngine.js";
+import {cacheEngine} from "../utils/engine/CacheEngine.js";
 
 
 
@@ -30,7 +30,7 @@ class AppController {
                     latency: await storage.getLatency(),
                 },
                 cache: {
-                    connection: await cacheEngine.isConnected(),
+                    connection: cacheEngine.isConnected(),
                     latency: await cacheEngine.getLatency()
                 }
             };

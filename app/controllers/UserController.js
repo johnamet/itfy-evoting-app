@@ -1,4 +1,5 @@
 import User from "../models/user.js";
+import {ObjectId} from "mongodb";
 
 class UserController {
     /**
@@ -6,7 +7,16 @@ class UserController {
      */
     static async createUser(req, res) {
         try {
-            const { name, email, password } = req.body;
+
+            const data = req.body;
+
+            if (!data){
+                return res.status(400).send({
+                    error: "Missing data",
+                    success: false
+                })
+            }
+            const { name, email, password } = data;
 
             if (!name || !email || !password) {
                 return res.status(400).send({
@@ -24,7 +34,7 @@ class UserController {
                 });
             }
 
-            const user = new User(name, email, password);
+            const user = await User.create(name, email, password);
             const result = await user.save();
 
             if (!result) {
@@ -69,13 +79,15 @@ class UserController {
                 });
             }
 
-            let user = await User.get({ id: userId });
+            let user = await User.get({id: new ObjectId(userId)});
             if (!user) {
                 return res.status(404).send({
                     success: false,
                     error: `User with ID ${userId} not found.`
                 });
             }
+
+            delete user['password'];
 
             user = User.from_object(user);
             const result = await user.updateInstance(body);
@@ -114,7 +126,7 @@ class UserController {
                 });
             }
 
-            const result = await User.delete({ id: userId });
+            const result = await User.delete({ id: new ObjectId(userId) });
 
             if (!result) {
                 return res.status(404).send({
@@ -142,7 +154,7 @@ class UserController {
     static async listUsers(req, res) {
         try {
             const query = req.query || {};
-            const users = await User.query(query);
+            const users = await User.all(query);
 
             if (!users || users.length === 0) {
                 return res.status(404).send({
@@ -160,6 +172,36 @@ class UserController {
             return res.status(500).send({
                 success: false,
                 error: error.message
+            });
+        }
+    }
+
+    static async myProfile(req, res){
+        try{
+            const { userId } = req.params;
+
+            //check for the user with id
+            const userRecord = await User.get({id: new ObjectId(userId)});
+
+            if (!userRecord){
+                return res.status(400).send({
+                    error: `User with id: ${userId} not found.`,
+                    success: false
+                });
+            }
+
+            delete userRecord['password'];
+
+            return res.status(200).send({
+                success: true,
+                user: userRecord
+            })
+        }catch (e) {
+            console.error(e);
+
+            return res.status(500).send({
+                success: false,
+                error: e.message
             });
         }
     }

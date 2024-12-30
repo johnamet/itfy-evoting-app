@@ -1,11 +1,10 @@
-import chai from "chai";
 import sinon from "sinon";
 import pkg from "mongodb";
-import StorageEngine from "../utils/engine/StorageEngine.js";
+import {StorageEngine} from "../utils/engine/StorageEngine.js";
 
 const { MongoClient } = pkg;
 
-const { expect } = chai;
+import {expect} from 'chai';
 
 describe("StorageEngine", () => {
     let storageEngine;

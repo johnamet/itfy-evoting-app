@@ -2,13 +2,11 @@
  * The base model for all order models.
  */
 import pkg from "mongodb";
+import storage from "../utils/engine/StorageEngine.js";
 
 const { ObjectId } = pkg;
 
-import StorageEngine from "../utils/engine/StorageEngine.js";
 
-const storage = new StorageEngine();
-await storage.connect();
 
 class Basemodel {
 
@@ -115,6 +113,11 @@ class Basemodel {
         return this.execute(() => {
             return storage.update(this.constructor.collection, { id: this.id }, updateObject);
         });
+    }
+
+
+    async verifyPassword(password){
+        bcrypt.compare(password, this.password);
     }
 
     /**

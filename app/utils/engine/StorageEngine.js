@@ -117,10 +117,14 @@ class StorageEngine {
      * @returns {Promise<any>} - The result of the update operation.
      */
     async update(collectionName, query, update) {
+        // Ensure the update uses atomic operators
+        const atomicUpdate = { $set: update };
+
         return this.execute(() =>
-            this.getCollection(collectionName).updateOne(query, update)
+            this.getCollection(collectionName).updateOne(query, atomicUpdate)
         );
     }
+
 
     /**
      * Deletes a document from a collection.
@@ -177,6 +181,11 @@ class StorageEngine {
      * @returns {Promise<object|null>} - The matching document or null if not found.
      */
     async findOne(collectionName, query) {
+        Object.keys(query).forEach(key => {
+            if(key === "id"){
+                query['id'] = new Object(query['id']);
+            }
+        });
         return this.execute(() => this.getCollection(collectionName).findOne(query));
     }
 
@@ -242,5 +251,7 @@ class StorageEngine {
 
 const storage = new StorageEngine();
 await storage.connect();
+
+export {StorageEngine};
 
 export default storage;

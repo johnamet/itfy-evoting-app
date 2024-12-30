@@ -1,62 +1,74 @@
-/**
- * The user class
- * Extends the Basemodel to provide functionality for user management.
- */
-
 import Basemodel from "./basemodel.js";
-import bcrypt from "bcrypt"; // Import bcrypt for password hashing
+import bcrypt from "bcryptjs";
 
 class User extends Basemodel {
+  static collection = "users";
 
-    static collection = "users";
-    /**
-     * Constructor to initialize a new User instance.
-     *
-     * @param {string} name - The name of the user.
-     * @param {string} email - The email address of the user.
-     * @param {string} password - The raw password of the user (will be hashed).
-     * @param {...object} kwargs - Additional fields to pass to the base model.
-     */
-    constructor(name, email, password, kwargs = {}) {
-        super(kwargs); // Initialize base model fields
-        this.name = name;
-        this.email = email;
-        this.setPassword(password); // Hash and set the password
-    }
+  /**
+   * Constructor to initialize a new User instance.
+   *
+   * @param {string} name - The name of the user.
+   * @param {string} email - The email address of the user.
+   * @param {string} password - The hashed password of the user.
+   * @param {...object} kwargs - Additional fields to pass to the base model.
+   */
+  constructor(name, email, password, kwargs = {}) {
+    super(kwargs); // Initialize base model fields
+    this.name = name;
+    this.email = email;
+    this.password = password; // Already hashed password
+  }
 
-    /**
-     * Hashes and sets the user's password.
-     *
-     * @param {string} password - The raw password to hash and store.
-     */
-    async setPassword(password) {
-        const saltRounds = 10;
-        this.password = await bcrypt.hash(password, saltRounds);
-    }
+  /**
+   * Factory method to create a new User instance.
+   *
+   * @param {string} name - The name of the user.
+   * @param {string} email - The email address of the user.
+   * @param {string} password - The raw password to hash.
+   * @param {...object} kwargs - Additional fields to pass to the base model.
+   * @returns {Promise<User>} - A promise that resolves to a new User instance.
+   */
+  static async create(name, email, password, kwargs = {}) {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    return new User(name, email, hashedPassword, kwargs);
+  }
 
-    /**
-     * Verifies if a provided password matches the stored hashed password.
-     *
-     * @param {string} password - The raw password to verify.
-     * @returns {Promise<boolean>} - Returns true if passwords match, false otherwise.
-     */
-    async verifyPassword(password) {
-        return bcrypt.compare(password, this.password);
-    }
+  /**
+   * Verifies if a provided password matches the stored hashed password.
+   *
+   * @param {string} password - The raw password to verify.
+   * @returns {Promise<boolean>} - Returns true if passwords match, false otherwise.
+   */
+  async verifyPassword(password) {
+    return bcrypt.compare(password, this.password);
+  }
 
-    /**
-     * Converts the User instance to a plain JavaScript object,
-     * excluding sensitive fields like the password.
-     *
-     * @returns {object} - The user object without sensitive information.
-     */
-    to_object() {
-        const obj = super.to_object(); // Get base model fields
-        obj.name = this.name;
-        obj.email = this.email;
-        delete obj.password; // Exclude password from the output
-        return obj;
-    }
+
+  /**
+   * Check the user in the database matching email and password
+   * @param {string} email - The email of the user
+   * @param {string} password - The raw password to verify
+   * @returns {Promise<Basemodel>} - The user instance from the database
+   */
+  static async checkUser(email, password){
+    const hashedPassword = await bcrypt.hash(password, 10);
+    return await super.get({email, password:hashedPassword});
+  }
+
+  /**
+   * Converts the User instance to a plain JavaScript object,
+   * excluding sensitive fields like the password.
+   *
+   * @returns {object} - The user object without sensitive information.
+   */
+  to_object() {
+    const obj = super.to_object(); // Get base model fields
+    obj.name = this.name;
+    obj.email = this.email;
+    obj.password = this.password;
+    // delete obj.password; // Exclude password from the output
+    return obj;
+  }
 }
 
 export default User;

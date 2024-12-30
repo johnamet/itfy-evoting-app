@@ -1,8 +1,9 @@
 import User from "../models/user.js";
 import Role from "../models/role.js";
 import jwt from "jsonwebtoken";
-import cacheEngine from "../utils/engine/CacheEngine.js";
 import {configDotenv} from "dotenv";
+import {ObjectId} from "mongodb";
+import {cacheEngine} from "../utils/engine/CacheEngine.js";
 
 configDotenv();
 class AuthController {
@@ -20,7 +21,8 @@ class AuthController {
                 });
             }
 
-            const userRecord = await User.get({ email });
+            const userRecord = await User.get({email});
+
             if (!userRecord) {
                 return res.status(404).send({
                     success: false,
@@ -30,14 +32,16 @@ class AuthController {
 
             const user = User.from_object(userRecord);
 
-            if (!user.verifyPassword(password)) {
+            const checkPassword = await user.verifyPassword(password);
+
+            if (!checkPassword) {
                 return res.status(400).send({
                     success: false,
                     error: "Password mismatched."
                 });
             }
 
-            const role = user.roleId ? await Role.get({ id: user.roleId })['name'] : null;
+            const role = user.roleId ? await Role.get({id: new ObjectId(user.roleId)})['name'] : null;
             const payload = {
                 userId: user.id,
                 role,
@@ -114,13 +118,18 @@ class AuthController {
                 });
             }
 
+            console.log("Checking blacklist")
+
             const isBlacklisted = await cacheEngine.get(`blacklisted-${accessToken}`);
-            if (isBlacklisted) {
-                return res.status(403).send({
-                    success: false,
-                    error: "Token has been revoked"
-                });
-            }
+
+            // if (isBlacklisted) {
+            //     return res.status(403).send({
+            //         success: false,
+            //         error: "Token has been revoked"
+            //     });
+            // }
+
+            console.log("Verifying accesstoken");
 
             jwt.verify(accessToken, process.env["SECRET_KEY"], (err, decoded) => {
                 if (err) {
