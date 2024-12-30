@@ -1,5 +1,6 @@
 import Basemodel from "./basemodel.js";
 import bcrypt from "bcryptjs";
+import storage from "../utils/engine/StorageEngine.js";
 
 class User extends Basemodel {
   static collection = "users";
@@ -40,6 +41,10 @@ class User extends Basemodel {
    * @returns {Promise<boolean>} - Returns true if passwords match, false otherwise.
    */
   async verifyPassword(password) {
+
+    if(!this.password){
+      throw new Error("User does not have a password");
+    }
     return bcrypt.compare(password, this.password);
   }
 
@@ -54,6 +59,24 @@ class User extends Basemodel {
     const hashedPassword = await bcrypt.hash(password, 10);
     return await super.get({email, password:hashedPassword});
   }
+
+    /**
+     * Update an instance in the database.
+     * @param {object} updateObject - The fields to be updated.
+     * @returns {Promise<any>} - The result of the update operation.
+     */
+    async updateInstance(updateObject) {
+
+      const {password} = updateObject;
+      if (password){
+        const hashedPassword = await bcrypt.hash(password, 10);
+        updateObject["password"] = hashedPassword;
+      }
+      return this.execute(() => {
+          return storage.update(this.constructor.collection, { id: this.id }, updateObject);
+      });
+  }
+
 
   /**
    * Converts the User instance to a plain JavaScript object,

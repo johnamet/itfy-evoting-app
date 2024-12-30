@@ -212,7 +212,7 @@ class StorageEngine {
      */
     async count(collectionName, query = {}) {
         return this.execute(() =>
-            this.getCollection('base').countDocuments(query)
+            this.getCollection(collectionName).find({}).toArray
         );
     }
 

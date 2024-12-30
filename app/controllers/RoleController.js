@@ -15,14 +15,13 @@ class RoleController {
                 });
             }
 
-            //check if role with name exists
+            // Check if role with name exists
+            const roleRecord = await Role.get({ name: name.toLowerCase() });
 
-            const roleRecord = await Role.get({name: name.toLowerCase()});
-
-            if (roleRecord){
+            if (roleRecord) {
                 return res.status(403).send({
                     error: `Role with name ${name} exists`,
-                    success: false
+                    success: false,
                 });
             }
 
@@ -39,6 +38,42 @@ class RoleController {
             return res.status(201).send({
                 success: true,
                 role: role.to_object(),
+            });
+        } catch (e) {
+            console.error(e);
+            return res.status(500).send({
+                error: e.message,
+                success: false,
+            });
+        }
+    }
+
+    /**
+     * Retrieve a single role by its ID.
+     */
+    static async getRole(req, res) {
+        try {
+            const { roleId } = req.params;
+
+            if (!roleId) {
+                return res.status(400).send({
+                    error: "Missing `roleId` parameter",
+                    success: false,
+                });
+            }
+
+            const role = await Role.get({ id: roleId });
+
+            if (!role) {
+                return res.status(404).send({
+                    error: `Role with id: ${roleId} not found`,
+                    success: false,
+                });
+            }
+
+            return res.status(200).send({
+                success: true,
+                role: Role.from_object(role).to_object(),
             });
         } catch (e) {
             console.error(e);
@@ -108,6 +143,52 @@ class RoleController {
             return res.status(200).send({
                 success: true,
                 role: role.to_object(),
+            });
+        } catch (e) {
+            console.error(e);
+            return res.status(500).send({
+                error: e.message,
+                success: false,
+            });
+        }
+    }
+
+    /**
+     * Delete an existing role.
+     */
+    static async deleteRole(req, res) {
+        try {
+            const { roleId } = req.params;
+
+            if (!roleId) {
+                return res.status(400).send({
+                    error: "Missing `roleId` parameter",
+                    success: false,
+                });
+            }
+
+            const role = await Role.get({ id: roleId });
+
+            if (!role) {
+                return res.status(404).send({
+                    error: `Role with id: ${roleId} not found`,
+                    success: false,
+                });
+            }
+
+            // Delete the role
+            const deleteResult = await Role.delete({ id: roleId });
+
+            if (!deleteResult) {
+                return res.status(500).send({
+                    error: "Failed to delete the role",
+                    success: false,
+                });
+            }
+
+            return res.status(200).send({
+                success: true,
+                message: `Role with id: ${roleId} successfully deleted`,
             });
         } catch (e) {
             console.error(e);

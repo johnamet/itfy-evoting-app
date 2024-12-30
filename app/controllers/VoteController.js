@@ -19,12 +19,20 @@ class VoteController {
                 });
             }
 
-            const { candidate_id, event_id, category_id, voter_ip } = data;
+            const { candidate_id, event_id, category_id, voter_ip,
+                 voting_id } = data;
 
-            if (!candidate_id || !event_id || !category_id || !voter_ip) {
+            if (!event_id || !category_id || !voter_ip) {
                 return res.status(400).send({
                     success: false,
                     error: "Missing required fields: `candidate_id`, `event_id`, `category_id`, or `voter_ip`."
+                });
+            }
+
+            if(!candidate_id && !voting_id){
+                return res.status(400).send({
+                    success: false,
+                    error: "Either a `candidate_id` or a `voting_id` is required."
                 });
             }
 
@@ -47,7 +55,9 @@ class VoteController {
             }
 
             // Validate candidate
-            const candidate = await Candidate.get({ id: new ObjectId(candidate_id) });
+            const candidate = await Candidate.get({ id: new ObjectId(candidate_id)}) ? candidate_id: await Candidate.get({
+                voting_id
+            });
             if (!candidate || candidate.categoryId !== category_id) {
                 return res.status(404).send({
                     success: false,

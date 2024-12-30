@@ -9,17 +9,17 @@ import {Router} from "express";
 
 const userRouter = Router()
 
-userRouter.post('/create-user', UserController.createUser);
-userRouter.put('/update-user/:userId',
+userRouter.post('/', UserController.createUser);
+userRouter.put('/:userId', AuthController.verifyToken,
     UserController.updateUser);
 userRouter.get('/', AuthController.verifyToken,
     AuthController.verifyRole(['admin']),
     UserController.listUsers);
 
-userRouter.get('/me/:userId', UserController.myProfile);
+userRouter.get('/me/:userId', AuthController.verifyToken, UserController.myProfile);
 
 
-userRouter.delete('/users/delete-user', AuthController.verifyToken,
+userRouter.delete('/:userId', AuthController.verifyToken,
     AuthController.verifyRole(['admin']),
     UserController.deleteUser);
 

@@ -1,8 +1,11 @@
 import Candidate from "../models/candidate.js";
 import Event from "../models/event.js";
 import Category from "../models/category.js";
-import Nomination from "../models/nomination.js";
 import { ObjectId } from "mongodb";
+import { parse } from "csv-parse";
+import fs from "fs";
+
+const uploadProgress = new Map(); // To track ongoing uploads and their progress
 
 class CandidateController {
     /**
@@ -15,20 +18,20 @@ class CandidateController {
             if (!data) {
                 return res.status(400).send({
                     success: false,
-                    error: "Missing request body."
+                    error: "Missing data."
                 });
             }
 
             const { name, event_id, category_ids } = data;
 
-            if (!name || !event_id || !category_ids || !Array.isArray(category_ids)) {
+            if (!name || !event_id) {
                 return res.status(400).send({
                     success: false,
-                    error: "Missing or invalid fields: `name`, `event_id`, or `category_ids`."
+                    error: "Missing required fields: `name`, `event_id`."
                 });
             }
 
-            // Validate event
+            // Validate event existence
             const event = await Event.get({ id: new ObjectId(event_id) });
             if (!event) {
                 return res.status(404).send({
@@ -38,26 +41,30 @@ class CandidateController {
             }
 
             // Validate categories
-            for (const category_id of category_ids) {
-                const category = await Category.get({ id: new ObjectId(category_id), eventId: event_id });
+            if (category_ids){
+                for (const categoryId of category_ids) {
+                const category = await Category.get({ id: new ObjectId(categoryId) });
                 if (!category) {
-                    return res.status(400).send({
+                    return res.status(404).send({
                         success: false,
-                        error: `Invalid category ID ${category_id} for the given event.`
+                        error: `Category with ID ${categoryId} not found.`
                     });
                 }
             }
+            }
+            
 
-            // Check for duplicate candidate in the event
-            const existingCandidate = await Candidate.get({ name, event_id });
-            if (existingCandidate) {
-                return res.status(400).send({
+            //check if candidate with name exists
+            const existingCandidate = await Candidate.get({name: name});
+
+            if (existingCandidate){
+                res.status(400).send({
                     success: false,
-                    error: `Candidate '${name}' already exists in the event.`
+                    error: `Candidate with name ${name} exists.`
                 });
             }
-
-            const candidate = await Candidate.create(name, event_id, category_ids);
+            // Create candidate
+            const candidate = await Candidate.create(name, event_id, category_ids ? category_ids: []);
             const result = await candidate.save();
 
             if (!result) {
@@ -81,64 +88,98 @@ class CandidateController {
     }
 
     /**
-     * Updates an existing candidate.
+     * Handles bulk upload of candidates via CSV or Excel file.
      */
-    static async updateCandidate(req, res) {
+    static async bulkUploadCandidates(req, res) {
         try {
-            const { candidateId } = req.params;
-            const body = req.body;
-
-            if (!candidateId) {
+            if (!req.file) {
                 return res.status(400).send({
                     success: false,
-                    error: "Missing required parameter: `candidateId`."
+                    error: "No file uploaded."
                 });
             }
 
-            if (!body) {
+            const filePath = req.file.path;
+            const rows = [];
+
+            const parser = fs
+                .createReadStream(filePath)
+                .pipe(
+                    parse({
+                        columns: true,
+                        skip_empty_lines: true
+                    })
+                );
+
+            for await (const row of parser) {
+                rows.push(row);
+            }
+
+            // Validate headers
+            const requiredColumns = ["name", "event_id", "category_ids"];
+            const fileColumns = Object.keys(rows[0]);
+            const missingColumns = requiredColumns.filter(
+                column => !fileColumns.includes(column)
+            );
+
+            if (missingColumns.length > 0) {
                 return res.status(400).send({
                     success: false,
-                    error: "Missing request body."
+                    error: `Missing required columns: ${missingColumns.join(", ")}.`
                 });
             }
 
-            let candidate = await Candidate.get({ id: new ObjectId(candidateId) });
-            if (!candidate) {
-                return res.status(404).send({
-                    success: false,
-                    error: `Candidate with ID ${candidateId} not found.`
-                });
-            }
+            const uploadId = new ObjectId().toString();
+            uploadProgress.set(uploadId, { total: rows.length, processed: 0 });
 
-            // Ensure categories are valid if updated
-            if (body.category_ids) {
-                for (const category_id of body.category_ids) {
-                    const category = await Category.get({ id: new ObjectId(category_id), eventId: candidate.event_id });
-                    if (!category) {
-                        return res.status(400).send({
-                            success: false,
-                            error: `Invalid category ID ${category_id} for the candidate's event.`
-                        });
+            // Process rows with a worker-like approach
+            const processRow = async row => {
+                try {
+                    const { name, event_id, category_ids } = row;
+
+                    // Validate event
+                    const event = await Event.get({ id: new ObjectId(event_id) });
+                    if (!event) {
+                        console.error(`Event with ID ${event_id} not found.`);
+                        return;
+                    }
+
+                    // Validate categories
+                    const categoryIdList = category_ids.split(",");
+                    for (const categoryId of categoryIdList) {
+                        const category = await Category.get({ id: new ObjectId(categoryId.trim()) });
+                        if (!category) {
+                            console.error(`Category with ID ${categoryId} not found.`);
+                            return;
+                        }
+                    }
+
+                    // Create and save candidate
+                    const candidate = await Candidate.create(name, event_id, categoryIdList);
+                    await candidate.save();
+                } catch (error) {
+                    console.error("Error processing row:", row, error);
+                } finally {
+                    const progress = uploadProgress.get(uploadId);
+                    if (progress) {
+                        progress.processed += 1;
                     }
                 }
+            };
+
+            for (const row of rows) {
+                await processRow(row);
             }
 
-            candidate = Candidate.from_object(candidate);
-            const result = await candidate.updateInstance(body);
-
-            if (!result) {
-                return res.status(500).send({
-                    success: false,
-                    error: "Failed to update candidate."
-                });
-            }
+            uploadProgress.delete(uploadId);
 
             return res.status(200).send({
                 success: true,
-                candidate: candidate.to_object()
+                message: "Bulk upload initiated. Candidates are being processed.",
+                uploadId
             });
         } catch (error) {
-            console.error("Error updating candidate:", error);
+            console.error("Error in bulk upload:", error);
             return res.status(500).send({
                 success: false,
                 error: error.message
@@ -147,52 +188,43 @@ class CandidateController {
     }
 
     /**
-     * Deletes a candidate.
+     * Lists ongoing uploads.
      */
-    static async deleteCandidate(req, res) {
-        try {
-            const { candidateId } = req.params;
+    static listOngoingUploads(req, res) {
+        const uploads = Array.from(uploadProgress.entries()).map(([id, progress]) => ({
+            uploadId: id,
+            total: progress.total,
+            processed: progress.processed
+        }));
 
-            if (!candidateId) {
-                return res.status(400).send({
-                    success: false,
-                    error: "Missing required parameter: `candidateId`."
-                });
-            }
-
-            // Check if there are active nominations for the candidate
-            const activeNominations = await Nomination.get({ candidate_id: candidateId });
-            if (activeNominations) {
-                return res.status(400).send({
-                    success: false,
-                    error: "Cannot delete candidate with active nominations."
-                });
-            }
-
-            const result = await Candidate.delete({ id: new ObjectId(candidateId) });
-
-            if (!result) {
-                return res.status(404).send({
-                    success: false,
-                    error: `Candidate with ID ${candidateId} not found or could not be deleted.`
-                });
-            }
-
-            return res.status(200).send({
-                success: true,
-                message: `Candidate with ID ${candidateId} successfully deleted.`
-            });
-        } catch (error) {
-            console.error("Error deleting candidate:", error);
-            return res.status(500).send({
-                success: false,
-                error: error.message
-            });
-        }
+        return res.status(200).send({
+            success: true,
+            uploads
+        });
     }
 
     /**
-     * Lists all candidates or candidates matching query parameters.
+     * Checks the progress of a specific upload.
+     */
+    static checkUploadProgress(req, res) {
+        const { uploadId } = req.params;
+        const progress = uploadProgress.get(uploadId);
+
+        if (!progress) {
+            return res.status(404).send({
+                success: false,
+                error: "Upload not found or already completed."
+            });
+        }
+
+        return res.status(200).send({
+            success: true,
+            progress
+        });
+    }
+
+    /**
+     * Lists candidates with optional filters.
      */
     static async listCandidates(req, res) {
         try {
@@ -220,56 +252,119 @@ class CandidateController {
     }
 
     /**
-     * Retrieves details of a specific candidate.
+     * Updates an existing candidate.
      */
-    static async getCandidateDetails(req, res) {
+    static async updateCandidate(req, res) {
         try {
             const { candidateId } = req.params;
+            const updates = req.body;
 
-            const candidate = await Candidate.get({ id: new ObjectId(candidateId) });
-
-            if (!candidate) {
-                return res.status(404).send({
+            if (!candidateId) {
+                return res.status(400).send({
                     success: false,
-                    error: `Candidate with ID ${candidateId} not found.`
+                    error: "Missing `candidateId` parameter.",
                 });
             }
 
+            if (!updates || Object.keys(updates).length === 0) {
+                return res.status(400).send({
+                    success: false,
+                    error: "Missing fields to update.",
+                });
+            }
+
+            // Fetch the candidate to update
+            let candidate = await Candidate.get({ id: new ObjectId(candidateId) });
+            if (!candidate) {
+                return res.status(404).send({
+                    success: false,
+                    error: `Candidate with ID ${candidateId} not found.`,
+                });
+            }
+
+            candidate = Candidate.from_object(candidate);
+
+            // Validate event if updated
+            if (updates.event_id) {
+                const event = await Event.get({ id: new ObjectId(updates.event_id) });
+                if (!event) {
+                    return res.status(404).send({
+                        success: false,
+                        error: `Event with ID ${updates.event_id} not found.`,
+                    });
+                }
+            }
+
+            // Validate categories if updated
+            if (updates.category_ids) {
+                for (const categoryId of updates.category_ids) {
+                    const category = await Category.get({ id: new ObjectId(categoryId) });
+                    if (!category) {
+                        return res.status(404).send({
+                            success: false,
+                            error: `Category with ID ${categoryId} not found.`,
+                        });
+                    }
+                }
+            }
+
+            // Update the candidate
+            await candidate.updateInstance(updates);
+
             return res.status(200).send({
                 success: true,
-                candidate: Candidate.from_object(candidate).to_object()
+                candidate: candidate.to_object(),
             });
         } catch (error) {
-            console.error("Error retrieving candidate details:", error);
+            console.error("Error updating candidate:", error);
             return res.status(500).send({
                 success: false,
-                error: error.message
+                error: error.message,
             });
         }
     }
 
     /**
-     * Counts candidates by event or category.
+     * Deletes an existing candidate.
      */
-    static async countCandidates(req, res) {
+    static async deleteCandidate(req, res) {
         try {
-            const { event_id, category_id } = req.query;
-            const query = {};
+            const { candidateId } = req.params;
 
-            if (event_id) query.event_id = event_id;
-            if (category_id) query.category_ids = category_id;
+            if (!candidateId) {
+                return res.status(400).send({
+                    success: false,
+                    error: "Missing `candidateId` parameter.",
+                });
+            }
 
-            const count = await Candidate.count(query);
+            const candidate = await Candidate.get({ id: new ObjectId(candidateId) });
+            if (!candidate) {
+                return res.status(404).send({
+                    success: false,
+                    error: `Candidate with ID ${candidateId} not found.`,
+                });
+            }
+
+            // Delete the candidate
+            const deleteResult = await Candidate.delete({ id: new ObjectId(candidateId) });
+
+            if (!deleteResult) {
+                return res.status(500).send({
+                    success: false,
+                    error: "Failed to delete candidate.",
+                });
+            }
 
             return res.status(200).send({
                 success: true,
-                count
+                message: `Candidate with ID ${candidateId} successfully deleted.`,
             });
         } catch (error) {
-            console.error("Error counting candidates:", error);
+            console.error("Error deleting candidate:", error);
             return res.status(500).send({
                 success: false,
-                error: error.message
+                error: error.message,
             });
         }
     }

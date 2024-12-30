@@ -68,8 +68,16 @@ class NominationController {
             }
 
             // Create nomination
-            const nomination = await Nomination.create(candidate_id, event_id, category_id);
+            const nomination = await Nomination(candidate_id, event_id, category_id);
             const result = await nomination.save();
+
+            const candidateInstance = Candidate.from_object(candidate);
+
+            const categories = candidateInstance.category_ids;
+
+            categories.push(category_id);
+
+            await candidateInstance.updateInstance({category_ids: categories});
 
             if (!result) {
                 return res.status(500).send({
@@ -115,6 +123,88 @@ class NominationController {
             return res.status(500).send({
                 success: false,
                 error: error.message
+            });
+        }
+    }
+
+    /**
+     * Update an existing nomination.
+     */
+    static async updateNomination(req, res) {
+        try {
+            const { nominationId } = req.params;
+            const updates = req.body;
+
+            if (!nominationId) {
+                return res.status(400).send({
+                    success: false,
+                    error: "Missing `nominationId` parameter.",
+                });
+            }
+
+            if (!updates || Object.keys(updates).length === 0) {
+                return res.status(400).send({
+                    success: false,
+                    error: "No fields to update provided.",
+                });
+            }
+
+            // Fetch the nomination
+            let nomination = await Nomination.get({ id: nominationId });
+
+            if (!nomination) {
+                return res.status(404).send({
+                    success: false,
+                    error: `Nomination with ID ${nominationId} not found.`,
+                });
+            }
+
+            // Validate updates
+            const { candidate_id, event_id, category_id } = updates;
+
+            if (candidate_id) {
+                const candidate = await Candidate.get({ id: candidate_id });
+                if (!candidate) {
+                    return res.status(404).send({
+                        success: false,
+                        error: `Candidate with ID ${candidate_id} not found.`,
+                    });
+                }
+            }
+
+            if (event_id) {
+                const event = await Event.get({ id: event_id });
+                if (!event) {
+                    return res.status(404).send({
+                        success: false,
+                        error: `Event with ID ${event_id} not found.`,
+                    });
+                }
+            }
+
+            if (category_id) {
+                const category = await Category.get({ id: category_id });
+                if (!category) {
+                    return res.status(404).send({
+                        success: false,
+                        error: `Category with ID ${category_id} not found.`,
+                    });
+                }
+            }
+
+            // Update the nomination
+            nomination = Nomination.from_object(nomination);
+            await nomination.updateInstance(updates);
+
+            return res.status(200).send({
+                success: true,
+                nomination: nomination.to_object(),
+            });
+        } catch (error) {
+            console.error("Error updating nomination:", error);
+            return res.status(500).send({
+                success: false,
+                error: error.message,
             });
         }
     }

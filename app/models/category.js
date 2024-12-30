@@ -21,7 +21,7 @@ class Category extends Basemodel {
      * @param {string} eventId - The ID of the event this category is associated with.
      * @param {...object} kwargs - Additional fields to dynamically add to the category instance.
      */
-    constructor(name, description, thumbnailUri, eventId, ...kwargs) {
+    constructor(name, description, thumbnailUri="", eventId, ...kwargs) {
         super(kwargs); // Call the Basemodel constructor with additional fields
 
         this.name = name; // Assign the category name

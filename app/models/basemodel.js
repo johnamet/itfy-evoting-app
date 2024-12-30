@@ -3,6 +3,7 @@
  */
 import pkg from "mongodb";
 import storage from "../utils/engine/StorageEngine.js";
+import bcrypt from "bcryptjs/dist/bcrypt.js";
 
 const { ObjectId } = pkg;
 
@@ -189,7 +190,7 @@ class Basemodel {
         const collection = this.collection;
        return this.prototype.execute(() => {
             storage.count(collection, query);
-        })
+        });
     }
 
 }

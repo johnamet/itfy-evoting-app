@@ -17,12 +17,12 @@ class CategoryController {
                 });
             }
 
-            const { name, description, thumbnailUri, eventId } = data;
+            const { name, description, eventId } = data;
 
-            if (!name || !description || !thumbnailUri || !eventId) {
+            if (!name || !description || !eventId) {
                 return res.status(400).send({
                     success: false,
-                    error: "Missing required fields: `name`, `description`, `thumbnailUri`, or `eventId`."
+                    error: "Missing required fields: `name`, `description`, or `eventId`."
                 });
             }
 
@@ -44,7 +44,7 @@ class CategoryController {
                 });
             }
 
-            const category = await Category.create(name, description, thumbnailUri, eventId);
+            const category = await new Category(name, description, "", eventId);
             const result = await category.save();
 
             if (!result) {

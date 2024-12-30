@@ -16,6 +16,8 @@ class EventController {
                 });
             }
 
+            console.log(data);
+
             const { name, description, startDate, endDate } = data;
 
             if (!name || !description || !startDate || !endDate) {
@@ -34,7 +36,7 @@ class EventController {
                 });
             }
 
-            const event = await Event.create(name, description, new Date(startDate), new Date(endDate));
+            const event = new Event(name, description, new Date(startDate), new Date(endDate));
             const result = await event.save();
 
             if (!result) {

@@ -87,8 +87,6 @@ class UserController {
                 });
             }
 
-            delete user['password'];
-
             user = User.from_object(user);
             const result = await user.updateInstance(body);
 
@@ -101,8 +99,13 @@ class UserController {
 
             return res.status(200).send({
                 success: true,
-                user: user.to_object()
-            });
+                user: await User.get({ id: user.id }).then(user => {
+                    if (user) {
+                        delete user.password;
+                    }
+                    return user;
+                })
+            });            
         } catch (error) {
             console.error("Error updating user:", error);
             return res.status(500).send({
@@ -165,7 +168,11 @@ class UserController {
 
             return res.status(200).send({
                 success: true,
-                users: users.map(user => User.from_object(user).to_object())
+                users: users.map(user => {
+                    user = User.from_object(user).to_object()
+                    delete user.password;
+                    return user;
+                })
             });
         } catch (error) {
             console.error("Error listing users:", error);

@@ -23,6 +23,8 @@ class AuthController {
 
             const userRecord = await User.get({email});
 
+            console.log(userRecord);
+
             if (!userRecord) {
                 return res.status(404).send({
                     success: false,
@@ -31,6 +33,7 @@ class AuthController {
             }
 
             const user = User.from_object(userRecord);
+
 
             const checkPassword = await user.verifyPassword(password);
 
@@ -41,7 +44,8 @@ class AuthController {
                 });
             }
 
-            const role = user.roleId ? await Role.get({id: new ObjectId(user.roleId)})['name'] : null;
+            const role = user.roleId ? await Role.get({id: new ObjectId(user.roleId)}) : null;
+
             const payload = {
                 userId: user.id,
                 role,
@@ -88,7 +92,7 @@ class AuthController {
                     });
                 }
 
-                await cacheEngine.set(`blacklisted-${accessToken}`, true, 3600); // Blacklist for 1 hour
+                await cacheEngine.set(`blacklisted-${accessToken}`, accessToken, 3600); // Blacklist for 1 hour
                 return res.status(200).send({
                     success: true,
                     message: "User logged out successfully"
@@ -118,18 +122,15 @@ class AuthController {
                 });
             }
 
-            console.log("Checking blacklist")
 
             const isBlacklisted = await cacheEngine.get(`blacklisted-${accessToken}`);
 
-            // if (isBlacklisted) {
-            //     return res.status(403).send({
-            //         success: false,
-            //         error: "Token has been revoked"
-            //     });
-            // }
-
-            console.log("Verifying accesstoken");
+            if (isBlacklisted) {
+                return res.status(403).send({
+                    success: false,
+                    error: "Token has been revoked"
+                });
+            }
 
             jwt.verify(accessToken, process.env["SECRET_KEY"], (err, decoded) => {
                 if (err) {
@@ -159,6 +160,9 @@ class AuthController {
         return async (req, res, next) => {
             try {
                 const { user } = req;
+
+                console.log(user);
+
                 if (!user || !user.role || !allowedRoles.includes(user.role.name)) {
                     return res.status(403).send({
                         success: false,
