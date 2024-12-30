@@ -4,6 +4,7 @@ import sinonChai from 'sinon-chai';
 import {use, expect} from 'chai';
 import CacheEngine from "../utils/engine/CacheEngine.js";
 import * as redis from 'redis';
+import {charset} from "mime-types";
 const cacheEngine = new CacheEngine();
 
 use(sinonChai);
@@ -12,18 +13,7 @@ describe('CacheEngine', () => {
     let client;
 
     beforeEach(() => {
-        client = {
-            connect: sinon.stub().resolves(),
-            ping: sinon.stub().resolves('PONG'),
-            get: sinon.stub(),
-            setEx: sinon.stub(),
-            del: sinon.stub(),
-            incr: sinon.stub(),
-            expire: sinon.stub(),
-            isReady: true,
-        };
-
-        sinon.stub(redis, 'createClient').returns(client);
+       client = cacheEngine.client;
     });
 
     afterEach(() => {
@@ -36,30 +26,41 @@ describe('CacheEngine', () => {
     });
 
     it('should get a value by key', async () => {
-        // client.get.yields(null, 'testValue');
+        await cacheEngine.set("testKey", "testValue")
         const result = await cacheEngine.get('testKey');
-        expect(client.get).to.have.been.calledOnceWith('testKey', sinon.match.func);
+        // expect(client.get).to.have.been.calledOnceWith('testKey', sinon.match.func);
         expect(result).to.equal('testValue');
     });
 
-    it('should set a value with TTL', async () => {
-        await cacheEngine.set('testKey', 'testValue', 3600);
-        expect(client.set).to.have.been.calledOnceWith('testKey', 3600, 'testValue');
-    });
+  it('should set a value with TTL', async () => {
+    await cacheEngine.set('testKey2', 'testValue', 1); // Set value with TTL of 1 second
+
+    // Wait for 1.5 seconds to ensure the TTL has expired
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    const result = await cacheEngine.get('testKey2');
+    expect(result).to.be.null;
+});
+
 
     it('should delete a key', async () => {
         await cacheEngine.del('testKey');
-        expect(client.del).to.have.been.calledOnceWith('testKey');
+        const result = await cacheEngine.get("testKey");
+        expect(result).to.be.null;
     });
 
     it('should increment a key', async () => {
         await cacheEngine.incr('testKey');
-        expect(client.incr).to.have.been.calledOnceWith('testKey');
+        const result = await cacheEngine.get("testKey");
+        expect(result).to.be.equal("1");
+
     });
 
     it('should set a key to expire', async () => {
-        await cacheEngine.expire('testKey', 120);
-        // expect(client.expire).to.have.been.calledOnceWith('testKey', 120);
+        await cacheEngine.expire('testKey', 1);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const result = await cacheEngine.get('testKey');
+        expect(result).to.be.null;
     });
 
     it('should measure latency to Redis server', async () => {
