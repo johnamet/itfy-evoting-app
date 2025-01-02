@@ -1,4 +1,3 @@
-import chai from "chai";
 import chaiHttp from "chai-http";
 import sinon from "sinon";
 import { ObjectId } from "mongodb";
@@ -6,8 +5,9 @@ import app from "../app.js";
 import UserController from "../controllers/UserController.js";
 import User from "../models/user.js";
 
-const { expect } = chai;
-chai.use(chaiHttp);
+import {use, expect} from 'chai';
+
+use(chaiHttp);
 
 describe("UserController Tests", () => {
     let userStub;

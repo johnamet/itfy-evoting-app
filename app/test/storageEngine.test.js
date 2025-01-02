@@ -4,7 +4,9 @@ import {StorageEngine} from "../utils/engine/StorageEngine.js";
 
 const { MongoClient } = pkg;
 
-import {expect} from 'chai';
+import {use, expect} from 'chai';
+
+use(chaiHttp);
 
 describe("StorageEngine", () => {
     let storageEngine;

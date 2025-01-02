@@ -1,4 +1,3 @@
-import chai from "chai";
 import chaiHttp from "chai-http";
 import sinon from "sinon";
 import { ObjectId } from "mongodb";
@@ -6,8 +5,9 @@ import app from "../app.js";
 import RoleController from "../controllers/RoleController.js";
 import Role from "../models/role.js";
 
-const { expect } = chai;
-chai.use(chaiHttp);
+import {use, expect} from 'chai';
+
+use(chaiHttp);
 
 describe("RoleController Tests", () => {
     let roleStub;

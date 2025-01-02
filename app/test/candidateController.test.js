@@ -1,4 +1,3 @@
-import chai from "chai";
 import chaiHttp from "chai-http";
 import sinon from "sinon";
 import { ObjectId } from "mongodb";
@@ -8,8 +7,9 @@ import Candidate from "../models/candidate.js";
 import Event from "../models/event.js";
 import Category from "../models/category.js";
 
-const { expect } = chai;
-chai.use(chaiHttp);
+import {use, expect} from 'chai';
+
+use(chaiHttp);
 
 describe("CandidateController", () => {
     let eventStub, categoryStub, candidateStub, fileStub;

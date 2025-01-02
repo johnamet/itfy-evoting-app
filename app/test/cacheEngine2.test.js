@@ -3,8 +3,6 @@ import sinonChai from 'sinon-chai';
 
 import {use, expect} from 'chai';
 import CacheEngine from "../utils/engine/CacheEngine.js";
-import * as redis from 'redis';
-import {charset} from "mime-types";
 const cacheEngine = new CacheEngine();
 
 use(sinonChai);

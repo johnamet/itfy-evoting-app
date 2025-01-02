@@ -1,12 +1,13 @@
-import chai from "chai";
 import chaiHttp from "chai-http";
 import sinon from "sinon";
-import fs from "fs";
+import sinonChai from "sinon-chai";
 import app from "../app.js";
 import AppController from "../controllers/AppController.js";
 
-const { expect } = chai;
-chai.use(chaiHttp);
+import { expect, use } from "chai";
+
+use(chaiHttp);
+use(sinonChai);
 
 describe("AppController Tests", () => {
   before(() => {

@@ -5,6 +5,7 @@
  */
 
 import pkg from 'mongodb'
+import { isObject } from 'util';
 
 const { MongoClient } = pkg;
 
@@ -181,7 +182,7 @@ class StorageEngine {
      * @returns {Promise<object|null>} - The matching document or null if not found.
      */
     async findOne(collectionName, query) {
-        Object.keys(query).forEach(key => {
+       Object.keys(query).forEach(key => {
             if(key === "id"){
                 query['id'] = new Object(query['id']);
             }
@@ -247,7 +248,38 @@ class StorageEngine {
             throw error;
         }
     }
+
+    async watcher(collection, operationType,){
+
+        const collectionStream = this.getCollection(collection).watch();
+
+        collectionStream.on("change", (change) => {
+            if(change.operationType === operationType){
+
+                return operationType === "update" ? change.UpdateDescription.updatedFields : change.fullDocument;
+
+            }
+        })
+    }
+/**
+ * Watches a collection for a specific operation type and sends a push notification on change.
+ *
+ * @param {string} collection - The collection to watch.
+ * @param {string} operationType - The operation type to look out for (e.g., "insert", "update", "delete").
+ * @param {Function} sendNotification - The function to send a push notification.
+ */
+async watcher(collection, operationType, sendNotification) {
+    const collectionStream = this.getCollection(collection).watch();
+
+    collectionStream.on("change", (change) => {
+        if (change.operationType === operationType) {
+            const data = operationType === "update" ? change.updateDescription.updatedFields : change.fullDocument;
+            sendNotification(data);
+        }
+    });
 }
+}
+
 
 const storage = new StorageEngine();
 await storage.connect();

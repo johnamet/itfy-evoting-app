@@ -1,4 +1,3 @@
-import chai from "chai";
 import chaiHttp from "chai-http";
 import sinon from "sinon";
 import { ObjectId } from "mongodb";
@@ -7,8 +6,9 @@ import CategoryController from "../controllers/CategoryController.js";
 import Category from "../models/category.js";
 import Event from "../models/event.js";
 
-const { expect } = chai;
-chai.use(chaiHttp);
+import {use, expect} from 'chai';
+
+use(chaiHttp);
 
 describe("CategoryController Tests", () => {
     let categoryStub, eventStub;

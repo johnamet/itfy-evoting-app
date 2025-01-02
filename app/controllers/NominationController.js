@@ -45,7 +45,13 @@ class NominationController {
                 });
             }
 
-            const candidate = await Candidate.get({ id: new ObjectId(candidate_id) });
+            console.log(candidate_id);
+
+            const cId = new ObjectId(candidate_id);
+
+            console.log(candidate_id,cId);
+
+            const candidate = await Candidate.get({ _id: cId});
             if (!candidate) {
                 return res.status(404).send({
                     success: false,
@@ -68,7 +74,7 @@ class NominationController {
             }
 
             // Create nomination
-            const nomination = await Nomination(candidate_id, event_id, category_id);
+            const nomination = await new Nomination(candidate_id, event_id, category_id);
             const result = await nomination.save();
 
             const candidateInstance = Candidate.from_object(candidate);

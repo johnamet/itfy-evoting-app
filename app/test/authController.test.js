@@ -1,4 +1,3 @@
-import chai from "chai";
 import chaiHttp from "chai-http";
 import sinon from "sinon";
 import jwt from "jsonwebtoken";
@@ -6,9 +5,9 @@ import AuthController from "../controllers/AuthController.js";
 import User from "../models/user.js";
 import Role from "../models/role.js";
 import app from "../app.js";
+import {use, expect} from 'chai';
 
-const { expect } = chai;
-chai.use(chaiHttp);
+use(chaiHttp);
 
 describe("AuthController - Login", () => {
     let userStub, verifyPasswordStub, roleStub, jwtStub;
