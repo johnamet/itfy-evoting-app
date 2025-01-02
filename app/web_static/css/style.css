@@ -1,0 +1,210 @@
+:root {
+    --primary-color: #006b3f; /* Ghana flag green */
+    --secondary-color: #fcd116; /* Ghana flag yellow */
+    --accent-color: #ce1126; /* Ghana flag red */
+    --text-color: #333;
+    --background-color: #f4f4f4;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Poppins', sans-serif;
+    line-height: 1.6;
+    color: var(--text-color);
+    background-color: var(--background-color);
+    background-image: url('https://th.bing.com/th/id/OIP.30zb408ezBGZE8_8QGo9SQHaFr?rs=1&pid=ImgDetMain'); /* Kente pattern background */
+    background-size: 200px;
+    background-repeat: repeat;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+header {
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 20px 0;
+    position: fixed;
+    width: 100%;
+    top: 0;
+    z-index: 1000;
+}
+
+nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+nav ul {
+    display: flex;
+    list-style: none;
+}
+
+nav ul li {
+    margin-left: 20px;
+}
+
+nav ul li a {
+    text-decoration: none;
+    color: var(--text-color);
+    font-weight: 600;
+    transition: color 0.3s ease;
+}
+
+nav ul li a:hover, nav ul li a.active {
+    color: var(--primary-color);
+}
+
+nav ul li a.active {
+    border-bottom: 2px solid var(--primary-color);
+}
+
+main {
+    padding-top: 80px;
+}
+
+.hero {
+    text-align: center;
+    padding: 100px 0;
+    background-color: rgba(255, 255, 255, 0.8);
+    border-radius: 10px;
+    margin-top: 20px;
+}
+
+h1 {
+    font-size: 2.5rem;
+    color: var(--primary-color);
+    margin-bottom: 20px;
+}
+
+.hero p {
+    font-size: 1.2rem;
+    margin-bottom: 30px;
+}
+
+.cta-button {
+    background-color: var(--accent-color);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    border-radius: 5px;
+}
+
+.cta-button:hover {
+    background-color: #a50e1f;
+}
+
+section {
+    background-color: rgba(255, 255, 255, 0.9);
+    margin: 40px 0;
+    padding: 40px;
+    border-radius: 10px;
+}
+
+h2 {
+    color: var(--primary-color);
+    margin-bottom: 20px;
+}
+
+.categories ul {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+}
+
+.categories ul li {
+    flex-basis: calc(50% - 10px);
+    background-color: var(--secondary-color);
+    color: var(--text-color);
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 5px;
+    text-align: center;
+    font-weight: 600;
+}
+
+.event-list, .candidate-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+.event-card, .candidate-card {
+    background-color: var(--secondary-color);
+    padding: 20px;
+    border-radius: 5px;
+    text-align: center;
+    transition: transform 0.3s ease;
+}
+
+.event-card:hover, .candidate-card:hover {
+    transform: translateY(-5px);
+}
+
+.event-card h3, .candidate-card h3 {
+    color: var(--primary-color);
+    margin-bottom: 10px;
+}
+
+.candidate-photo {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 15px;
+}
+
+footer {
+    text-align: center;
+    padding: 20px 0;
+    background-color: rgba(255, 255, 255, 0.9);
+    margin-top: 40px;
+}
+
+.adage {
+    font-style: italic;
+    color: var(--primary-color);
+    margin-top: 10px;
+}
+
+@media (max-width: 768px) {
+    nav {
+        flex-direction: column;
+    }
+
+    nav ul {
+        margin-top: 20px;
+    }
+
+    nav ul li {
+        margin-left: 0;
+        margin-right: 20px;
+    }
+
+    .categories ul li {
+        flex-basis: 100%;
+    }
+
+    .event-list, .candidate-list {
+        grid-template-columns: 1fr;
+    }
+}

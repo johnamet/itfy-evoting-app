@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard | IT FOR Youth Ghana Voting Platform</title>
+    <link rel="stylesheet" href="../css/admin-dashboard-styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="header">
+            <div class="logo">
+                <img src="/placeholder.svg?height=40&width=40" alt="IT FOR Youth Ghana Logo">
+                <span>IT FOR Youth Ghana</span>
+            </div>
+            <div class="search-bar">
+                <input type="text" placeholder="Search...">
+            </div>
+            <div class="header-actions">
+                <div class="notifications">
+                    <span class="notification-icon">🔔</span>
+                    <span class="notification-count">3</span>
+                </div>
+                <div class="user-profile">
+                    <img src="/placeholder.svg?height=32&width=32" alt="Admin Avatar" class="avatar">
+                    <span class="username">Admin User</span>
+                </div>
+            </div>
+        </header>
+
+        <nav class="sidebar">
+            <ul>
+                <li class="active"><a href="#dashboard"><span class="icon">📊</span> Dashboard Overview</a></li>
+                <li><a href="#events"><span class="icon">📅</span> Manage Events</a></li>
+                <li><a href="#candidates"><span class="icon">👥</span> Manage Candidates</a></li>
+                <li><a href="#users"><span class="icon">👤</span> Manage Users</a></li>
+                <li><a href="#analytics"><span class="icon">📈</span> Analytics</a></li>
+                <li><a href="#settings"><span class="icon">⚙️</span> Settings</a></li>
+                <li><a href="#support"><span class="icon">💬</span> Support</a></li>
+            </ul>
+        </nav>
+
+        <main class="main-content">
+            <section id="dashboard" class="dashboard-overview">
+                <h1>Dashboard Overview</h1>
+                <div class="stats-summary">
+                    <div class="stat-card">
+                        <h3>Total Events</h3>
+                        <p class="stat-number">12</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Registered Candidates</h3>
+                        <p class="stat-number">156</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Users</h3>
+                        <p class="stat-number">1,234</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Active Votes</h3>
+                        <p class="stat-number">3</p>
+                    </div>
+                </div>
+
+                <div class="quick-actions">
+                    <button class="action-button">Create New Event</button>
+                    <button class="action-button">Add Candidate</button>
+                    <button class="action-button">Manage Users</button>
+                </div>
+
+                <div class="live-voting-status">
+                    <h2>Live Voting Status</h2>
+                    <div class="voting-progress">
+                        <div class="progress-item">
+                            <span class="event-name">Best Web Developer 2023</span>
+                            <div class="progress-bar">
+                                <div class="progress" style="width: 75%;"></div>
+                            </div>
+                            <span class="progress-text">75% Complete</span>
+                        </div>
+                        <div class="progress-item">
+                            <span class="event-name">Innovative Tech Solution 2023</span>
+                            <div class="progress-bar">
+                                <div class="progress" style="width: 40%;"></div>
+                            </div>
+                            <span class="progress-text">40% Complete</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="recent-activities">
+                    <h2>Recent Activities</h2>
+                    <ul class="activity-list">
+                        <li>New candidate added: John Doe (Web Development)</li>
+                        <li>Voting started: Best Mobile App 2023</li>
+                        <li>New user registered: jane@example.com</li>
+                        <li>Event closed: AI Innovation Challenge</li>
+                    </ul>
+                </div>
+
+                <div class="system-alerts">
+                    <h2>System Alerts</h2>
+                    <ul class="alert-list">
+                        <li class="alert-item urgent">Voting for "Best Web Developer 2023" ends in 2 days</li>
+                        <li class="alert-item">New feedback received for the platform</li>
+                    </ul>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <p>&copy; 2023 IT FOR Youth Ghana. All rights reserved.</p>
+        </footer>
+    </div>
+    <script src="../js/"></script>
+</body>
+</html>

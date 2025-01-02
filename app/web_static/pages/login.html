@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | IT FOR Youth Ghana Voting Platform</title>
+    <link rel="stylesheet" href="../css/login-style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script> <!-- Optional for AJAX -->
+</head>
+
+<body>
+    <div class="container">
+        <div class="login-box">
+            <!-- Cultural Symbols -->
+            <div class="cultural-symbols">
+                <div class="adinkra-symbol" title="Sankofa: Learn from the past">&#xE253;</div>
+                <div class="adinkra-symbol" title="Dwennimmen: Strength and humility">&#xE277;</div>
+                <div class="adinkra-symbol" title="Nea Onnim No Sua A, Ohu: Knowledge and lifelong learning">&#xE271;</div>
+            </div>
+
+            <!-- Login Header -->
+            <h1>Sign in to your account</h1>
+
+            <!-- Coding Joke -->
+            <div class="coding-joke">
+                <p>Why do programmers prefer dark mode?</p>
+                <p class="punchline">Because light attracts bugs!</p>
+            </div>
+
+            <!-- Login Form -->
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="email">Email address</label>
+                    <input type="email" id="email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <button type="submit" id="loginButton">Sign in</button>
+            </form>
+
+            <!-- Progress Bar -->
+            <div id="progressBar" class="progress-bar" style="display: none;">
+                <div class="progress"></div>
+            </div>
+
+            <!-- Status Message -->
+            <div id="statusMessage" class="status-message"></div>
+        </div>
+
+        <!-- Placeholder for additional content or an image -->
+        <div class="computing-image"></div>
+    </div>
+
+    <!-- External Script -->
+    <script src="../js/login.js"></script>
+</body>
+
+</html>

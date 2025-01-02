@@ -1,0 +1,255 @@
+:root {
+    --primary-color: #006b3f; /* Ghana flag green */
+    --secondary-color: #fcd116; /* Ghana flag yellow */
+    --accent-color: #ce1126; /* Ghana flag red */
+    --text-color: #333;
+    --background-color: #f4f4f4;
+    --white: #ffffff;
+    --light-gray: #e0e0e0;
+    --dark-gray: #4a4a4a;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Poppins', sans-serif;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    line-height: 1.6;
+}
+
+.dashboard-container {
+    display: grid;
+    grid-template-areas:
+        "header header"
+        "sidebar main"
+        "footer footer";
+    grid-template-columns: 250px 1fr;
+    grid-template-rows: auto 1fr auto;
+    min-height: 100vh;
+}
+
+.header {
+    grid-area: header;
+    background-color: var(--white);
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    font-weight: bold;
+    font-size: 1.2rem;
+    color: var(--primary-color);
+}
+
+.logo img {
+    margin-right: 0.5rem;
+}
+
+.search-bar input {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--light-gray);
+    border-radius: 20px;
+    width: 300px;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+}
+
+.notifications {
+    position: relative;
+    margin-right: 1rem;
+}
+
+.notification-count {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background-color: var(--accent-color);
+    color: var(--white);
+    font-size: 0.7rem;
+    padding: 2px 5px;
+    border-radius: 50%;
+}
+
+.user-profile {
+    display: flex;
+    align-items: center;
+}
+
+.avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+}
+
+.sidebar {
+    grid-area: sidebar;
+    background-color: var(--primary-color);
+    color: var(--white);
+    padding: 2rem 0;
+}
+
+.sidebar ul {
+    list-style-type: none;
+}
+
+.sidebar li {
+    padding: 0.5rem 1rem;
+}
+
+.sidebar li.active {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.sidebar a {
+    color: var(--white);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+}
+
+.sidebar .icon {
+    margin-right: 0.5rem;
+}
+
+.main-content {
+    grid-area: main;
+    padding: 2rem;
+}
+
+h1, h2, h3 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+}
+
+.stats-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background-color: var(--white);
+    padding: 1rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    text-align: center;
+}
+
+.stat-number {
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--accent-color);
+}
+
+.quick-actions {
+    margin-bottom: 2rem;
+}
+
+.action-button {
+    background-color: var(--secondary-color);
+    color: var(--text-color);
+    border: none;
+    padding: 0.5rem 1rem;
+    margin-right: 0.5rem;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.action-button:hover {
+    background-color: #e5b914;
+}
+
+.live-voting-status, .recent-activities, .system-alerts {
+    background-color: var(--white);
+    padding: 1rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    margin-bottom: 2rem;
+}
+
+.progress-item {
+    margin-bottom: 1rem;
+}
+
+.progress-bar {
+    background-color: var(--light-gray);
+    height: 10px;
+    border-radius: 5px;
+    overflow: hidden;
+    margin: 0.5rem 0;
+}
+
+.progress {
+    background-color: var(--primary-color);
+    height: 100%;
+}
+
+.activity-list, .alert-list {
+    list-style-type: none;
+}
+
+.activity-list li, .alert-list li {
+    margin-bottom: 0.5rem;
+    padding-left: 1rem;
+    border-left: 3px solid var(--secondary-color);
+}
+
+.alert-item.urgent {
+    border-left-color: var(--accent-color);
+    font-weight: bold;
+}
+
+.footer {
+    grid-area: footer;
+    background-color: var(--dark-gray);
+    color: var(--white);
+    text-align: center;
+    padding: 1rem;
+}
+
+@media (max-width: 768px) {
+    .dashboard-container {
+        grid-template-areas:
+            "header"
+            "main"
+            "footer";
+        grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+        display: none;
+    }
+
+    .header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .search-bar, .header-actions {
+        margin-top: 1rem;
+    }
+
+    .search-bar input {
+        width: 100%;
+    }
+
+    .stats-summary {
+        grid-template-columns: 1fr;
+    }
+}
