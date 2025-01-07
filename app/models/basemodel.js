@@ -94,6 +94,7 @@ class Basemodel {
         });
     }
 
+
     /**
      * Save multiple instances to the database.
      * @param {Array<Basemodel>} objects - The objects to save.
@@ -117,8 +118,26 @@ class Basemodel {
     }
 
 
+    /**
+     * Verifies if the provided password matches the stored password.
+     *
+     * @param {string} password - The password to verify.
+     * @returns {Promise<boolean>} - A promise that resolves to true if the password matches, otherwise false.
+     */
     async verifyPassword(password){
         bcrypt.compare(password, this.password);
+    }
+
+    /**
+     * Aggregates the documents in a collection
+     * @param {Array} pipeline - The aggregation pipeline
+     * @returns {Promise<any[]>} - The result of the aggregation
+     */
+
+    static async aggregate(pipeline){
+        return  this.prototype.execute(() => {
+            return storage.aggregate(this.collection, pipeline);
+        });
     }
 
     /**
@@ -187,10 +206,7 @@ class Basemodel {
      * @returns {Promise<number>} - The number of documents in a collection
      */
     static async count(query ={}){
-        const collection = this.collection;
-       return this.prototype.execute(() => {
-            storage.count(collection, query);
-        });
+       return  storage.count(this.collection, query);
     }
 
 }

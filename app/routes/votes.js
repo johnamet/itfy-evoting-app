@@ -10,10 +10,10 @@ voteRouter.post('/', VoteController.castVote);
 voteRouter.get('/stats', AuthController.verifyToken, AuthController.verifyRole(['admin']),
  VoteController.getVoteStats);
 
-voteRouter.get('/summary', AuthController.verifyToken, AuthController.verifyRole(['admin']),
- VoteController.getVoterSummary);
+voteRouter.get('/summary',
+ VoteController.getVoteSummary);
 
-voteRouter.put('/close', AuthController.verifyToken, AuthController.verifyRole(['admin']),
-VoteController.closeVoting);
+
+
 
 export default voteRouter;

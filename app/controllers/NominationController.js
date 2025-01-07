@@ -1,3 +1,10 @@
+#!/usr/bin/node
+
+/**
+ * NominationController handles nomination-related operations.
+ * It includes methods for creating, updating, deleting, and listing nominations, as well as retrieving nomination details.
+ */
+
 import Nomination from "../models/nomination.js";
 import Event from "../models/event.js";
 import Category from "../models/category.js";
@@ -7,6 +14,8 @@ import { ObjectId } from "mongodb";
 class NominationController {
     /**
      * Creates a new nomination.
+     * @param {Request} req - The request object containing nomination details.
+     * @param {Response} res - The response object.
      */
     static async createNomination(req, res) {
         try {
@@ -107,6 +116,8 @@ class NominationController {
 
     /**
      * Lists nominations with optional filters.
+     * @param {Request} req - The request object containing query parameters.
+     * @param {Response} res - The response object.
      */
     static async listNominations(req, res) {
         try {
@@ -135,6 +146,8 @@ class NominationController {
 
     /**
      * Update an existing nomination.
+     * @param {Request} req - The request object containing nomination ID and update details.
+     * @param {Response} res - The response object.
      */
     static async updateNomination(req, res) {
         try {
@@ -217,6 +230,8 @@ class NominationController {
 
     /**
      * Retrieves the details of a specific nomination.
+     * @param {Request} req - The request object containing nomination ID.
+     * @param {Response} res - The response object.
      */
     static async getNominationDetails(req, res) {
         try {
@@ -253,6 +268,8 @@ class NominationController {
 
     /**
      * Deletes a nomination.
+     * @param {Request} req - The request object containing nomination ID.
+     * @param {Response} res - The response object.
      */
     static async deleteNomination(req, res) {
         try {
@@ -289,6 +306,8 @@ class NominationController {
 
     /**
      * Counts nominations by event, category, or candidate.
+     * @param {Request} req - The request object containing query parameters.
+     * @param {Response} res - The response object.
      */
     static async countNominations(req, res) {
         try {

@@ -1,6 +1,10 @@
+#!/usr/bin/node
+
 /**
- * The application controller
+ * AppController handles application-wide operations.
+ * It includes methods for file uploads, retrieving application status, and statistics.
  */
+
 import Candidate from "../models/candidate.js";
 import Category from "../models/category.js";
 import Nomination from "../models/nomination.js";
@@ -9,12 +13,15 @@ import Vote from "../models/vote.js";
 import Event from "../models/event.js";
 import User from "../models/user.js";
 import storage from "../utils/engine/StorageEngine.js";
-import {cacheEngine} from "../utils/engine/CacheEngine.js";
+import { cacheEngine } from "../utils/engine/CacheEngine.js";
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
+import multer from "multer";
 
-
+// Configure multer for file uploads
+const uploadStorage = multer.memoryStorage();
+const upload = multer({ uploadStorage });
 
 class AppController {
 
@@ -36,44 +43,50 @@ class AppController {
      * @returns {Promise<Response>} - The response with file details.
      */
     static async uploadFile(req, res) {
-        try {
-            const { category, entityId } = req.body;
-
-            if (!req.file) {
-                return res.status(400).send({ success: false, error: "No file uploaded." });
+        upload.single('file')(req, res, async (err) => {
+            if (err) {
+                return res.status(500).send({ success: false, error: "Failed to upload file." });
             }
 
-            if (!category || !entityId) {
-                return res.status(400).send({
-                    success: false,
-                    error: "Missing required fields: `category` or `entityId`.",
+            try {
+                const { category, entityId } = req.body;
+
+                if (!req.file) {
+                    return res.status(400).send({ success: false, error: "No file uploaded." });
+                }
+
+                if (!category || !entityId) {
+                    return res.status(400).send({
+                        success: false,
+                        error: "Missing required fields: `category` or `entityId`.",
+                    });
+                }
+
+                const entityPath = path.join(AppController.fileStoragePath, category, entityId);
+                if (!fs.existsSync(entityPath)) {
+                    fs.mkdirSync(entityPath, { recursive: true });
+                }
+
+                const fileName = `${uuidv4()}_${req.file.originalname}`;
+                const filePath = path.join(entityPath, fileName);
+
+                fs.writeFileSync(filePath, req.file.buffer);
+
+                return res.status(201).send({
+                    success: true,
+                    message: "File uploaded successfully.",
+                    file: {
+                        name: fileName,
+                        path: filePath,
+                        category,
+                        entityId,
+                    },
                 });
+            } catch (error) {
+                console.error("Error uploading file:", error);
+                return res.status(500).send({ success: false, error: "Failed to upload file." });
             }
-
-            const entityPath = path.join(AppController.fileStoragePath, category, entityId);
-            if (!fs.existsSync(entityPath)) {
-                fs.mkdirSync(entityPath, { recursive: true });
-            }
-
-            const fileName = `${uuidv4()}_${req.file.originalname}`;
-            const filePath = path.join(entityPath, fileName);
-
-            fs.writeFileSync(filePath, req.file.buffer);
-
-            return res.status(201).send({
-                success: true,
-                message: "File uploaded successfully.",
-                file: {
-                    name: fileName,
-                    path: filePath,
-                    category,
-                    entityId,
-                },
-            });
-        } catch (error) {
-            console.error("Error uploading file:", error);
-            return res.status(500).send({ success: false, error: "Failed to upload file." });
-        }
+        });
     }
 
     /**
@@ -84,21 +97,21 @@ class AppController {
      */
     static async getFiles(req, res) {
         try {
-            const { category, entityId } = req.params;
+            const { categoryId, entityId } = req.params;
 
-            if (!category || !entityId) {
+            if (!categoryId || !entityId) {
                 return res.status(400).send({
                     success: false,
                     error: "Missing required fields: `category` or `entityId`.",
                 });
             }
 
-            const entityPath = path.join(AppController.fileStoragePath, category, entityId);
+            const entityPath = path.join(AppController.fileStoragePath, categoryId, entityId);
 
             if (!fs.existsSync(entityPath)) {
                 return res.status(404).send({
                     success: false,
-                    error: `No files found for category: ${category} and entityId: ${entityId}.`,
+                    error: `No files found for category: ${categoryId} and entityId: ${entityId}.`,
                 });
             }
 
@@ -122,18 +135,18 @@ class AppController {
      */
     static async downloadFile(req, res) {
         try {
-            const { category, entityId, fileName } = req.params;
+            const { categoryId, entityId, fileName } = req.params;
 
-            if (!category || !entityId || !fileName) {
+            if (!categoryId || !entityId || !fileName) {
                 return res.status(400).send({
                     success: false,
-                    error: "Missing required fields: `category`, `entityId`, or `fileName`.",
+                    error: "Missing required fields: `categoryId`, `entityId`, or `fileName`.",
                 });
             }
 
             const filePath = path.join(
                 AppController.fileStoragePath,
-                category,
+                categoryId,
                 entityId,
                 fileName
             );
@@ -188,13 +201,13 @@ class AppController {
     static async getStats(req, res) {
         try {
             const count = {
-                candidates: (await Candidate.all()).length,
-                categories: (await Category.all()).length,
-                events: (await Event.all()).length,
-                nominations: (await Nomination.all()).length,
-                roles: (await Role.all()).length,
-                users: (await User.all()).length,
-                votes: (await Vote.all()).length,
+                candidates: await Candidate.count(),
+                categories: await Category.count(),
+                events: await Event.count(),
+                nominations: await Nomination.count(),
+                roles: await Role.count(),
+                users: await User.count(),
+                votes: await Vote.count(),
             };
 
             return res.status(200).send(count);

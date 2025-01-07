@@ -5,7 +5,7 @@
  */
 
 import pkg from 'mongodb'
-import { isObject } from 'util';
+import pushNotification from '../notificationUtil.js';
 
 const { MongoClient } = pkg;
 
@@ -213,7 +213,7 @@ class StorageEngine {
      */
     async count(collectionName, query = {}) {
         return this.execute(() =>
-            this.getCollection(collectionName).find({}).toArray
+            this.getCollection(collectionName).countDocuments(query)
         );
     }
 
@@ -261,6 +261,19 @@ class StorageEngine {
             }
         })
     }
+
+    /**
+     * Performs an aggregation on a collection.
+     *
+     * @param {string} collectionName - The collection to aggregate.
+     * @param {Array<object>} pipeline - The aggregation pipeline.
+     * @returns {Promise<Array<object>>} - The result of the aggregation.
+     */
+    async aggregate(collectionName, pipeline) {
+        return this.execute(() =>
+            this.getCollection(collectionName).aggregate(pipeline).toArray()
+        );
+    }
 /**
  * Watches a collection for a specific operation type and sends a push notification on change.
  *
@@ -268,14 +281,43 @@ class StorageEngine {
  * @param {string} operationType - The operation type to look out for (e.g., "insert", "update", "delete").
  * @param {Function} sendNotification - The function to send a push notification.
  */
-async watcher(collection, operationType, sendNotification) {
+async watcher(collection, operationType = null, sendNotification) {
     const collectionStream = this.getCollection(collection).watch();
 
     collectionStream.on("change", (change) => {
-        if (change.operationType === operationType) {
-            const data = operationType === "update" ? change.updateDescription.updatedFields : change.fullDocument;
-            sendNotification(data);
+        let notificationData = null;
+        if (operationType && change.operationType === operationType) {
+            notificationData = {
+                operation: change.operationType,
+                id: change.documentKey._id,
+                data: operationType === "update" ? change.updateDescription.updatedFields : change.fullDocument
+            };
+
+        }else{
+            notificationData = {
+                operation: change.operationType,
+                id: change.documentKey._id,
+                data: change.fullDocument
+            };
         }
+
+        sendNotification("databaseStream",notificationData);
+    });
+}
+
+/**
+ * Watches all collections for a specific operation type and sends a push notification on change.
+ *
+ * @param {string} collection - The collection to watch.
+ * @param {string} operationType - The operation type to look out for (e.g., "insert", "update", "delete").
+ * @param {Function} sendNotification - The function to send a push notification.
+ */
+
+async watchAllCollections(sendNotification) {
+    const collections = await this.db.listCollections().toArray();
+
+    collections.forEach((collection) => {
+        this.watcher(collection=collection.name, sendNotification=sendNotification);
     });
 }
 }
@@ -283,6 +325,10 @@ async watcher(collection, operationType, sendNotification) {
 
 const storage = new StorageEngine();
 await storage.connect();
+
+
+
+// await storage.watchAllCollections(pushNotification);
 
 export {StorageEngine};
 

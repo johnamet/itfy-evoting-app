@@ -1,0 +1,751 @@
+openapi: 3.0.0
+info:
+  title: ITFY E-Voting App API
+  version: 1.0.0
+  description: API documentation for the ITFY E-Voting application
+  components:
+    securitySchemes:
+      ApiKeyAuth:
+        type: authorization
+        in: header
+        name: Authorization
+        description: Bearer token for authentication
+
+servers:
+  - url: http://localhost:3000/api
+
+paths:
+  /users:
+    post:
+      summary: Creates a new user
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - password
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '201':
+          description: User created successfully
+        '400':
+          description: Missing required fields or user already exists
+        '500':
+          description: Internal server error
+    get:
+      summary: Lists all users or users matching query parameters
+      tags: [Users]
+      parameters:
+        - in: query
+          name: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of users
+        '404':
+          description: No users found
+        '500':
+          description: Internal server error
+
+  /users/{userId}:
+    put:
+      summary: Updates an existing user
+      tags: [Users]
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+          description: The ID of the user to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: User updated successfully
+        '400':
+          description: Missing required fields or user not found
+        '500':
+          description: Internal server error
+    delete:
+      summary: Deletes a user
+      tags: [Users]
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+          description: The ID of the user to delete
+      responses:
+        '200':
+          description: User deleted successfully
+        '400':
+          description: Missing required fields or user not found
+        '500':
+          description: Internal server error
+
+  /users/{userId}/profile:
+    get:
+      summary: Retrieves the profile of a specific user
+      tags: [Users]
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+          description: The ID of the user
+      responses:
+        '200':
+          description: User profile
+        '400':
+          description: User not found
+        '500':
+          description: Internal server error
+
+  /roles:
+    post:
+      summary: Creates a new role
+      tags: [Roles]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Role created successfully
+        '400':
+          description: Missing required fields or role already exists
+        '500':
+          description: Internal server error
+    get:
+      summary: Lists all roles
+      tags: [Roles]
+      responses:
+        '200':
+          description: List of roles
+        '404':
+          description: No roles found
+        '500':
+          description: Internal server error
+
+  /roles/{roleId}:
+    put:
+      summary: Updates an existing role
+      tags: [Roles]
+      parameters:
+        - in: path
+          name: roleId
+          required: true
+          schema:
+            type: string
+          description: The ID of the role to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Role updated successfully
+        '400':
+          description: Missing required fields or role not found
+        '500':
+          description: Internal server error
+    delete:
+      summary: Deletes a role
+      tags: [Roles]
+      parameters:
+        - in: path
+          name: roleId
+          required: true
+          schema:
+            type: string
+          description: The ID of the role to delete
+      responses:
+        '200':
+          description: Role deleted successfully
+        '400':
+          description: Missing required fields or role not found
+        '500':
+          description: Internal server error
+
+
+  /votes:
+    post:
+      summary: Casts a vote
+      tags: [Votes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - userId
+                - electionId
+                - candidateId
+              properties:
+                userId:
+                  type: string
+                electionId:
+                  type: string
+                candidateId:
+                  type: string
+      responses:
+        '201':
+          description: Vote cast successfully
+        '400':
+          description: Missing required fields or invalid vote
+        '500':
+          description: Internal server error
+
+  /votes/stats:
+    get:
+      summary: Retrieves the results of an election
+      tags: [Votes]
+      parameters:
+        - in: query
+          name: event_id
+          required: true
+          schema:
+            type: string
+          description: The ID of the event
+        - in: query
+          name: category_id
+          required: false
+          schema:
+            type: string
+          description: The ID of the category
+      responses:
+        '200':
+          description: Election results
+        '400':
+          description: Event not found
+        '500':
+          description: Internal server error
+
+  /nominations:
+    post:
+      summary: Creates a new nomination
+      tags: [Nominations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - candidate_id
+                - event_id
+                - category_id
+              properties:
+                candidate_id:
+                  type: string
+                event_id:
+                  type: string
+                category_id:
+                  type: string
+      responses:
+        '201':
+          description: Nomination created successfully
+        '400':
+          description: Missing required fields or nomination already exists
+        '500':
+          description: Internal server error
+    get:
+      summary: Lists all nominations
+      tags: [Nominations]
+      responses:
+        '200':
+          description: List of nominations
+        '404':
+          description: No nominations found
+        '500':
+          description: Internal server error
+
+  /nominations/{nominationId}:
+    put:
+      summary: Updates an existing nomination
+      tags: [Nominations]
+      parameters:
+        - in: path
+          name: nominationId
+          required: true
+          schema:
+            type: string
+          description: The ID of the nomination to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                candidate_id:
+                  type: string
+                event_id:
+                  type: string
+                category_id:
+                  type: string
+      responses:
+        '200':
+          description: Nomination updated successfully
+        '400':
+          description: Missing required fields or nomination not found
+        '500':
+          description: Internal server error
+    delete:
+      summary: Deletes a nomination
+      tags: [Nominations]
+      parameters:
+        - in: path
+          name: nominationId
+          required: true
+          schema:
+            type: string
+          description: The ID of the nomination to delete
+      responses:
+        '200':
+          description: Nomination deleted successfully
+        '400':
+          description: Missing required fields or nomination not found
+        '500':
+          description: Internal server error
+
+  /events:
+    post:
+      summary: Creates a new event
+      tags: [Events]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - description
+                - startDate
+                - endDate
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                startDate:
+                  type: string
+                  format: date-time
+                endDate:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Event created successfully
+        '400':
+          description: Missing required fields or event already exists
+        '500':
+          description: Internal server error
+    get:
+      summary: Lists all events
+      tags: [Events]
+      responses:
+        '200':
+          description: List of events
+        '404':
+          description: No events found
+        '500':
+          description: Internal server error
+
+  /events/{eventId}:
+    put:
+      summary: Updates an existing event
+      tags: [Events]
+      parameters:
+        - in: path
+          name: eventId
+          required: true
+          schema:
+            type: string
+          description: The ID of the event to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                startDate:
+                  type: string
+                  format: date-time
+                endDate:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: Event updated successfully
+        '400':
+          description: Missing required fields or event not found
+        '500':
+          description: Internal server error
+    delete:
+      summary: Deletes an event
+      tags: [Events]
+      parameters:
+        - in: path
+          name: eventId
+          required: true
+          schema:
+            type: string
+          description: The ID of the event to delete
+      responses:
+        '200':
+          description: Event deleted successfully
+        '400':
+          description: Missing required fields or event not found
+        '500':
+          description: Internal server error
+
+  /categories:
+    post:
+      summary: Creates a new category
+      tags: [Categories]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - description
+                - eventId
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                eventId:
+                  type: string
+      responses:
+        '201':
+          description: Category created successfully
+        '400':
+          description: Missing required fields or category already exists
+        '500':
+          description: Internal server error
+    get:
+      summary: Lists all categories
+      tags: [Categories]
+      responses:
+        '200':
+          description: List of categories
+        '404':
+          description: No categories found
+        '500':
+          description: Internal server error
+
+  /categories/{categoryId}:
+    put:
+      summary: Updates an existing category
+      tags: [Categories]
+      parameters:
+        - in: path
+          name: categoryId
+          required: true
+          schema:
+            type: string
+          description: The ID of the category to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                eventId:
+                  type: string
+      responses:
+        '200':
+          description: Category updated successfully
+        '400':
+          description: Missing required fields or category not found
+        '500':
+          description: Internal server error
+    delete:
+      summary: Deletes a category
+      tags: [Categories]
+      parameters:
+        - in: path
+          name: categoryId
+          required: true
+          schema:
+            type: string
+          description: The ID of the category to delete
+      responses:
+        '200':
+          description: Category deleted successfully
+        '400':
+          description: Missing required fields or category not found
+        '500':
+          description: Internal server error
+
+  /candidates:
+    post:
+      summary: Creates a new candidate
+      tags: [Candidates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - event_id
+              properties:
+                name:
+                  type: string
+                event_id:
+                  type: string
+                category_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Candidate created successfully
+        '400':
+          description: Missing required fields or candidate already exists
+        '500':
+          description: Internal server error
+    get:
+      summary: Lists all candidates
+      tags: [Candidates]
+      responses:
+        '200':
+          description: List of candidates
+        '404':
+          description: No candidates found
+        '500':
+          description: Internal server error
+
+  /candidates/{candidateId}:
+    put:
+      summary: Updates an existing candidate
+      tags: [Candidates]
+      parameters:
+        - in: path
+          name: candidateId
+          required: true
+          schema:
+            type: string
+          description: The ID of the candidate to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                event_id:
+                  type: string
+                category_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Candidate updated successfully
+        '400':
+          description: Missing required fields or candidate not found
+        '500':
+          description: Internal server error
+    delete:
+      summary: Deletes a candidate
+      tags: [Candidates]
+      parameters:
+        - in: path
+          name: candidateId
+          required: true
+          schema:
+            type: string
+          description: The ID of the candidate to delete
+      responses:
+        '200':
+          description: Candidate deleted successfully
+        '400':
+          description: Missing required fields or candidate not found
+        '500':
+          description: Internal server error
+
+  /auth/login:
+    post:
+      summary: Logs in a user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: User logged in successfully
+        '400':
+          description: Missing required fields or invalid credentials
+        '500':
+          description: Internal server error
+
+  /auth/logout:
+    post:
+      summary: Logs out a user
+      tags: [Auth]
+      responses:
+        '200':
+          description: User logged out successfully
+        '401':
+          description: Missing authorization header
+        '403':
+          description: Invalid or expired token
+        '500':
+          description: Internal server error
+
+  /app/files:
+    post:
+      summary: Uploads a file
+      tags: [Files]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - category
+                - entityId
+                - file
+              properties:
+                category:
+                  type: string
+                entityId:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: File uploaded successfully
+        '400':
+          description: Missing required fields or no file uploaded
+        '500':
+          description: Internal server error
+
+  /app/files/{category}/{entityId}:
+    get:
+      summary: Retrieves files associated with a specific entity and category
+      tags: [Files]
+      parameters:
+        - in: path
+          name: category
+          required: true
+          schema:
+            type: string
+          description: The category of the files
+        - in: path
+          name: entityId
+          required: true
+          schema:
+            type: string
+          description: The ID of the entity
+      responses:
+        '200':
+          description: List of files
+        '404':
+          description: No files found
+        '500':
+          description: Internal server error
+
+  /app/files/{category}/{entityId}/{fileName}:
+    get:
+      summary: Downloads a specific file
+      tags: [Files]
+      parameters:
+        - in: path
+          name: category
+          required: true
+          schema:
+            type: string
+          description: The category of the file
+        - in: path
+          name: entityId
+          required: true
+          schema:
+            type: string
+          description: The ID of the entity
+        - in: path
+          name: fileName
+          required: true
+          schema:
+            type: string
+          description: The name of the file
+      responses:
+        '200':
+          description: File downloaded successfully
+        '404':
+          description: File not found
+        '500':
+          description: Internal server error

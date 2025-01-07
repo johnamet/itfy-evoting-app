@@ -1,248 +1,109 @@
+#!/usr/bin/node
+
+/**
+ * VoteController handles the voting operations.
+ * It includes methods for casting votes, retrieving vote statistics, and vote summaries.
+ */
+
 import Vote from "../models/vote.js";
 import Event from "../models/event.js";
-import Category from "../models/category.js";
-import Candidate from "../models/candidate.js";
 import { ObjectId } from "mongodb";
 
 class VoteController {
-    /**
-     * Casts a new vote.
-     */
-    static async castVote(req, res) {
-        try {
-            const data = req.body;
+  /**
+   * Casts a vote.
+   * @param {Request} req - The request object containing vote details.
+   * @param {Response} res - The response object.
+   */
+  static async castVote(req, res) {
+    try {
+      const { candidate_id, event_id, category_id, number_of_votes, voter_ip } = req.body;
 
-            if (!data) {
-                return res.status(400).send({
-                    success: false,
-                    error: "Missing data."
-                });
-            }
+      if (!event_id || !category_id || !candidate_id) {
+        return res.status(400).send({ success: false, error: "Missing required fields. `event_id` or `category_id` or `candidate_id`" });
+      }
 
-            const { candidate_id, event_id, category_id, voter_ip,
-                 voting_id } = data;
+      const event = await Event.get({id: new ObjectId(event_id)});
+      if (!event) return res.status(404).send({ success: false, error: "Event not found." });
 
-            if (!event_id || !category_id || !voter_ip) {
-                return res.status(400).send({
-                    success: false,
-                    error: "Missing required fields: `candidate_id`, `event_id`, `category_id`, or `voter_ip`."
-                });
-            }
+      const vote = new Vote(candidate_id, event_id, category_id, number_of_votes || 1, voter_ip || req.ip);
+      await vote.save();
 
-            if(!candidate_id && !voting_id){
-                return res.status(400).send({
-                    success: false,
-                    error: "Either a `candidate_id` or a `voting_id` is required."
-                });
-            }
+      // Broadcast to all clients
+      req.io.emit("newVote", vote);
 
-            // Validate event
-            const event = await Event.get({ id: new ObjectId(event_id) });
-            if (!event) {
-                return res.status(404).send({
-                    success: false,
-                    error: "Event not found."
-                });
-            }
-
-            // Validate category
-            const category = await Category.get({ id: new ObjectId(category_id) });
-            if (!category || category.eventId !== event_id) {
-                return res.status(404).send({
-                    success: false,
-                    error: "Category not found or does not belong to the specified event."
-                });
-            }
-
-            // Validate candidate
-            const candidate = await Candidate.get({ id: new ObjectId(candidate_id)}) ? candidate_id: await Candidate.get({
-                voting_id
-            });
-            if (!candidate || candidate.categoryId !== category_id) {
-                return res.status(404).send({
-                    success: false,
-                    error: "Candidate not found or does not belong to the specified category."
-                });
-            }
-
-            // Check if voting is within the allowed period
-            const now = new Date();
-            if (now < new Date(event.startDate) || now > new Date(event.endDate)) {
-                return res.status(400).send({
-                    success: false,
-                    error: "Voting is not allowed outside the event's voting period."
-                });
-            }
-
-            // Check for duplicate voting
-            const existingVote = await Vote.get({
-                voter_ip,
-                event_id,
-                category_id
-            });
-
-            if (existingVote) {
-                return res.status(400).send({
-                    success: false,
-                    error: "You have already voted in this category."
-                });
-            }
-
-            // Cast the vote
-            const vote = await Vote.create(candidate_id, event_id, category_id, 1, voter_ip);
-            const result = await vote.save();
-
-            if (!result) {
-                return res.status(500).send({
-                    success: false,
-                    error: "Failed to cast vote."
-                });
-            }
-
-            return res.status(201).send({
-                success: true,
-                message: "Vote cast successfully."
-            });
-        } catch (error) {
-            console.error("Error casting vote:", error);
-            return res.status(500).send({
-                success: false,
-                error: error.message
-            });
-        }
+      res.status(201).send({ success: true, message: "Vote cast successfully.", vote });
+    } catch (error) {
+      console.error("Error casting vote:", error);
+      res.status(500).send({ success: false, error: "Internal Server Error" });
     }
+  }
 
-    /**
-     * Retrieves vote statistics for an event or category.
-     */
-    static async getVoteStats(req, res) {
-        try {
-            const { event_id, category_id } = req.query;
+  /**
+   * Retrieves vote summary for an event.
+   * @param {Request} req - The request object containing event ID.
+   * @param {Response} res - The response object.
+   */
+  static async getVoteSummary(req, res) {
+    try {
+      const { event_id } = req.query;
 
-            if (!event_id) {
-                return res.status(400).send({
-                    success: false,
-                    error: "Missing required parameter: `event_id`."
-                });
-            }
+      if (!event_id) return res.status(400).send({ success: false, error: "Missing event_id." });
 
-            const query = { event_id };
-            if (category_id) query.category_id = category_id;
+      const eventObj = await Event.get({ id: new ObjectId(event_id) });
+      const event = eventObj ? Event.fromObject(eventObj) : null;
 
-            const votes = await Vote.all(query);
+      if (!event) return res.status(404).send({ success: false, error: "Event not found." });
 
-            if (!votes || votes.length === 0) {
-                return res.status(404).send({
-                    success: false,
-                    error: "No votes found."
-                });
-            }
+      const totalVotes = await Vote.count({ event_id: event_id });
 
-            const stats = votes.reduce((acc, vote) => {
-                acc[vote.candidate_id] = (acc[vote.candidate_id] || 0) + vote.number_of_votes;
-                return acc;
-            }, {});
+      const categoryVotes = await Vote.aggregate([
+        { $match: { event_id: event_id } },
+        { $group: { _id: "$category_id", votes: { $sum: 1 } } },
+      ]);
 
-            return res.status(200).send({
-                success: true,
-                stats
-            });
-        } catch (error) {
-            console.error("Error retrieving vote stats:", error);
-            return res.status(500).send({
-                success: false,
-                error: error.message
-            });
-        }
+      const candidateVotes = await Vote.aggregate([
+        { $match: { event_id: event_id } },
+        { $group: { _id: "$candidate_id", votes: { $sum: 1 } } },
+        { $sort: { votes: -1 } },
+      ]);
+
+      const summary = {
+        totalVotes,
+        categoryVotes,
+        candidateVotes,
+        eventStatus: new Date() < event.start_date ? "pending" : new Date() > event.end_date ? "ended" : "ongoing",
+      };
+
+      res.status(200).send({ success: true, summary });
+    } catch (error) {
+      console.error("Error fetching vote summary:", error);
+      res.status(500).send({ success: false, error: "Internal Server Error" });
     }
+  }
 
-    /**
-     * Retrieves all votes cast by a specific voter.
-     */
-    static async getVoterSummary(req, res) {
-        try {
-            const { voter_ip } = req.params;
+  /**
+   * Retrieves vote statistics for an event and optionally a category.
+   * @param {Request} req - The request object containing event ID and optional category ID.
+   * @param {Response} res - The response object.
+   */
+  static async getVoteStats(req, res) {
+    try {
+      const { event_id, category_id } = req.query;
 
-            if (!voter_ip) {
-                return res.status(400).send({
-                    success: false,
-                    error: "Missing required parameter: `voter_ip`."
-                });
-            }
+      if (!event_id) return res.status(400).send({ success: false, error: "Missing event_id." });
 
-            const votes = await Vote.all({ voter_ip });
+      const stats = await Vote.aggregate([
+        { $match:  !category_id ? { event_id: event_id } : { event_id: event_id, category_id: category_id } },
+        { $group: { _id: "$candidate_id", votes: { $sum: 1 } } },
+      ]);
 
-            if (!votes || votes.length === 0) {
-                return res.status(404).send({
-                    success: false,
-                    error: "No votes found for this voter."
-                });
-            }
-
-            return res.status(200).send({
-                success: true,
-                votes
-            });
-        } catch (error) {
-            console.error("Error retrieving voter summary:", error);
-            return res.status(500).send({
-                success: false,
-                error: error.message
-            });
-        }
+      res.status(200).send({ success: true, stats });
+    } catch (error) {
+      console.error("Error fetching vote stats:", error);
+      res.status(500).send({ success: false, error: "Internal Server Error" });
     }
-
-    /**
-     * Ends voting for a specific event or category.
-     */
-    static async closeVoting(req, res) {
-        try {
-            const { event_id, category_id } = req.body;
-
-            if (!event_id) {
-                return res.status(400).send({
-                    success: false,
-                    error: "Missing required field: `event_id`."
-                });
-            }
-
-            const event = await Event.get({ id: new ObjectId(event_id) });
-            if (!event) {
-                return res.status(404).send({
-                    success: false,
-                    error: "Event not found."
-                });
-            }
-
-            // Mark event as closed
-            event.isVotingClosed = true;
-            if (category_id) {
-                const category = await Category.get({ id: new ObjectId(category_id) });
-                if (!category || category.eventId !== event_id) {
-                    return res.status(404).send({
-                        success: false,
-                        error: "Category not found or does not belong to the specified event."
-                    });
-                }
-
-                category.isVotingClosed = true;
-                await category.updateInstance({ isVotingClosed: true });
-            }
-
-            await event.updateInstance({ isVotingClosed: true });
-
-            return res.status(200).send({
-                success: true,
-                message: `Voting closed for ${category_id ? "category" : "event"}.`
-            });
-        } catch (error) {
-            console.error("Error closing voting:", error);
-            return res.status(500).send({
-                success: false,
-                error: error.message
-            });
-        }
-    }
+  }
 }
 
 export default VoteController;

@@ -13,6 +13,7 @@ import eventRouter from "./events.js";
 import voteRouter from "./votes.js";
 import nominationRouter from "./nominations.js";
 import candidateRouter from "./candidates.js";
+import appRouter from "./app.js";
 
 
 
@@ -30,6 +31,7 @@ router.use('/events',
 router.use('/votes', voteRouter);
 router.use('/nominations', nominationRouter);
 router.use('/candidates', candidateRouter);
+router.use('/app', appRouter)
 
 
 

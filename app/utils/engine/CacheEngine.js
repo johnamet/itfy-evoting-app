@@ -120,6 +120,38 @@ class CacheEngine {
             throw error;
         }
     }
+
+    /**
+     * Saves an object to Redis
+     * @param {string} key - The key to be saved in Redis
+     * @param {Object} value - The object to be assigned to the key
+     * @param {number} ttl - TTL of the key in seconds
+     * @return {Promise<void>} No return
+     */
+    async setObject(key, value, ttl = 60 * 24 * 60 * 60) {
+        try {
+            const stringValue = JSON.stringify(value);
+            await this.client.setEx(key, ttl, stringValue);
+        } catch (error) {
+            console.error(`Error setting object for key "${key}" with TTL:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Gets an object from Redis
+     * @param {string} key - The key to search for in Redis
+     * @return {Promise<Object>} The object corresponding to the key
+     */
+    async getObject(key) {
+        try {
+            const value = await this.client.get(key);
+            return JSON.parse(value);
+        } catch (error) {
+            console.error(`Error getting object for key "${key}":`, error);
+            throw error;
+        }
+    }
 }
 
 const cacheEngine = new CacheEngine();

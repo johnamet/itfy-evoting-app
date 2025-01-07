@@ -16,7 +16,7 @@ userRouter.get('/', AuthController.verifyToken,
     AuthController.verifyRole(['admin']),
     UserController.listUsers);
 
-userRouter.get('/me/:userId', AuthController.verifyToken, UserController.myProfile);
+userRouter.get('/profile/:userId', AuthController.verifyToken, UserController.myProfile);
 
 
 userRouter.delete('/:userId', AuthController.verifyToken,
