@@ -61,7 +61,7 @@ const speedLimiter = slowDown({ windowMs: 15 * 60 * 1000, delayAfter: 50, delayM
 app.use(speedLimiter);
 
 // Routes
-app.use("/evoting", router);
+app.use("/evoting/api/v1", router);
 
 // Error handler
 app.use((err, req, res, next) => {
