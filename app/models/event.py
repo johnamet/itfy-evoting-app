@@ -1,7 +1,7 @@
 
-from .base_model import Basemodel
+from .base_model import BaseModel
 
-class Event(Basemodel):
+class Event(BaseModel):
     collection = "events"
 
     def __init__(self, name, description, start_date, end_date, **kwargs):

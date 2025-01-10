@@ -1,12 +1,55 @@
+#!/usr/bin/env python
+import os
 import bcrypt
 from pymongo import MongoClient
 from bson import ObjectId
 from datetime import datetime
 
-client = MongoClient('mongodb://localhost:27017/')
-db = client['evoting_db']
+HOST = os.getenv('DB_HOST', 'localhost')
+PORT = int(os.getenv('DB_PORT', 27017))
+DB_NAME = os.getenv('DB_NAME', 'evoting_db')
+DB_USER = os.getenv('DB_USER', 'itfy-user')
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'itfy-password')
+client = MongoClient(f'mongodb://{HOST}:{PORT}/')
+db = client[DB_NAME]
 
 class BaseModel:
+    """
+    BaseModel class provides a base for other models to inherit from, offering common functionality for database operations.
+
+    Attributes:
+        collection_name (str): The name of the collection in the database.
+
+    Methods:
+        __init__(**kwargs):
+            Initializes a new instance of BaseModel with given keyword arguments.
+            Automatically sets `id`, `created_at`, and `updated_at` attributes.
+
+        save():
+            Saves the current instance to the database.
+
+        update(data):
+            Updates the current instance in the database with the provided data.
+            Automatically updates the `updated_at` attribute.
+            Hashes the password if present in the data.
+
+        delete(query):
+            Class method that deletes a single document from the collection based on the query.
+
+        deleteMany(query):
+            Class method that deletes multiple documents from the collection based on the query.
+
+        get(query):
+            Class method that retrieves a single document from the collection based on the query.
+            Converts `id` in the query to ObjectId if present.
+
+        all(query=None):
+            Class method that retrieves all documents from the collection based on the query.
+            If no query is provided, retrieves all documents.
+
+        to_dict():
+            Converts the current instance to a dictionary.
+    """
     collection_name = 'base'
 
     def __init__(self, **kwargs):

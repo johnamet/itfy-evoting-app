@@ -1,9 +1,9 @@
-from models.base_model import Basemodel
+from models.base_model import BaseModel
 
-class Vote(Basemodel):
+class Vote(BaseModel):
     collection = "votes"
 
-    def __init__(self, candidate_id, event_id, category_id, number_of_votes=1, voter_ip, **kwargs):
+    def __init__(self, candidate_id, event_id, category_id, voter_ip, number_of_votes=1, **kwargs):
         super().__init__(**kwargs)
         self.candidate_id = candidate_id
         self.event_id = event_id

@@ -1,6 +1,5 @@
 import Basemodel from "./basemodel.js";
 import bcrypt from "bcryptjs";
-import storage from "../utils/engine/StorageEngine.js";
 
 class User extends Basemodel {
   static collection = "users";

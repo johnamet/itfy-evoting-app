@@ -1,7 +1,6 @@
 import chaiHttp from "chai-http";
 import sinon from "sinon";
 import sinonChai from "sinon-chai";
-import app from "../app.js";
 import AppController from "../controllers/AppController.js";
 
 import { expect, use } from "chai";

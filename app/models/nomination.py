@@ -1,6 +1,6 @@
-from .base_model import Basemodel
+from .base_model import BaseModel
 
-class Nomination(Basemodel):
+class Nomination(BaseModel):
     collection = "nominations"
 
     def __init__(self, candidate_id, event_id, category_id, **kwargs):

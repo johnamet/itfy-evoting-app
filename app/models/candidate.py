@@ -1,7 +1,7 @@
-from models.base_model import Basemodel
-from utils.engine.CacheEngine import cacheEngine
+from .base_model import BaseModel
+from utils.engine.CacheEngine import CacheEngine as cacheEngine
 
-class Candidate(Basemodel):
+class Candidate(BaseModel):
     collection = "candidates"
 
     def __init__(self, name, event_id, category_ids=None, **kwargs):

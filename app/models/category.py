@@ -1,10 +1,10 @@
 
-from .base_model import Basemodel
+from .base_model import BaseModel
 
-class Category(Basemodel):
+class Category(BaseModel):
     collection = "categories"
 
-    def __init__(self, name, description, thumbnail_uri="", event_id, **kwargs):
+    def __init__(self, name, description, event_id, thumbnail_uri="", **kwargs):
         super().__init__(**kwargs)
         self.name = name
         self.description = description
