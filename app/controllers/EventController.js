@@ -1,9 +1,18 @@
+#!/usr/bin/node
+
+/**
+ * EventController handles event-related operations.
+ * It includes methods for creating, updating, deleting, and listing events, as well as retrieving event details.
+ */
+
 import Event from "../models/event.js";
 import { ObjectId } from "mongodb";
 
 class EventController {
     /**
      * Creates a new event.
+     * @param {Request} req - The request object containing event details.
+     * @param {Response} res - The response object.
      */
     static async createEvent(req, res) {
         try {
@@ -61,6 +70,8 @@ class EventController {
 
     /**
      * Updates an existing event.
+     * @param {Request} req - The request object containing event ID and update details.
+     * @param {Response} res - The response object.
      */
     static async updateEvent(req, res) {
         try {
@@ -114,6 +125,8 @@ class EventController {
 
     /**
      * Deletes an event.
+     * @param {Request} req - The request object containing event ID.
+     * @param {Response} res - The response object.
      */
     static async deleteEvent(req, res) {
         try {
@@ -150,6 +163,8 @@ class EventController {
 
     /**
      * Lists all events or events matching query parameters.
+     * @param {Request} req - The request object containing query parameters.
+     * @param {Response} res - The response object.
      */
     static async listEvents(req, res) {
         try {
@@ -178,6 +193,8 @@ class EventController {
 
     /**
      * Retrieves the details of a specific event.
+     * @param {Request} req - The request object containing event ID.
+     * @param {Response} res - The response object.
      */
     static async getEventDetails(req, res) {
         try {

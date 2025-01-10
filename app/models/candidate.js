@@ -8,6 +8,7 @@
 import { cacheEngine } from "../utils/engine/CacheEngine.js";
 import Basemodel from "./basemodel.js";
 
+
 class Candidate extends Basemodel {
     // Name of the MongoDB collection associated with this model
     static collection = "candidates";
@@ -38,7 +39,7 @@ class Candidate extends Basemodel {
      * @returns {Candidate} - A new Candidate instance.
      */
     static async create(name, event_id, category_ids = [], kwargs = {}) {
-        const voting_id = await this.generateUniqueCode(name); // Generate and add unique voting ID
+        const voting_id = this.generateUniqueCode(name); // Generate and add unique voting ID
         return new this(name, event_id, category_ids, {voting_id, ...kwargs}); // Create and return the new instance
     }
 

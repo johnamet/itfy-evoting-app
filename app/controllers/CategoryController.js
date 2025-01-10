@@ -1,3 +1,10 @@
+#!/usr/bin/node
+
+/**
+ * CategoryController handles category-related operations.
+ * It includes methods for creating, updating, deleting, and listing categories, as well as retrieving category details.
+ */
+
 import Category from "../models/category.js";
 import Event from "../models/event.js";
 import { ObjectId } from "mongodb";
@@ -5,6 +12,8 @@ import { ObjectId } from "mongodb";
 class CategoryController {
     /**
      * Creates a new category.
+     * @param {Request} req - The request object containing category details.
+     * @param {Response} res - The response object.
      */
     static async createCategory(req, res) {
         try {
@@ -69,6 +78,8 @@ class CategoryController {
 
     /**
      * Updates an existing category.
+     * @param {Request} req - The request object containing category ID and update details.
+     * @param {Response} res - The response object.
      */
     static async updateCategory(req, res) {
         try {
@@ -133,6 +144,8 @@ class CategoryController {
 
     /**
      * Deletes a category.
+     * @param {Request} req - The request object containing category ID.
+     * @param {Response} res - The response object.
      */
     static async deleteCategory(req, res) {
         try {
@@ -169,6 +182,8 @@ class CategoryController {
 
     /**
      * Lists all categories or categories matching query parameters.
+     * @param {Request} req - The request object containing query parameters.
+     * @param {Response} res - The response object.
      */
     static async listCategories(req, res) {
         try {
@@ -197,6 +212,8 @@ class CategoryController {
 
     /**
      * Retrieves the details of a specific category.
+     * @param {Request} req - The request object containing category ID.
+     * @param {Response} res - The response object.
      */
     static async getCategoryDetails(req, res) {
         try {

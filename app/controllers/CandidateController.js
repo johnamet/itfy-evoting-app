@@ -1,3 +1,10 @@
+#!/usr/bin/node
+
+/**
+ * CandidateController handles candidate-related operations.
+ * It includes methods for creating, updating, deleting, and listing candidates, as well as handling bulk uploads.
+ */
+
 import Candidate from "../models/candidate.js";
 import Event from "../models/event.js";
 import Category from "../models/category.js";
@@ -10,6 +17,8 @@ const uploadProgress = new Map(); // To track ongoing uploads and their progress
 class CandidateController {
     /**
      * Creates a new candidate.
+     * @param {Request} req - The request object containing candidate details.
+     * @param {Response} res - The response object.
      */
     static async createCandidate(req, res) {
         try {
@@ -89,6 +98,8 @@ class CandidateController {
 
     /**
      * Handles bulk upload of candidates via CSV or Excel file.
+     * @param {Request} req - The request object containing the file.
+     * @param {Response} res - The response object.
      */
     static async bulkUploadCandidates(req, res) {
         try {
@@ -189,6 +200,8 @@ class CandidateController {
 
     /**
      * Lists ongoing uploads.
+     * @param {Request} req - The request object.
+     * @param {Response} res - The response object.
      */
     static listOngoingUploads(req, res) {
         const uploads = Array.from(uploadProgress.entries()).map(([id, progress]) => ({
@@ -205,6 +218,8 @@ class CandidateController {
 
     /**
      * Checks the progress of a specific upload.
+     * @param {Request} req - The request object containing upload ID.
+     * @param {Response} res - The response object.
      */
     static checkUploadProgress(req, res) {
         const { uploadId } = req.params;
@@ -225,6 +240,8 @@ class CandidateController {
 
     /**
      * Lists candidates with optional filters.
+     * @param {Request} req - The request object containing query parameters.
+     * @param {Response} res - The response object.
      */
     static async listCandidates(req, res) {
         try {
@@ -253,6 +270,8 @@ class CandidateController {
 
     /**
      * Updates an existing candidate.
+     * @param {Request} req - The request object containing candidate ID and update details.
+     * @param {Response} res - The response object.
      */
     static async updateCandidate(req, res) {
         try {
@@ -326,6 +345,8 @@ class CandidateController {
 
     /**
      * Deletes an existing candidate.
+     * @param {Request} req - The request object containing candidate ID.
+     * @param {Response} res - The response object.
      */
     static async deleteCandidate(req, res) {
         try {
