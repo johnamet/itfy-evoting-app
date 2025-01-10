@@ -31,7 +31,7 @@ The ITFY E-Voting App is a secure and user-friendly electronic voting system des
     ```
 2. Open your browser and navigate to `http://localhost:8000`.
 
-##To run the console
+## To run the console
 1. Create a python environment and activate it.
 2. Run `pip install -r requirements.txt`
 3. After successful installation of the dependencies, run `bash console2.py`
