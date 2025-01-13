@@ -183,10 +183,10 @@ class Basemodel {
      * @param {object|null} query - The query to filter objects.
      * @returns {Promise<any[]>} - The found objects.
      */
-    static async all(query = null) {
+    static async all(query = null, options) {
         return query
-            ? storage.query(this.collection, query)
-            : storage.all(this.collection);
+            ? storage.query(this.collection, query, options)
+            : storage.all(this.collection, options);
     }
 
     /**

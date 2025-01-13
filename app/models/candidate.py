@@ -17,7 +17,7 @@ class Candidate(BaseModel):
         if category_ids is None:
             category_ids = []
         voting_id = await cls.generate_unique_code(name)
-        return cls(name, event_id, category_ids, voting_id=voting_id, **kwargs)
+        return cls(name, event_id, category_ids, voting_id, **kwargs)
 
     @staticmethod
     async def generate_unique_code(candidate_name):

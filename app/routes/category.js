@@ -13,8 +13,7 @@ catRouter.post('/', AuthController.verifyToken,
     AuthController.verifyRole(['admin', 'superuser']),
  CategoryController.createCategory);
 
-catRouter.get('/', AuthController.verifyToken, 
-    AuthController.verifyRole(['admin', 'superuser']), 
+catRouter.get('/', 
  CategoryController.listCategories);
 
 
@@ -26,7 +25,7 @@ catRouter.delete('/:categoryId', AuthController.verifyToken,
     AuthController.verifyRole(["admin", "superuser"]), 
 );
 
-catRouter.get('/:categoryId', AuthController.verifyToken, AuthController.verifyRole(['admin']),
+catRouter.get('/:categoryId',
 CategoryController.getCategoryDetails);
 
 

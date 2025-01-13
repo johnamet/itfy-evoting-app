@@ -67,7 +67,7 @@ class CandidateController {
             const existingCandidate = await Candidate.get({name: name});
 
             if (existingCandidate){
-                res.status(400).send({
+                return res.status(400).send({
                     success: false,
                     error: `Candidate with name ${name} exists.`
                 });
@@ -239,14 +239,35 @@ class CandidateController {
     }
 
     /**
-     * Lists candidates with optional filters.
+     * Lists candidates with optional filters and pagination.
      * @param {Request} req - The request object containing query parameters.
      * @param {Response} res - The response object.
      */
     static async listCandidates(req, res) {
         try {
             const query = req.query || {};
-            const candidates = await Candidate.all(query);
+            const page = parseInt(query.page, 10) || 1;
+            const limit = parseInt(query.limit, 10) || 10;
+            const skip = (page - 1) * limit;
+
+            delete query.page;
+            delete query.limit;
+
+            console.log(query);
+
+            Object.keys(query).forEach(key => {
+                if (key === "id") { 
+                    query[key] = new ObjectId(query[key]);
+                }
+            });
+
+            if (query.category_ids) {
+                query.category_ids = { $in: query.category_ids.split(',').map(id => id.trim()) };
+            }
+
+            console.log(query);
+
+            const candidates = await Candidate.all(query, { skip, limit });
 
             if (!candidates || candidates.length === 0) {
                 return res.status(404).send({
@@ -255,9 +276,18 @@ class CandidateController {
                 });
             }
 
+            const totalCandidates = await Candidate.count(query);
+            const totalPages = Math.ceil(totalCandidates / limit);
+
             return res.status(200).send({
                 success: true,
-                candidates: candidates.map(candidate => Candidate.from_object(candidate).to_object())
+                candidates: candidates.map(candidate => Candidate.from_object(candidate).to_object()),
+                pagination: {
+                    totalCandidates,
+                    totalPages,
+                    currentPage: page,
+                    pageSize: limit
+                }
             });
         } catch (error) {
             console.error("Error listing candidates:", error);

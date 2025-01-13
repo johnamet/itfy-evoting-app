@@ -181,25 +181,56 @@ class CategoryController {
     }
 
     /**
-     * Lists all categories or categories matching query parameters.
+     * Lists all categories or categories matching query parameters with pagination.
      * @param {Request} req - The request object containing query parameters.
      * @param {Response} res - The response object.
      */
     static async listCategories(req, res) {
         try {
             const query = req.query || {};
-            const categories = await Category.all(query);
+            const page = parseInt(query.page) || 1;
+            const limit = parseInt(query.limit) || 10;
+            const skip = (page - 1) * limit;
 
-            if (!categories || categories.length === 0) {
-                return res.status(404).send({
+            delete query.page;
+            delete query.limit;
+
+            console.log("Query:", query);
+
+            Object.keys(query).forEach(key => {
+                if (key == "id") {
+                    query[key] = new ObjectId(query[key]);
+                }
+            });
+
+            console.log("Query:", query);
+
+            const categories = await Category.all(query, {skip, limit});
+            const totalCategories = await Category.count(query);
+
+            if ((!categories || categories.length === 0) && Object.keys(query).length > 0) {
+                return res.status(200).send({
                     success: false,
                     error: "No categories found matching the given criteria."
                 });
             }
 
+            if (!categories || categories.length === 0) {
+                return res.status(200).send({
+                    success: false,
+                    error: "No categories found."
+                });
+            }
+
             return res.status(200).send({
                 success: true,
-                categories: categories.map(category => Category.from_object(category).to_object())
+                categories: categories.map(category => Category.from_object(category).to_object()),
+                pagination: {
+                    total: totalCategories,
+                    page: page,
+                    limit: limit,
+                    totalPages: Math.ceil(totalCategories / limit)
+                }
             });
         } catch (error) {
             console.error("Error listing categories:", error);

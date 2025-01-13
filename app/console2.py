@@ -240,6 +240,99 @@ class UserManagementApp(cmd.Cmd):
             print(f"Error: {str(e)}")
             self._error_usage("create")
 
+    def do_list(self, arg):
+        """List all documents or entities with optional query parameters.
+        Example:
+        -------
+        list user
+        or
+        list role
+        or list user name=John
+        """
+        if not self._require_login():
+            return
+
+        entity_query = {}
+        entity, *args = arg.split()
+        if entity not in classes:
+            print(f"Invalid entity: {entity}")
+            return
+
+        if len(args) > 0:
+            entity_query = self._key_value_parser(' '.join(args))
+
+        entity_class = classes[entity]
+        entities = entity_class.all(entity_query)
+        if entities:
+            print(f"Listing all {entity}s:")
+            for entity_instance in entities:
+                pprint(entity_instance)
+        else:
+            print(f"No {entity}s found.")
+
+
+    def do_delete(self, arg):
+        """Delete an existing document or entity.
+        Example:
+        -------
+        delete user id=12345
+        or
+        delete user all
+        """
+        if not self._require_login():
+            return
+
+        if not self.is_key_holder:
+            print("Only the key-holder can perform delete operations.")
+            return
+
+        if len(arg) == 0:
+            print("Please provide the entity to delete.")
+            return
+
+        entity, *args = arg.split()
+        if entity not in classes:
+            print(f"Invalid entity: {entity}")
+            return
+
+        if 'all' in args:
+            confirmation = input(
+                f"Are you sure you want to delete all {entity}s? This action cannot be undone. (yes/no): "
+            ).strip().lower()
+            if confirmation == "yes":
+                args.remove('all')
+
+                params = self._key_value_parser(' '.join(args))
+                entity_class = classes[entity]
+                entity_class.deleteMany(params or {})
+                print(f"All {entity}s have been deleted.")
+            else:
+                print("Action canceled.")
+            return
+
+        entity_class = classes[entity]
+        entity_query = self._key_value_parser(' '.join(args))
+
+        if not entity_query:
+            print("Please provide a valid query to delete.")
+            return
+        
+        entity_instance = entity_class.get(entity_query)
+        if entity_instance is None:
+            print(f"{entity} with {entity_query} not found")
+            return
+
+        confirmation = input(
+            f"Are you sure you want to delete {entity} with {entity_query}? (yes/no): "
+        ).strip().lower()
+        if confirmation == "yes":
+            entity_instance = entity_class(**entity_instance)
+            entity_instance.delete(entity_query)
+            print(f"{entity} deleted:")
+            pprint(entity_instance.to_dict())
+        else:
+            print("Action canceled.")
+
     def do_exit(self, arg):
         """
         Exit the application.

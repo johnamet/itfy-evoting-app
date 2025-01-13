@@ -6,6 +6,7 @@
  */
 
 import Vote from "../models/vote.js";
+import Candidate from "../models/candidate.js";
 import Event from "../models/event.js";
 import { ObjectId } from "mongodb";
 
@@ -23,14 +24,21 @@ class VoteController {
         return res.status(400).send({ success: false, error: "Missing required fields. `event_id` or `category_id` or `candidate_id`" });
       }
 
-      const event = await Event.get({id: new ObjectId(event_id)});
+      const event = await Event.get({ id: new ObjectId(event_id) });
       if (!event) return res.status(404).send({ success: false, error: "Event not found." });
 
       const vote = new Vote(candidate_id, event_id, category_id, number_of_votes || 1, voter_ip || req.ip);
       await vote.save();
 
+      const votes = await Vote.aggregate([
+        { $match: { candidate_id: candidate_id } },
+        { $group: { _id: "$category_id", votes: { $sum: 1 } } },
+      ]);
+
       // Broadcast to all clients
       req.io.emit("newVote", vote);
+      req.io.emit(`voteUpdate:${candidate_id}`, votes);
+
 
       res.status(201).send({ success: true, message: "Vote cast successfully.", vote });
     } catch (error) {
@@ -59,12 +67,12 @@ class VoteController {
 
       const categoryVotes = await Vote.aggregate([
         { $match: { event_id: event_id } },
-        { $group: { _id: "$category_id", votes: { $sum: 1 } } },
+        { $group: { id: "$category_id", votes: { $sum: 1 } } },
       ]);
 
       const candidateVotes = await Vote.aggregate([
         { $match: { event_id: event_id } },
-        { $group: { _id: "$candidate_id", votes: { $sum: 1 } } },
+        { $group: { id: "$candidate_id", votes: { $sum: 1 } } },
         { $sort: { votes: -1 } },
       ]);
 
@@ -94,13 +102,50 @@ class VoteController {
       if (!event_id) return res.status(400).send({ success: false, error: "Missing event_id." });
 
       const stats = await Vote.aggregate([
-        { $match:  !category_id ? { event_id: event_id } : { event_id: event_id, category_id: category_id } },
+        { $match: !category_id ? { event_id: event_id } : { event_id: event_id, category_id: category_id } },
         { $group: { _id: "$candidate_id", votes: { $sum: 1 } } },
       ]);
 
       res.status(200).send({ success: true, stats });
     } catch (error) {
       console.error("Error fetching vote stats:", error);
+      res.status(500).send({ success: false, error: "Internal Server Error" });
+    }
+  }
+
+  /**
+   * Emits real-time updates of votes for a specific event.
+   * @param {Request} req - The request object containing event ID.
+   * @param {Response} res - The response object.
+   */
+  static async liveVoteUpdates(req, res) {
+    try {
+      const { candidate_id } = req.params;
+
+      if (!candidate_id) return res.status(400).send({ success: false, error: "Missing candidate_id." });
+
+      const candidate = await Candidate.get({ id: new ObjectId(candidate_id) });
+      if (!candidate) return res.status(404).send({ success: false, error: "Candidate not found." });
+
+      const votes = await Vote.aggregate([
+        { $match: { candidate_id: candidate_id } },
+        { $group: { _id: "$candidate_id", votes: { $sum: 1 } } },
+      ]);
+
+      // Establish WebSocket connection for live updates
+      req.io.on(`voteUpdate:${candidate_id}`, async () => {
+        const votes = await Vote.aggregate([
+          { $match: { candidate_id: candidate_id } },
+          { $group: { _id: "$candidate_id", votes: { $sum: 1 } } },
+        ]);
+
+        req.io.emit(`voteUpdate:${candidate_id}`, votes);
+
+      });
+
+      res.status(200).send({ success: true, message: "Live vote updates enabled.", votes: votes });
+    } catch (error) {
+      console.error("Error enabling live vote updates:", error);
       res.status(500).send({ success: false, error: "Internal Server Error" });
     }
   }

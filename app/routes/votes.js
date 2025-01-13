@@ -13,6 +13,8 @@ voteRouter.get('/stats', AuthController.verifyToken, AuthController.verifyRole([
 voteRouter.get('/summary',
  VoteController.getVoteSummary);
 
+voteRouter.get('/:candidate_id', VoteController.liveVoteUpdates);
+
 
 
 

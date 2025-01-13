@@ -126,6 +126,59 @@ class AppController {
             return res.status(500).send({ success: false, error: "Failed to retrieve files." });
         }
     }
+/**
+ * Open a specific file and return it for viewing or downloading.
+ * @param {Request} req - The request object containing the categoryId, entityId, and fileName.
+ * @param {Response} res - The response object.
+ * @returns {Promise<Response>} - The file content for viewing or download.
+ */
+static async openFile(req, res) {
+    try {
+        const { categoryId, entityId, fileName } = req.params;
+
+        // Validate required parameters
+        if (!categoryId || !entityId || !fileName) {
+            return res.status(400).json({
+                success: false,
+                error: "Missing required fields: `categoryId`, `entityId`, or `fileName`.",
+            });
+        }
+
+        // Construct and sanitize file path
+        const filePath = path.resolve(
+            AppController.fileStoragePath,
+            categoryId,
+            entityId,
+            fileName
+        );
+
+        // Check if the file exists
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({
+                success: false,
+                error: "File not found.",
+            });
+        }
+
+        // Send the file for viewing
+        return res.sendFile(filePath, (err) => {
+            if (err) {
+                console.error("Error sending file:", err);
+                return res.status(500).json({
+                    success: false,
+                    error: "Failed to send the file.",
+                });
+            }
+        });
+    } catch (error) {
+        console.error("Error opening file:", error);
+        return res.status(500).json({
+            success: false,
+            error: "An unexpected error occurred while opening the file.",
+        });
+    }
+}
+
 
     /**
      * Download a specific file.

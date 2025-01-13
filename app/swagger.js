@@ -21,7 +21,7 @@ const swaggerOptions = {
         },
         servers: [
             {
-                url: 'http://localhost:8000/evoting',
+                url: 'http://localhost:8000/evoting/api/v1',
                 description: 'Local server',
             },
         ],

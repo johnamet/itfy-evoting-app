@@ -18,8 +18,8 @@ const server = http.createServer(app);
 // Initialize Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: "*", // Update for production
-    methods: ["GET", "POST"],
+    origin: ["http://localhost:63342", "*"], // Update for production
+    methods: ["GET", "POST","PUT", "DELETE"],
   },
 });
 

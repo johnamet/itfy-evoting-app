@@ -27,12 +27,12 @@ class EventController {
 
             console.log(data);
 
-            const { name, description, startDate, endDate } = data;
+            const { name, description, start_date, end_date } = data;
 
-            if (!name || !description || !startDate || !endDate) {
+            if (!name || !description || !start_date || !end_date) {
                 return res.status(400).send({
                     success: false,
-                    error: "Missing required fields: `name`, `description`, `startDate`, or `endDate`."
+                    error: "Missing required fields: `name`, `description`, `start_date`, or `end_date`."
                 });
             }
 
@@ -45,7 +45,12 @@ class EventController {
                 });
             }
 
-            const event = new Event(name, description, new Date(startDate), new Date(endDate));
+            delete data.name;
+            delete data.description;
+            delete data.start_date;
+            delete data.end_date;
+
+            const event = new Event(name, description, new Date(start_date), new Date(end_date), data);
             const result = await event.save();
 
             if (!result) {
@@ -171,12 +176,21 @@ class EventController {
             const query = req.query || {};
             const events = await Event.all(query);
 
-            if (!events || events.length === 0) {
-                return res.status(404).send({
-                    success: false,
+            if ((!events || events.length === 0) && Object.keys(query).length > 0) {
+                return res.status(200).send({
+                    success: true,
                     error: "No events found matching the given criteria."
                 });
             }
+
+            if (!events || events.length === 0) {
+                return res.status(200).send({
+                    success: true,
+                    error: "No events found."
+                });
+            }
+
+
 
             return res.status(200).send({
                 success: true,

@@ -4,7 +4,7 @@
  * A class to handle database connections and operations using MongoDB.
  */
 
-import pkg from 'mongodb'
+import pkg, { ObjectId } from 'mongodb'
 import pushNotification from '../notificationUtil.js';
 
 const { MongoClient } = pkg;
@@ -161,8 +161,10 @@ class StorageEngine {
      * @param {string} collectionName - The collection to fetch from.
      * @returns {Promise<Array<object>>} - Array of all documents.
      */
-    async all(collectionName) {
-        return this.execute(() => this.getCollection(collectionName).find({}).toArray());
+    async all(collectionName, options={skip:0, limit:0}) {
+        return this.execute(() => 
+            this.getCollection(collectionName).find({}).skip(options.skip).limit(options.limit).toArray()
+        );
     }
 
     /**
@@ -172,8 +174,9 @@ class StorageEngine {
      * @param {object} query - The query object.
      * @returns {Promise<Array<object>>} - Array of matching documents.
      */
-    async query(collectionName, query) {
-        return this.execute(() => this.getCollection(collectionName).find(query).toArray());
+    async query(collectionName, query, options={skip:0, limit:0}) {
+        return this.execute(() => this.getCollection(collectionName).find(query)
+        .toArray());
     }
 
     /**
