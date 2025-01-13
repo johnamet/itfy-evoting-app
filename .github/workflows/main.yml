@@ -32,6 +32,9 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/itfy-voting-app:latest
 
+      - name: Save Docker image tag
+        run: echo "DOCKER_IMAGE_TAG=${{ secrets.DOCKER_USERNAME }}/itfy-voting-app:latest" >> $GITHUB_ENV
+
   deploy:
     runs-on: ubuntu-latest
     needs: build
@@ -42,6 +45,6 @@ jobs:
 
       - name: Deploy to server
         run: |
-          ssh user@your-server "docker pull ${{ secrets.DOCKER_USERNAME }}/itfy-voting-app:latest && docker-compose up -d"
+          ssh -i ${{ secrets.SSH_PRIVATE_KEY }} user@your-server "docker pull ${{ env.DOCKER_IMAGE_TAG }} && docker-compose up -d"
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
