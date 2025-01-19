@@ -14,6 +14,7 @@ candidateRouter.get('/ongoing-uploads', AuthController.verifyToken,
     AuthController.verifyRole(["admin", "superuser"]),CandidateController.listOngoingUploads);
 
 candidateRouter.get('/', CandidateController.listCandidates);
+candidateRouter.get('/:candidateId', CandidateController.getCandidate);
 
 candidateRouter.put('/:candidateId', AuthController.verifyToken,
     AuthController.verifyRole(["admin", "superuser"]),CandidateController.updateCandidate);

@@ -95,6 +95,42 @@ class CandidateController {
             });
         }
     }
+    /**
+     * Retrieves a single candidate from the server
+     * @param {Request} req - The request object containing candidate ID.
+     * @param {Response} res - The response object.
+     */
+    static async getCandidate(req, res) {
+        try {
+            const { candidateId } = req.params;
+
+            if (!candidateId) {
+                return res.status(400).send({
+                    success: false,
+                    error: "Missing `candidateId` parameter.",
+                });
+            }
+
+            const candidate = await Candidate.get({ id: new ObjectId(candidateId) });
+            if (!candidate) {
+                return res.status(404).send({
+                    success: false,
+                    error: `Candidate with ID ${candidateId} not found.`,
+                });
+            }
+
+            return res.status(200).send({
+                success: true,
+                candidate: Candidate.from_object(candidate).to_object(),
+            });
+        } catch (error) {
+            console.error("Error retrieving candidate:", error);
+            return res.status(500).send({
+                success: false,
+                error: error.message,
+            });
+        }
+    }
 
     /**
      * Handles bulk upload of candidates via CSV or Excel file.
