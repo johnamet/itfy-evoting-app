@@ -72,8 +72,17 @@ class CandidateController {
                     error: `Candidate with name ${name} exists.`
                 });
             }
+
+            delete data.category_ids;
+            delete data.name;
+            delete data.event_id;
             // Create candidate
-            const candidate = await Candidate.create(name, event_id, category_ids ? category_ids: []);
+            const voting_id = await Candidate.generateUniqueCode(name);
+            data.voting_id = voting_id;
+
+            console.log(data)
+
+            const candidate = new Candidate(name, event_id, category_ids ? category_ids: [], data);
             const result = await candidate.save();
 
             if (!result) {
@@ -306,9 +315,10 @@ class CandidateController {
             const candidates = await Candidate.all(query, { skip, limit });
 
             if (!candidates || candidates.length === 0) {
-                return res.status(404).send({
-                    success: false,
-                    error: "No candidates found matching the given criteria."
+                return res.status(200).send({
+                    success: true,
+                    error: "No candidates found matching the given criteria.",
+                    candidates: []
                 });
             }
 

@@ -19,11 +19,7 @@ class Basemodel {
         this.updated_at = new Date(); // Initialize updated_at to the same as created_at
 
         // Dynamically assign additional fields passed via kwargs
-        kwargs.forEach(arg => {
-            Object.keys(arg).forEach(key => {
-                this[key] = arg[key];
-            });
-        });
+        Object.assign(this, ...kwargs)
     }
 
     /**

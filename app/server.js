@@ -30,7 +30,7 @@ setupSocket(io);
 // Middleware
 app.use(json());
 app.use(helmet());
-app.use(cors({ origin: "*", methods: "GET,POST,PUT,DELETE", allowedHeaders: "Content-Type,Authorization" }));
+app.use(cors({ origin: "http://localhost:63342", methods: "GET,POST,PUT,DELETE", allowedHeaders: "Content-Type,Authorization" }));
 app.use(morgan("combined"));
 
 // Middleware for pretty-printing JSON responses

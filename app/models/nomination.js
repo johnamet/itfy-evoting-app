@@ -20,13 +20,22 @@ class Nomination extends Basemodel {
      * @param {...object} kwargs - Additional fields to dynamically add to the nomination.
      */
     constructor(candidate_id, event_id, category_id, ...kwargs) {
-        super(kwargs); // Call the Basemodel constructor with additional fields
+        super(...kwargs); // Call the Basemodel constructor with additional fields
 
         this.candidate_id = candidate_id; // Assign the candidate ID
         this.event_id = event_id; // Assign the event ID
         this.category_id = category_id; // Assign the category ID
-
     }
 }
 
+
+class NominationForm extends Basemodel {
+	static collection = "nomination_forms";
+
+	constructor(...params){
+		super(params)
+	}
+}
+
 export default Nomination;
+export {NominationForm};

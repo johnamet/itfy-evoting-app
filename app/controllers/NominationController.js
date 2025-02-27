@@ -9,6 +9,7 @@ import Nomination from "../models/nomination.js";
 import Event from "../models/event.js";
 import Category from "../models/category.js";
 import Candidate from "../models/candidate.js";
+import { NominationForm } from "../models/nomination.js";
 import { ObjectId } from "mongodb";
 
 class NominationController {
@@ -28,9 +29,9 @@ class NominationController {
                 });
             }
 
-            const { candidate_id, event_id, category_id } = data;
+            const { candidate_email, event_id, category_id } = data;
 
-            if (!candidate_id || !event_id || !category_id) {
+            if (!candidate_email || !event_id || !category_id) {
                 return res.status(400).send({
                     success: false,
                     error: "Missing required fields: `candidate_id`, `event_id`, or `category_id`."
@@ -54,23 +55,17 @@ class NominationController {
                 });
             }
 
-            console.log(candidate_id);
-
-            const cId = new ObjectId(candidate_id);
-
-            console.log(candidate_id,cId);
-
-            const candidate = await Candidate.get({ _id: cId});
+            const candidate = await Candidate.get({ email: candidate_email });
             if (!candidate) {
                 return res.status(404).send({
                     success: false,
-                    error: `Candidate with ID ${candidate_id} not found.`
+                    error: `Candidate with email ${candidate_email} not found.`
                 });
             }
 
             // Check for duplicate nomination
             const existingNomination = await Nomination.get({
-                candidate_id,
+                candidate_id: candidate.id,
                 event_id,
                 category_id
             });
@@ -83,7 +78,7 @@ class NominationController {
             }
 
             // Create nomination
-            const nomination = await new Nomination(candidate_id, event_id, category_id);
+            const nomination = new Nomination(candidate.id, event_id, category_id, data);
             const result = await nomination.save();
 
             const candidateInstance = Candidate.from_object(candidate);
@@ -92,7 +87,7 @@ class NominationController {
 
             categories.push(category_id);
 
-            await candidateInstance.updateInstance({category_ids: categories});
+            await candidateInstance.updateInstance({ category_ids: categories });
 
             if (!result) {
                 return res.status(500).send({
@@ -326,6 +321,111 @@ class NominationController {
             });
         }
     }
-}
 
+
+    /**
+     * Create a nomination requirement form
+     * @param {Request} req - The request object containing query parameters.
+     * @param {Response} res - The response object.
+     */
+    static async createNominationRequirementForm(req, res) {
+        try {
+            const { eventId } = req.params;
+
+            console.log(eventId)
+
+            if (!eventId) {
+                return res.status(400).send({
+                    success: false,
+                    error: "Provide the event id"
+                });
+            }
+
+            const event = await Event.get({ id: new ObjectId(eventId) })
+
+
+            if (!event) {
+                console.log(`Event with id: ${eventId} not found.`)
+                return res.status(404).send({
+                    success: false,
+                    error: `Event with id: ${eventId} not found.`
+                })
+            }
+
+            const requirements = req.body;
+
+            if (!requirements) {
+                return res.status(400).send({
+                    success: false,
+                    error: "Please provide the requirements for the nomination forms."
+                })
+            }
+
+
+            const form = new NominationForm(requirements);
+            const result = await form.save()
+
+            const fetchedNom = await NominationForm.all()
+
+            console.log(fetchedNom)
+            if (result) {
+                return res.status(200).send({
+                    success: true,
+                    message: "Form created successfully",
+                    form
+                })
+            }
+
+        } catch (e) {
+            console.error(`Error creating the form ${e}`)
+            return res.status(500).send(
+                {
+                    success: false,
+                    error: `Failed to create form due to Internal Error, Error: ${e}`
+                }
+            )
+        }
+    }
+
+    /**
+     * Retrieve a nomination form based on eventId and categoryId
+     * @param {Request} req - The request object containing query parameters.
+     * @param {Response} res - The response object.
+     */
+    static async getNominationForm(req, res) {
+        try {
+            const { eventId} = req.params;
+
+            if (!eventId) {
+                return res.status(400).send({
+                    success: false,
+                    error: "Provide both eventId",
+                });
+            }
+
+            const form = await NominationForm.get({
+                eventId: eventId,
+            });
+
+            if (!form) {
+                return res.status(404).send({
+                    success: false,
+                    error: `Nomination form not found for eventId: ${eventId}.`,
+                });
+            }
+
+            return res.status(200).send({
+                success: true,
+                form,
+            });
+
+        } catch (e) {
+            console.error(`Error retrieving the nomination form: ${e}`);
+            return res.status(500).send({
+                success: false,
+                error: `Failed to retrieve form due to Internal Error, Error: ${e}`,
+            });
+        }
+    }
+}
 export default NominationController;

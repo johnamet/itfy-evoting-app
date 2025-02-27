@@ -45,6 +45,7 @@ class AppController {
     static async uploadFile(req, res) {
         upload.single('file')(req, res, async (err) => {
             if (err) {
+		    console.log(err);
                 return res.status(500).send({ success: false, error: "Failed to upload file." });
             }
 
@@ -217,9 +218,8 @@ static async openFile(req, res) {
             return res.status(500).send({ success: false, error: "Failed to download file." });
         }
     }
-
     /**
-     * Retrieve the status of the application, including database connection and latency.
+     * Retrieve the status of the application, including database connection, latency, uptime, and load time.
      * @param {Request} req - The request object.
      * @param {Response} res - The response object.
      * @returns {Promise<Response>} - The status of the application.
@@ -235,7 +235,9 @@ static async openFile(req, res) {
                 cache: {
                     connection: cacheEngine.isConnected(),
                     latency: await cacheEngine.getLatency()
-                }
+                },
+                uptime: process.uptime(),
+                loadTime: process.hrtime()
             };
 
             return res.status(200).send(status);
