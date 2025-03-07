@@ -11,6 +11,8 @@ import Category from "../models/category.js";
 import { ObjectId } from "mongodb";
 import { parse } from "csv-parse";
 import fs from "fs";
+import Activity from "../models/activity.js";
+import jobQueue  from "../utils/engine/JobEngine.js";
 
 const uploadProgress = new Map(); // To track ongoing uploads and their progress
 
@@ -21,6 +23,8 @@ class CandidateController {
      * @param {Response} res - The response object.
      */
     static async createCandidate(req, res) {
+        let activity = null
+
         try {
             const data = req.body;
 
@@ -77,26 +81,29 @@ class CandidateController {
             delete data.name;
             delete data.event_id;
             // Create candidate
-            const voting_id = await Candidate.generateUniqueCode(name);
+            const voting_id = Candidate.generateUniqueCode(name);
             data.voting_id = voting_id;
-
-            console.log(data)
 
             const candidate = new Candidate(name, event_id, category_ids ? category_ids: [], data);
             const result = await candidate.save();
-
             if (!result) {
+                activity = new Activity(req.user.id, 'create', 'candidate', candidate.id, new Date(), ...{success: false});
                 return res.status(500).send({
                     success: false,
                     error: "Failed to create candidate."
                 });
             }
 
+             activity = new Activity(req.user.id, 'create', 'candidate', candidate.id, new Date(), {success: true});
+            jobQueue.add('activity', activity.save());
+
             return res.status(201).send({
                 success: true,
                 candidate: candidate.to_object()
             });
         } catch (error) {
+            activity = new Activity(req.user.id, 'create', 'candidate', null, new Date(), {success: false});
+            jobQueue.add('activity', activity.save());
             console.error("Error creating candidate:", error);
             return res.status(500).send({
                 success: false,
@@ -147,6 +154,7 @@ class CandidateController {
      * @param {Response} res - The response object.
      */
     static async bulkUploadCandidates(req, res) {
+        let activity = null;
         try {
             if (!req.file) {
                 return res.status(400).send({
@@ -229,12 +237,16 @@ class CandidateController {
 
             uploadProgress.delete(uploadId);
 
+            activity = new Activity(req.user.id, 'bulk_upload', 'candidate', null, new Date(), {success: true});
+            jobQueue.add('activity', activity.save());
             return res.status(200).send({
                 success: true,
                 message: "Bulk upload initiated. Candidates are being processed.",
                 uploadId
             });
         } catch (error) {
+            activity = new Activity(req.user.id, 'bulk_upload', 'candidate', null, new Date(), {success: false});
+            jobQueue.add('activity', activity.save());
             console.error("Error in bulk upload:", error);
             return res.status(500).send({
                 success: false,
@@ -350,6 +362,7 @@ class CandidateController {
      * @param {Response} res - The response object.
      */
     static async updateCandidate(req, res) {
+        let activity = null;
         try {
             const { candidateId } = req.params;
             const updates = req.body;
@@ -406,11 +419,16 @@ class CandidateController {
             // Update the candidate
             await candidate.updateInstance(updates);
 
+            activity = new Activity(req.user.id, 'update', 'candidate', candidate.id, new Date(), {success: true});
+            jobQueue.add('activity', activity.save());
+
             return res.status(200).send({
                 success: true,
                 candidate: candidate.to_object(),
             });
         } catch (error) {
+            activity = new Activity(req.user.id, 'update', 'candidate', null, new Date(), {success: false});
+            jobQueue.add('activity', activity.save());
             console.error("Error updating candidate:", error);
             return res.status(500).send({
                 success: false,
@@ -425,6 +443,7 @@ class CandidateController {
      * @param {Response} res - The response object.
      */
     static async deleteCandidate(req, res) {
+        let activity = null;
         try {
             const { candidateId } = req.params;
 
@@ -453,11 +472,15 @@ class CandidateController {
                 });
             }
 
+            activity = new Activity(req.user.id, 'delete', 'candidate', candidateId, new Date(), {success: true});
+            jobQueue.add('activity', activity.save());
             return res.status(200).send({
                 success: true,
                 message: `Candidate with ID ${candidateId} successfully deleted.`,
             });
         } catch (error) {
+            activity = new Activity(req.user.id, 'delete', 'candidate', null, new Date(), {success: false});
+            jobQueue.add('activity', activity.save());
             console.error("Error deleting candidate:", error);
             return res.status(500).send({
                 success: false,

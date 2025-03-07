@@ -14,7 +14,7 @@ voteRouter.get('/summary',
  VoteController.getVoteSummary);
 
 voteRouter.get('/:candidate_id', VoteController.liveVoteUpdates);
-
+voteRouter.get('/raw/:candidate_id', VoteController.candidateVotes);
 
 
 

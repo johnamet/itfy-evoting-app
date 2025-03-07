@@ -30,14 +30,10 @@ class VoteController {
       const vote = new Vote(candidate_id, event_id, category_id, number_of_votes || 1, voter_ip || req.ip);
       await vote.save();
 
-      const votes = await Vote.aggregate([
-        { $match: { candidate_id: candidate_id } },
-        { $group: { _id: "$category_id", votes: { $sum: 1 } } },
-      ]);
 
       // Broadcast to all clients
       req.io.emit("newVote", vote);
-      req.io.emit(`voteUpdate:${candidate_id}`, votes);
+      req.io.emit(`voteUpdate:${candidate_id}`, vote);
 
 
       res.status(201).send({ success: true, message: "Vote cast successfully.", vote });
@@ -59,7 +55,7 @@ class VoteController {
       if (!event_id) return res.status(400).send({ success: false, error: "Missing event_id." });
 
       const eventObj = await Event.get({ id: new ObjectId(event_id) });
-      const event = eventObj ? Event.fromObject(eventObj) : null;
+      const event = eventObj;
 
       if (!event) return res.status(404).send({ success: false, error: "Event not found." });
 
@@ -67,12 +63,12 @@ class VoteController {
 
       const categoryVotes = await Vote.aggregate([
         { $match: { event_id: event_id } },
-        { $group: { id: "$category_id", votes: { $sum: 1 } } },
+        { $group: { _id: "$category_id", votes: { $sum:  { $toInt: "$number_of_votes" } } } },
       ]);
 
       const candidateVotes = await Vote.aggregate([
         { $match: { event_id: event_id } },
-        { $group: { id: "$candidate_id", votes: { $sum: 1 } } },
+        { $group: { _id: "$candidate_id", votes: { $sum:  { $toInt: "$number_of_votes" } } } },
         { $sort: { votes: -1 } },
       ]);
 
@@ -103,7 +99,7 @@ class VoteController {
 
       const stats = await Vote.aggregate([
         { $match: !category_id ? { event_id: event_id } : { event_id: event_id, category_id: category_id } },
-        { $group: { _id: "$candidate_id", votes: { $sum: 1 } } },
+        { $group: { _id: "$candidate_id", votes: { $sum:  { $toInt: "$number_of_votes" } } } },
       ]);
 
       res.status(200).send({ success: true, stats });
@@ -127,21 +123,21 @@ class VoteController {
       const candidate = await Candidate.get({ id: new ObjectId(candidate_id) });
       if (!candidate) return res.status(404).send({ success: false, error: "Candidate not found." });
 
-      const votes = await Vote.aggregate([
-        { $match: { candidate_id: candidate_id } },
-        { $group: { _id: "$candidate_id", votes: { $sum: 1 } } },
-      ]);
+  //    const votes = await Vote.aggregate([
+    //    { $match: { candidate_id: candidate_id } },
+      //  { $group: { _id: "$candidate_id", votes: { $sum: 1 } } },
+     // ]);
 
-      // Establish WebSocket connection for live updates
-      req.io.on(`voteUpdate:${candidate_id}`, async () => {
-        const votes = await Vote.aggregate([
-          { $match: { candidate_id: candidate_id } },
-          { $group: { _id: "$candidate_id", votes: { $sum: 1 } } },
-        ]);
+	   const votes = await Vote.aggregate([
+    { $match: { candidate_id: candidate_id } },
+    {
+        $group: {
+            _id: "$candidate_id",
+            votes: { $sum: { $toInt: "$number_of_votes" } }
+        }
+    }
+]);
 
-        req.io.emit(`voteUpdate:${candidate_id}`, votes);
-
-      });
 
       res.status(200).send({ success: true, message: "Live vote updates enabled.", votes: votes });
     } catch (error) {
@@ -149,6 +145,27 @@ class VoteController {
       res.status(500).send({ success: false, error: "Internal Server Error" });
     }
   }
+
+	static async candidateVotes(req, res){
+
+		try{
+		const { candidate_id } = req.params;
+
+		if (!candidate_id) return res.status(400).send({ success: false, error: "Missing candidate_id." });
+
+      const candidate = await Candidate.get({ id: new ObjectId(candidate_id) });
+      if (!candidate) return res.status(404).send({ success: false, error: "Candidate not found." });
+	
+
+
+           const votes = await Vote.all({ candidate_id})
+
+	res.status(200).send({success: true, votes: votes});
+		}catch(error){
+		console.error("Error fetching votes: error")
+		res.status(500).send({success: false, error: "Internal Server Error"+ error.message})
+	}
+    }
 }
 
 export default VoteController;

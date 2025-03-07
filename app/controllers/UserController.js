@@ -100,8 +100,9 @@ class UserController {
       user = User.from_object(user);
       const result = await user.updateInstance(body);
 
+      console.log("result", result);
       if (!result) {
-        return res.status(500).send({
+        return res.status(400).send({
           success: false,
           error: "Failed to update user."
         });

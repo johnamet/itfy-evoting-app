@@ -11,6 +11,8 @@ import Category from "../models/category.js";
 import Candidate from "../models/candidate.js";
 import { NominationForm } from "../models/nomination.js";
 import { ObjectId } from "mongodb";
+import jobQueue from "../utils/engine/JobEngine.js";
+import Activity from "../models/activity.js";
 
 class NominationController {
     /**
@@ -19,6 +21,7 @@ class NominationController {
      * @param {Response} res - The response object.
      */
     static async createNomination(req, res) {
+        let activity = null;
         try {
             const data = req.body;
 
@@ -96,11 +99,16 @@ class NominationController {
                 });
             }
 
+            activity = new Activity(req.user.id, 'create', 'nomination', nomination.id, new Date(), { success: true });
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });
+
             return res.status(201).send({
                 success: true,
                 nomination: nomination.to_object()
             });
         } catch (error) {
+            activity = new Activity(req.user.id, 'create', 'nomination', null, new Date(), { success: true })
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });
             console.error("Error creating nomination:", error);
             return res.status(500).send({
                 success: false,
@@ -145,6 +153,7 @@ class NominationController {
      * @param {Response} res - The response object.
      */
     static async updateNomination(req, res) {
+        let activity = null;
         try {
             const { nominationId } = req.params;
             const updates = req.body;
@@ -164,7 +173,7 @@ class NominationController {
             }
 
             // Fetch the nomination
-            let nomination = await Nomination.get({ id: nominationId });
+            let nomination = await Nomination.get({ id: new ObjectId(nominationId) });
 
             if (!nomination) {
                 return res.status(404).send({
@@ -177,7 +186,7 @@ class NominationController {
             const { candidate_id, event_id, category_id } = updates;
 
             if (candidate_id) {
-                const candidate = await Candidate.get({ id: candidate_id });
+                const candidate = await Candidate.get({ id: new ObjectId(candidate_id) });
                 if (!candidate) {
                     return res.status(404).send({
                         success: false,
@@ -187,7 +196,7 @@ class NominationController {
             }
 
             if (event_id) {
-                const event = await Event.get({ id: event_id });
+                const event = await Event.get({ id: new ObjectId(event_id) });
                 if (!event) {
                     return res.status(404).send({
                         success: false,
@@ -197,7 +206,7 @@ class NominationController {
             }
 
             if (category_id) {
-                const category = await Category.get({ id: category_id });
+                const category = await Category.get({ id: new ObjectId(category_id) });
                 if (!category) {
                     return res.status(404).send({
                         success: false,
@@ -210,11 +219,15 @@ class NominationController {
             nomination = Nomination.from_object(nomination);
             await nomination.updateInstance(updates);
 
+            activity = new Activity(req.user.id, "update", "nomination", nomination.id, new Date(), { success: true })
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });
             return res.status(200).send({
                 success: true,
                 nomination: nomination.to_object(),
             });
         } catch (error) {
+            activity = new Activity(req.user.id, "update", "nomination", null, new Date(), { success: false })
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });
             console.error("Error updating nomination:", error);
             return res.status(500).send({
                 success: false,
@@ -267,6 +280,7 @@ class NominationController {
      * @param {Response} res - The response object.
      */
     static async deleteNomination(req, res) {
+        let activity = null;
         try {
             const { nominationId } = req.params;
 
@@ -286,11 +300,16 @@ class NominationController {
                 });
             }
 
+            activity = new Activity(req.user.id, 'delete', 'nomination', nominationId, { success: true })
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });
+
             return res.status(200).send({
                 success: true,
                 message: `Nomination with ID ${nominationId} successfully deleted.`
             });
         } catch (error) {
+            activity = new Activity(req.user.id, 'delete', 'nomination', null, new Date(), { success: false })
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });
             console.error("Error deleting nomination:", error);
             return res.status(500).send({
                 success: false,
@@ -329,10 +348,11 @@ class NominationController {
      * @param {Response} res - The response object.
      */
     static async createNominationRequirementForm(req, res) {
+        console.log("Create form pinged")
         try {
             const { eventId } = req.params;
 
-            console.log(eventId)
+            let result = null;
 
             if (!eventId) {
                 return res.status(400).send({
@@ -361,19 +381,26 @@ class NominationController {
                 })
             }
 
-
-            const form = new NominationForm(requirements);
-            const result = await form.save()
-
-            const fetchedNom = await NominationForm.all()
-
-            console.log(fetchedNom)
-            if (result) {
-                return res.status(200).send({
+            let form = null;
+            form = await NominationForm.get({ eventId: eventId })
+            if (form) {
+                form = NominationForm.from_object(form)
+                await form.updateInstance(requirements)
+                return res.status(201).send({
                     success: true,
-                    message: "Form created successfully",
-                    form
+                    message: "Form updated successfully",
+                    form: await NominationForm.get({ eventId: eventId })
                 })
+            } else {
+                form = new NominationForm(requirements);
+                result = await form.save()
+                if (result) {
+                    return res.status(200).send({
+                        success: true,
+                        message: "Form created successfully",
+                        form
+                    })
+                }
             }
 
         } catch (e) {
@@ -394,7 +421,7 @@ class NominationController {
      */
     static async getNominationForm(req, res) {
         try {
-            const { eventId} = req.params;
+            const { eventId } = req.params;
 
             if (!eventId) {
                 return res.status(400).send({

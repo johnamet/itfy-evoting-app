@@ -7,7 +7,9 @@
 
 import Category from "../models/category.js";
 import Event from "../models/event.js";
+import Activity from "../models/activity.js";
 import { ObjectId } from "mongodb";
+import jobQueue from "../utils/engine/JobEngine.js";
 
 class CategoryController {
     /**
@@ -16,6 +18,7 @@ class CategoryController {
      * @param {Response} res - The response object.
      */
     static async createCategory(req, res) {
+        let activity = null;
         try {
             const data = req.body;
 
@@ -63,11 +66,15 @@ class CategoryController {
                 });
             }
 
+            activity = new Activity(req.user.userId, "create", "category", category.id, new Date(), { success: true });
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });;
             return res.status(201).send({
                 success: true,
                 category: category.to_object()
             });
         } catch (error) {
+            activity = new Activity(req.user.userId, "create", "category", null, new Date(), { success: false });
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });
             console.error("Error creating category:", error);
             return res.status(500).send({
                 success: false,
@@ -82,6 +89,7 @@ class CategoryController {
      * @param {Response} res - The response object.
      */
     static async updateCategory(req, res) {
+        let activity = null;
         try {
             const { categoryId } = req.params;
             const body = req.body;
@@ -129,12 +137,15 @@ class CategoryController {
                 });
             }
 
+            activity = new Activity(req.user.userId, "update", "category", category.id, new Date(), { success: true });
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });
             return res.status(200).send({
                 success: true,
                 category: category.to_object()
             });
         } catch (error) {
-            console.error("Error updating category:", error);
+            activity = new Activity(req.user.userId, "update", "category", null, new Date(), { success: false });
+            await jobQueue.add({ type: "activity", payload: activity.to_object() }); console.error("Error updating category:", error);
             return res.status(500).send({
                 success: false,
                 error: error.message
@@ -148,6 +159,8 @@ class CategoryController {
      * @param {Response} res - The response object.
      */
     static async deleteCategory(req, res) {
+        let activity = null;
+
         try {
             const { categoryId } = req.params;
 
@@ -167,12 +180,15 @@ class CategoryController {
                 });
             }
 
+            activity = new Activity(req.user.userId, "delete", "category", categoryId, new Date(), { success: true });
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });
             return res.status(200).send({
                 success: true,
                 message: `Category with ID ${categoryId} successfully deleted.`
             });
         } catch (error) {
-            console.error("Error deleting category:", error);
+            activity = new Activity(req.user.userId, "delete", "category", null, new Date(), { success: false });
+            await jobQueue.add({ type: "activity", payload: activity.to_object() }); console.error("Error deleting category:", error);
             return res.status(500).send({
                 success: false,
                 error: error.message
@@ -205,7 +221,7 @@ class CategoryController {
 
             console.log("Query:", query);
 
-            const categories = await Category.all(query, {skip, limit});
+            const categories = await Category.all(query, { skip, limit });
             const totalCategories = await Category.count(query);
 
             if ((!categories || categories.length === 0) && Object.keys(query).length > 0) {

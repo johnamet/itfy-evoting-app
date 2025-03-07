@@ -1,7 +1,6 @@
 {
   "name": "evoting-system",
   "version": "1.0.0",
-  "lint": "./node_modules/.bin/eslint",
   "check-lint": "lint app/*.js",
   "description": "ITFY evoting system backend",
   "type": "module",
@@ -9,7 +8,8 @@
   "scripts": {
     "start-server": "nodemon --exec babel-node --presets @babel/preset-env ./app/server.js",
     "test": "mocha --require @babel/register ./app/test/**/*.js --exit",
-    "dev": "nodemon --exec babel-node --presets @babel/preset-env"
+    "dev": "nodemon --exec babel-node --presets @babel/preset-env",
+    "lint": "./node_modules/.bin/eslint ."
   },
   "author": "John Ametepe Agboku",
   "license": "ISC",

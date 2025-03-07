@@ -12,5 +12,4 @@ appRouter.post('/files/', AppController.uploadFile);
 appRouter.get('/files/:categoryId/:entityId', AppController.getFiles)
 appRouter.get('/files/:categoryId/:entityId/:fileName/open', AppController.openFile);
 appRouter.get('/files/:categoryId/:entityId/:fileName', AppController.downloadFile);
-
 export default appRouter;

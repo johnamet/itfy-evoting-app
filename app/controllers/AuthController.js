@@ -1,25 +1,15 @@
-#!/usr/bin/node
-
-/**
- * AuthController handles authentication-related operations.
- * It includes methods for logging in, logging out, and verifying tokens and roles.
- */
-
 import User from "../models/user.js";
 import Role from "../models/role.js";
+import Activity from "../models/activity.js";
 import jwt from "jsonwebtoken";
 import { configDotenv } from "dotenv";
 import { ObjectId } from "mongodb";
 import { cacheEngine } from "../utils/engine/CacheEngine.js";
+import  jobQueue  from "../utils/engine/JobEngine.js";
 
 configDotenv();
 
 class AuthController {
-  /**
-   * Logs in a user.
-   * @param {Request} req - The request object containing login details.
-   * @param {Response} res - The response object.
-   */
   static async login(req, res) {
     try {
       const { email, password } = req.body;
@@ -32,7 +22,6 @@ class AuthController {
       }
 
       const userRecord = await User.get({ email });
-
       if (!userRecord) {
         return res.status(404).send({
           success: false,
@@ -41,9 +30,7 @@ class AuthController {
       }
 
       const user = User.from_object(userRecord);
-
       const checkPassword = await user.verifyPassword(password);
-
       if (!checkPassword) {
         return res.status(400).send({
           success: false,
@@ -51,147 +38,88 @@ class AuthController {
         });
       }
 
-      const role = user.roleId
-        ? await Role.get({ id: new ObjectId(user.roleId) })
-        : null;
+      const role = user.roleId ? await Role.get({ id: new ObjectId(user.roleId) }) : null;
+      const payload = { userId: user.id, role, iat: Math.floor(Date.now() / 1000) };
+      const accessToken = jwt.sign(payload, process.env["SECRET_KEY"], { expiresIn: "1h" });
 
-      const payload = {
-        userId: user.id,
-        role,
-        iat: Math.floor(Date.now() / 1000),
-      };
+      const activity = new Activity({ userId: user.id, action: "login", timestamp: new Date() });
+      await jobQueue.add({ type: "activity", payload: activity.to_object() });
 
-      const accessToken = jwt.sign(payload, process.env["SECRET_KEY"], {
-        expiresIn: "1h",
-      });
-
-      return res.status(200).send({
-        success: true,
-        accessToken,
-      });
+      return res.status(200).send({ success: true, accessToken, user });
     } catch (error) {
       console.error("Login error:", error);
-      return res.status(500).send({
-        success: false,
-        error: error.message,
-      });
+      return res.status(500).send({ success: false, error: error.message });
     }
   }
 
-  /**
-   * Logs out a user by blacklisting the access token.
-   * @param {Request} req - The request object containing the token.
-   * @param {Response} res - The response object.
-   */
   static async logout(req, res) {
     try {
       const authHeader = req.headers["authorization"];
       const accessToken = authHeader && authHeader.split(" ")[1];
 
       if (!accessToken) {
-        return res.status(401).send({
-          success: false,
-          error: "Missing authorization header",
-        });
+        return res.status(401).send({ success: false, error: "Missing authorization header" });
       }
 
-      jwt.verify(accessToken, process.env["SECRET_KEY"], async (err) => {
+      jwt.verify(accessToken, process.env["SECRET_KEY"], async (err, decoded) => {
         if (err) {
-          return res.status(403).send({
-            success: false,
-            error: "Invalid or expired token",
-          });
+          return res.status(403).send({ success: false, error: "Invalid or expired token" });
         }
 
-        await cacheEngine.set(`blacklisted-${accessToken}`, accessToken, 3600); // Blacklist for 1 hour
-        return res.status(200).send({
-          success: true,
-          message: "User logged out successfully",
-        });
+        await cacheEngine.set(`blacklisted-${accessToken}`, accessToken, 3600);
+        const activity = new Activity(decoded.userId, "logout", null, null ,new Date());
+        await jobQueue.add({ type: "activity", payload: activity.to_object() });
+
+        return res.status(200).send({ success: true, message: "User logged out successfully" });
       });
     } catch (error) {
       console.error("Logout error:", error);
-      return res.status(500).send({
-        success: false,
-        error: error.message,
-      });
+      return res.status(500).send({ success: false, error: error.message });
     }
   }
 
-  /**
-   * Middleware to verify and validate the token.
-   * @param {Request} req - The request object containing the token.
-   * @param {Response} res - The response object.
-   * @param {Function} next - The next middleware function.
-   */
   static async verifyToken(req, res, next) {
     try {
       const authHeader = req.headers["authorization"];
       const accessToken = authHeader && authHeader.split(" ")[1];
 
       if (!accessToken) {
-        return res.status(401).send({
-          success: false,
-          error: "Missing authorization header",
-        });
+        return res.status(401).send({ success: false, error: "Missing authorization header" });
       }
 
-      const isBlacklisted = await cacheEngine.get(
-        `blacklisted-${accessToken}`
-      );
-
+      const isBlacklisted = await cacheEngine.get(`blacklisted-${accessToken}`);
       if (isBlacklisted) {
-        return res.status(403).send({
-          success: false,
-          error: "Token has been revoked",
-        });
+        return res.status(403).send({ success: false, error: "Token has been revoked" });
       }
 
-      jwt.verify(accessToken, process.env["SECRET_KEY"], (err, decoded) => {
+      jwt.verify(accessToken, process.env["SECRET_KEY"], async (err, decoded) => {
         if (err) {
-          return res.status(403).send({
-            success: false,
-            error: "Invalid or expired token",
-          });
+          return res.status(403).send({ success: false, error: "Invalid or expired token" });
         }
 
-        req.user = decoded; // Attach decoded token to the request
+        req.user = decoded;
+    
         next();
       });
     } catch (error) {
       console.error("Token verification error:", error);
-      return res.status(500).send({
-        success: false,
-        error: error.message,
-      });
+      return res.status(500).send({ success: false, error: error.message });
     }
   }
 
-  /**
-   * Middleware to verify roles for RBAC.
-   * @param {Array<string>} allowedRoles - Array of allowed roles.
-   * @returns {Function} - Middleware function to verify roles.
-   */
   static verifyRole(allowedRoles) {
     return async (req, res, next) => {
       try {
         const { user } = req;
-
-        console.log(user);
-
         if (!user || !user.role || !allowedRoles.includes(user.role.name)) {
-          return res.status(403).send({
-            success: false,
-            error: "Access denied: insufficient permissions",
-          });
+          return res.status(403).send({ success: false, error: "Access denied: insufficient permissions" });
         }
+
+    
         next();
       } catch (error) {
         console.error("Role verification error:", error);
-        return res.status(500).send({
-          success: false,
-          error: error.message,
-        });
+        return res.status(500).send({ success: false, error: error.message });
       }
     };
   }

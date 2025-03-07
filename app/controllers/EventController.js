@@ -7,6 +7,8 @@
 
 import Event from "../models/event.js";
 import { ObjectId } from "mongodb";
+import  jobQueue  from "../utils/engine/JobEngine.js";
+import Activity from "../models/activity.js";
 
 class EventController {
     /**
@@ -15,6 +17,7 @@ class EventController {
      * @param {Response} res - The response object.
      */
     static async createEvent(req, res) {
+        let activity = null;
         try {
             const data = req.body;
 
@@ -24,8 +27,6 @@ class EventController {
                     success: false
                 });
             }
-
-            console.log(data);
 
             const { name, description, start_date, end_date } = data;
 
@@ -60,11 +61,15 @@ class EventController {
                 });
             }
 
+            activity = new Activity(req.user.id, "create", "event", event.id, new Date(), {success: true});
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });;
             return res.status(201).send({
                 success: true,
                 event: event.to_object()
             });
         } catch (error) {
+            activity = new Activity(req.user.id, "create", "event", null, new Date(), {success: false});
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });;
             console.error("Error creating event:", error);
             return res.status(500).send({
                 success: false,
@@ -79,6 +84,7 @@ class EventController {
      * @param {Response} res - The response object.
      */
     static async updateEvent(req, res) {
+        let activity = null;
         try {
             const { eventId } = req.params;
             const body = req.body;
@@ -115,11 +121,15 @@ class EventController {
                 });
             }
 
+            activity = new Activity(req.user.id, "update", "event", event.id, new Date(), {success: true});
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });;
             return res.status(200).send({
                 success: true,
                 event: event.to_object()
             });
         } catch (error) {
+            activity = new Activity(req.user.id, "update", "event", null, new Date(), {success: false});
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });;
             console.error("Error updating event:", error);
             return res.status(500).send({
                 success: false,
@@ -134,6 +144,7 @@ class EventController {
      * @param {Response} res - The response object.
      */
     static async deleteEvent(req, res) {
+        let activity = null;
         try {
             const { eventId } = req.params;
 
@@ -153,11 +164,16 @@ class EventController {
                 });
             }
 
+            activity = new Activity(req.user.id, "delete", "event", new ObjectId(eventId), new Date(), {success:  true});
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });;
+
             return res.status(200).send({
                 success: true,
                 message: `Event with ID ${eventId} successfully deleted.`
             });
         } catch (error) {
+            activity = new Activity(req.user.id, "delete", "event", null, new Date(), {success: false});
+            await jobQueue.add({ type: "activity", payload: activity.to_object() });;
             console.error("Error deleting event:", error);
             return res.status(500).send({
                 success: false,

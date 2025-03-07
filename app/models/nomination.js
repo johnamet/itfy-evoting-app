@@ -33,7 +33,7 @@ class NominationForm extends Basemodel {
 	static collection = "nomination_forms";
 
 	constructor(...params){
-		super(params)
+		super(...params)
 	}
 }
 
