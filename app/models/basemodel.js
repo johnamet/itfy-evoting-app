@@ -152,7 +152,7 @@ class Basemodel {
      */
     async delete() {
         return this.execute(() => {
-            return storage.delete(this.constructor.collection, { id: this.id });
+            return storage.delete(this.constructor.collection, { id: new ObjectId(this.id) });
         });
     }
 

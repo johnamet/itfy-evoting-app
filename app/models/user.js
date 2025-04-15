@@ -13,8 +13,8 @@ class User extends Basemodel {
    * @param {string} password - The hashed password of the user.
    * @param {...object} kwargs - Additional fields to pass to the base model.
    */
-  constructor(name, email, password, kwargs = {}) {
-    super(kwargs); // Initialize base model fields
+  constructor(name, email, password, ...kwargs) {
+    super(...kwargs); // Initialize base model fields
     this.name = name;
     this.email = email;
     this.password = password; // Already hashed password
@@ -29,9 +29,9 @@ class User extends Basemodel {
    * @param {...object} kwargs - Additional fields to pass to the base model.
    * @returns {Promise<User>} - A promise that resolves to a new User instance.
    */
-  static async create(name, email, password, kwargs = {}) {
+  static async create(name, email, password, ...kwargs) {
     const hashedPassword = await bcrypt.hash(password, 10);
-    return new User(name, email, hashedPassword, kwargs);
+    return new User(name, email, hashedPassword, ...kwargs);
   }
 
   /**

@@ -42,7 +42,7 @@ class AuthController {
       const payload = { userId: user.id, role, iat: Math.floor(Date.now() / 1000) };
       const accessToken = jwt.sign(payload, process.env["SECRET_KEY"], { expiresIn: "1h" });
 
-      const activity = new Activity({ userId: user.id, action: "login", timestamp: new Date() });
+      const activity = new Activity(user.id,"login",new Date(),'users', user.id, {success: true});
       await jobQueue.add({ type: "activity", payload: activity.to_object() });
 
       return res.status(200).send({ success: true, accessToken, user });

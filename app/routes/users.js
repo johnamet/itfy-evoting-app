@@ -22,5 +22,8 @@ userRouter.get('/profile/:userId', AuthController.verifyToken, UserController.my
 userRouter.delete('/:userId', AuthController.verifyToken,
     AuthController.verifyRole(['admin']),
     UserController.deleteUser);
-
+userRouter.post('/:userId/reset-password', AuthController.verifyToken,
+    UserController.resetPassword);
+userRouter.put('/:userId/password', AuthController.verifyToken,
+    UserController.changePassword);
 export default userRouter;

@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  server:
+    image: itfy-voting-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+      
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongo
+      - redis
+    environment:
+      - SECRET_KEY=3456789lkjhgf
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DB_HOST=mongo
+      - DB_PORT=27017
+      - DB_NAME=itfy_voting_app
+      - DB_USER=itfy-user
+      - DB_PASSWORD=itfy-password
+    command: ["npm", "run", "start-server"]
+
+  console:
+    image: itfy-voting-app-console
+    build:
+      context: .
+      dockerfile: Dockerfile.console
+    depends_on:
+      - mongo
+      - redis
+    environment:
+      - SECRET_KEY=3456789lkjhgf
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DB_HOST=mongo
+      - DB_PORT=27017
+      - DB_NAME=itfy_voting_app
+      - DB_USER=itfy-user
+      - DB_PASSWORD=itfy-password
+    stdin_open: true
+    tty: true
+    entrypoint: ./app/console2.py
+    command: []
+
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6380:6380"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27018:27018"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:

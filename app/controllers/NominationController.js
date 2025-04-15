@@ -99,16 +99,11 @@ class NominationController {
                 });
             }
 
-            activity = new Activity(req.user.id, 'create', 'nomination', nomination.id, new Date(), { success: true });
-            await jobQueue.add({ type: "activity", payload: activity.to_object() });
-
             return res.status(201).send({
                 success: true,
                 nomination: nomination.to_object()
             });
         } catch (error) {
-            activity = new Activity(req.user.id, 'create', 'nomination', null, new Date(), { success: true })
-            await jobQueue.add({ type: "activity", payload: activity.to_object() });
             console.error("Error creating nomination:", error);
             return res.status(500).send({
                 success: false,

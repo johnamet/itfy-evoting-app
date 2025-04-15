@@ -1,0 +1,12 @@
+node_modules
+
+.codegpt
+
+.env
+.idea
+.vscode
+uploads
+package-lock.json
+playground.js
+test.py
+evoting_env/

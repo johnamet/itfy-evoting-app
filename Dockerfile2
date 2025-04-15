@@ -1,0 +1,20 @@
+# Use an official Node.js runtime as a parent image
+FROM node:20.18.1
+ 
+# Set the working directory
+WORKDIR /usr/src/app
+
+# Copy package.json and package-lock.json
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy the rest of the application code
+COPY . .
+
+# Expose the port the app runs on
+EXPOSE 8000 27018 2017 6380 6329
+
+# Define the command to run the app
+CMD ["SECRET_KEY=3456789lkjhgf", "REDIS_PORT=6380", "DB_PORT=27018", "npm", "run", "start-server"]

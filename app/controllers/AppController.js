@@ -66,9 +66,17 @@ class AppController {
                 const entityPath = path.join(AppController.fileStoragePath, category, entityId);
                 if (!fs.existsSync(entityPath)) {
                     fs.mkdirSync(entityPath, { recursive: true });
-                }
+                }else{
+			// Delete all files in the directory
+    fs.readdirSync(entityPath).forEach((file) => {
+        const filePath = path.join(entityPath, file);
+        if (fs.lstatSync(filePath).isFile()) {
+            fs.unlinkSync(filePath);
+        }
+    });
+		}
 
-                const fileName = `${uuidv4()}_${req.file.originalname}`;
+                const fileName = `${entityId}_${req.file.originalname}`;
                 const filePath = path.join(entityPath, fileName);
 
                 fs.writeFileSync(filePath, req.file.buffer);
