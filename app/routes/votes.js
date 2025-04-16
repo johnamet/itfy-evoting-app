@@ -8,14 +8,7 @@ const voteRouter = Router();
 voteRouter.post('/', VoteController.castVote);
 
 voteRouter.get('/stats', AuthController.verifyToken, AuthController.verifyRole(['admin']),
- VoteController.getVoteStats);
-
-voteRouter.get('/summary',
- VoteController.getVoteSummary);
-
-voteRouter.get('/:candidate_id', VoteController.liveVoteUpdates);
-voteRouter.get('/raw/:candidate_id', VoteController.candidateVotes);
-
+ VoteController.voteStats);
 
 
 export default voteRouter;

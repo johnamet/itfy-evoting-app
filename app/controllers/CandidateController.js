@@ -5,7 +5,7 @@
  * It includes methods for creating, updating, deleting, and listing candidates, as well as handling bulk uploads.
  */
 
-import Candidate from "../models/candidate.js";
+import Candidate, { CandidateForm } from "../models/candidate.js";
 import Event from "../models/event.js";
 import Category from "../models/category.js";
 import { ObjectId } from "mongodb";
@@ -17,6 +17,106 @@ import jobQueue  from "../utils/engine/JobEngine.js";
 const uploadProgress = new Map(); // To track ongoing uploads and their progress
 
 class CandidateController {
+
+    /**
+     * Creates a candidate for open events
+     * * @param {Request} req - The request object containing candidate details.
+     * * @param {Response} res - The response object.
+     * 
+     */
+    static async registerCandidate(req, res) {
+        try{
+            const data= req.body;
+
+            if (!data){
+                return res.status(400).send({
+                    success: false,
+                    error: "Missing data."
+                });
+            }
+
+            const { name, event_id, category_ids } = data;
+
+            if (!name || !event_id){
+                return res.status(400).send({
+                    success: false,
+                    error: "Missing required fields: `name`, `event_id`."
+                });
+            }
+
+            // Validate event existence
+            const event = await Event.get({ id: new ObjectId(event_id) });
+
+            //check the event is an open event
+            const eventType = event.type;
+            if (!event || eventType !== "open"){
+                return res.status(404).send({
+                    success: false,
+                    error: `Event with ID ${event_id} not found or not an open event.`
+                });
+            }
+
+            // Validate categories
+            if (category_ids){
+                for (const categoryId of category_ids) {
+                    const category = await Category.get({ id: new ObjectId(categoryId) });
+                    if (!category) {
+                        return res.status(404).send({
+                            success: false,
+                            error: `Category with ID ${categoryId} not found.`
+                        });
+                    }
+                }
+            }
+
+            //check if candidate with name exists
+            const existingCandidate = await Candidate.get({name: name});
+
+            if (existingCandidate){
+                return res.status(400).send({
+                    success: false,
+                    error: `Candidate with name ${name} exists.`
+                });
+            }
+
+            // check if candidate with email exists
+            const email = data.email;
+            if (email){
+                const existingEmailCandidate = await Candidate.get({email: email});
+                if (existingEmailCandidate){
+                    return res.status(400).send({
+                        success: false,
+                        error: `Candidate with email ${email} exists.`
+                    });
+                }
+            }
+
+            delete data.category_ids;
+            delete data.event_id;
+            delete data.name;
+
+            //create candidate
+            const candidate = new Candidate(name, event_id, category_ids ? category_ids: [], data);
+            const result = await candidate.save();
+            if (!result) {
+                return res.status(500).send({
+                    success: false,
+                    error: "Failed to create candidate."
+                });
+            }
+
+            return res.status(201).send({
+                success: true,
+                candidate: candidate.to_object()
+            });
+        }catch (error) {
+            console.error("Error creating candidate:", error);
+            return res.status(500).send({
+                success: false,
+                error: error.message
+            });
+        }
+    }
     /**
      * Creates a new candidate.
      * @param {Request} req - The request object containing candidate details.
@@ -392,6 +492,8 @@ class CandidateController {
 
             candidate = Candidate.from_object(candidate);
 
+            
+
             // Validate event if updated
             if (updates.event_id) {
                 const event = await Event.get({ id: new ObjectId(updates.event_id) });
@@ -416,8 +518,19 @@ class CandidateController {
                 }
             }
 
-            // Update the candidate
             await candidate.updateInstance(updates);
+
+            // Update the candidate
+            if ("status" in Object.keys(updates)){
+                if (updates.status === "approved"){
+                    const referenceCode = Candidate.generateReferenceCode(candidate.name, candidate.event_id);
+                    candidate.reference_code = referenceCode;
+                    await candidate.updateInstance({reference_code: referenceCode});
+                    //Todo: Send email of approval
+                }else{
+                   //Todo: Send email of rejection
+                }
+            }
 
             activity = new Activity(req.user.id, 'update', 'candidate', candidate.id, new Date(), {success: true});
             jobQueue.add('activity', activity.save());
@@ -488,6 +601,125 @@ class CandidateController {
             });
         }
     }
+
+     /**
+         * Create a candidate requirement form
+         * @param {Request} req - The request object containing query parameters.
+         * @param {Response} res - The response object.
+         */
+        static async createCandidateRequirementForm(req, res) {
+            try {
+                const { eventId } = req.params;
+    
+                let result = null;
+    
+                if (!eventId) {
+                    return res.status(400).send({
+                        success: false,
+                        error: "Provide the event id"
+                    });
+                }
+    
+                const event = await Event.get({ id: new ObjectId(eventId) })
+    
+    
+                if (!event) {
+                    console.log(`Event with id: ${eventId} not found.`)
+                    return res.status(404).send({
+                        success: false,
+                        error: `Event with id: ${eventId} not found.`
+                    })
+                }
+
+                if (event.type !== "open"){
+                    return res.status(400).send({
+                        success: false,
+                        error: "Event type should be open"
+                    })
+                }
+    
+                const requirements = req.body;
+    
+                if (!requirements) {
+                    return res.status(400).send({
+                        success: false,
+                        error: "Please provide the requirements for the nomination forms."
+                    })
+                }
+    
+                let form = null;
+                form = await CandidateForm.get({ eventId: eventId })
+                if (form) {
+                    form = CandidateForm.from_object(form)
+                    await form.updateInstance(requirements)
+                    return res.status(201).send({
+                        success: true,
+                        message: "Form updated successfully",
+                        form: await CandidateForm.get({ eventId: eventId })
+                    })
+                } else {
+                    form = new CandidateForm(requirements);
+                    result = await form.save()
+                    if (result) {
+                        return res.status(200).send({
+                            success: true,
+                            message: "Form created successfully",
+                            form
+                        })
+                    }
+                }
+    
+            } catch (e) {
+                console.error(`Error creating the form ${e}`)
+                return res.status(500).send(
+                    {
+                        success: false,
+                        error: `Failed to create form due to Internal Error, Error: ${e}`
+                    }
+                )
+            }
+        }
+    
+        /**
+         * Retrieve a candidate form based on eventId and categoryId
+         * @param {Request} req - The request object containing query parameters.
+         * @param {Response} res - The response object.
+         */
+        static async getCandidateForm(req, res) {
+            try {
+                const { eventId } = req.params;
+    
+                if (!eventId) {
+                    return res.status(400).send({
+                        success: false,
+                        error: "Provide both eventId",
+                    });
+                }
+    
+                const form = await CandidateForm.get({
+                    eventId: eventId,
+                });
+    
+                if (!form) {
+                    return res.status(404).send({
+                        success: false,
+                        error: `Candidate Registration form not found for eventId: ${eventId}.`,
+                    });
+                }
+    
+                return res.status(200).send({
+                    success: true,
+                    form,
+                });
+    
+            } catch (e) {
+                console.error(`Error retrieving the nomination form: ${e}`);
+                return res.status(500).send({
+                    success: false,
+                    error: `Failed to retrieve form due to Internal Error, Error: ${e}`,
+                });
+            }
+        }
 }
 
 export default CandidateController;

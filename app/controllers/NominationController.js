@@ -32,9 +32,9 @@ class NominationController {
                 });
             }
 
-            const { candidate_email, event_id, category_id } = data;
+            const { reference_code, event_id, category_id } = data;
 
-            if (!candidate_email || !event_id || !category_id) {
+            if (!reference_code || !event_id || !category_id) {
                 return res.status(400).send({
                     success: false,
                     error: "Missing required fields: `candidate_id`, `event_id`, or `category_id`."
@@ -58,11 +58,11 @@ class NominationController {
                 });
             }
 
-            const candidate = await Candidate.get({ email: candidate_email });
+            const candidate = await Candidate.get({reference_code: reference_code });
             if (!candidate) {
                 return res.status(404).send({
                     success: false,
-                    error: `Candidate with email ${candidate_email} not found.`
+                    error: `Candidate with reference ${reference_code} not found.`
                 });
             }
 

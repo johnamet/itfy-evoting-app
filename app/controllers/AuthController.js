@@ -112,17 +112,36 @@ class AuthController {
       try {
         const { user } = req;
         if (!user || !user.role || !allowedRoles.includes(user.role.name)) {
-          return res.status(403).send({ success: false, error: "Access denied: insufficient permissions" });
+          return res.status(403).send({ success: false, error: "Access denied: invalid role" });
         }
-
-    
+  
+        const methodPermissionMap = {
+          POST: 'create',
+          GET: 'read',
+          PUT: 'update',
+          PATCH: 'update',
+          DELETE: 'delete',
+        };
+  
+        const requiredPermission = methodPermissionMap[req.method];
+  
+        if (!requiredPermission) {
+          return res.status(400).send({ success: false, error: "Invalid or unsupported HTTP method" });
+        }
+  
+        const rolePermissions = user.role.permissions || [];
+  
+        if (!rolePermissions.includes(requiredPermission)) {
+          return res.status(403).send({ success: false, error: `Access denied: missing '${requiredPermission}' permission` });
+        }
+  
         next();
       } catch (error) {
-        console.error("Role verification error:", error);
+        console.error("Role/permission verification error:", error);
         return res.status(500).send({ success: false, error: error.message });
       }
     };
-  }
+  }  
 }
 
 export default AuthController;

@@ -7,6 +7,8 @@
 
 import { cacheEngine } from "../utils/engine/CacheEngine.js";
 import Basemodel from "./basemodel.js";
+import { ObjectId } from "mongodb";
+import Event from "../models/event.js";
 
 
 class Candidate extends Basemodel {
@@ -43,6 +45,33 @@ class Candidate extends Basemodel {
     static async create(name, event_id, category_ids = [], kwargs = {}) {
         const voting_id = this.generateUniqueCode(name); // Generate and add unique voting ID
         return new this(name, event_id, category_ids, {voting_id, ...kwargs}); // Create and return the new instance
+    }
+
+    /**
+     * Generate a unique reference code for the candidate.
+     * @param {string} candidateName - The name of the candidate.
+     * @param {string} eventId - The ID of the event.
+     * @returns {string} - A unique reference code.
+     */
+
+    static async generateReferenceCode(candidateName, eventId) {
+        // Ensure the candidate's name is at least two characters long
+        if (candidateName.length < 2) {
+            throw new Error("Candidate's name must be at least two characters long");
+        }
+
+        // Get the first two letters of the candidate's name
+        const namePart = candidateName.substring(0, 2).toUpperCase();
+
+        // Get the last four characters of the event ID
+        const event = await Event.get({ id: new ObjectId(eventId) });
+        const eventPart = event.name.slice(-4).toUpperCase();
+
+       //get the count candidate of the particular event
+        const count = await Candidate.count({ event_id: eventId });
+        const countPart = (count+1).toString().padStart(3, '0'); // Pad with zeros to ensure it's 3 digits
+        // Combine the name part, event part, and the random part to form the unique code
+        return `${namePart}${eventPart}${countPart}`;
     }
 
     /**
@@ -87,4 +116,14 @@ class Candidate extends Basemodel {
     }
 }
 
+class CandidateForm extends Basemodel{
+    // Name of the MongoDB collection associated with this model
+    static collection = "candidate_forms";
+
+    constructor( ...kwargs) {
+        super(...kwargs); // Call the Basemodel constructor with additional fields
+    }
+}
+
 export default Candidate;
+export {CandidateForm};

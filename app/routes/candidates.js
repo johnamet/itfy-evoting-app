@@ -2,7 +2,9 @@ import { Router } from "express";
 import CandidateController from "../controllers/CandidateController.js";
 import AuthController from "../controllers/AuthController.js";
 
+
 const candidateRouter = Router();
+
 
 candidateRouter.post('/',AuthController.verifyToken,
     AuthController.verifyRole(["admin", "superuser"]), CandidateController.createCandidate);
