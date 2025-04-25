@@ -5,3 +5,5 @@
 2025-03-16 22:16:43,001 - ERROR - Key-value parsing failed: list index out of range
 2025-03-16 22:16:48,420 - ERROR - Key-value parsing failed: list index out of range
 2025-03-16 22:17:35,585 - ERROR - Failed to create entity: User.__init__() missing 2 required positional arguments: 'name' and 'email'
+2025-04-16 17:34:46,770 - ERROR - Failed to update role permissions: type object 'Role' has no attribute 'from_object'
+2025-04-16 17:39:22,019 - ERROR - Key-value parsing failed: list index out of range

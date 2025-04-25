@@ -69,7 +69,7 @@ class Candidate extends Basemodel {
 
        //get the count candidate of the particular event
         const count = await Candidate.count({ event_id: eventId });
-        const countPart = (count+1).toString().padStart(3, '0'); // Pad with zeros to ensure it's 3 digits
+        const countPart = (count).toString().padStart(3, '0'); // Pad with zeros to ensure it's 3 digits
         // Combine the name part, event part, and the random part to form the unique code
         return `${namePart}${eventPart}${countPart}`;
     }

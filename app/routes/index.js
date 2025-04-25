@@ -16,6 +16,8 @@ import candidateRouter from "./candidates.js";
 import activityRouter from "./activities.js";
 import appRouter from "./app.js";
 import slideRouter from "./slides.js";
+import promoRouter from "./promo.js";
+import voteBundleRouter from "./vote_bundles.js";
 
 
 
@@ -36,7 +38,8 @@ router.use('/candidates', candidateRouter);
 router.use('/app', appRouter)
 router.use('/activities', activityRouter);
 router.use('/slides', slideRouter);
-
+router.use('/promo', promoRouter)
+router.use('/bundles', voteBundleRouter);
 
 
 

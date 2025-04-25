@@ -18,8 +18,6 @@ class ActivityController{
         try{
             const activities = await Activity.all();
 
-
-
             return res.status(200).send({
                 success: true,
                 activities: activities.filter((activity) => activity.action !== 'site_visit')

@@ -521,10 +521,11 @@ class CandidateController {
             await candidate.updateInstance(updates);
 
             // Update the candidate
-            if ("status" in Object.keys(updates)){
+            if (updates.status) {
+                // If the status is updated to "approved", generate a reference code
                 if (updates.status === "approved"){
-                    const referenceCode = Candidate.generateReferenceCode(candidate.name, candidate.event_id);
-                    candidate.reference_code = referenceCode;
+                    const referenceCode = await Candidate.generateReferenceCode(candidate.name, candidate.event_id);
+                    console.log(referenceCode)
                     await candidate.updateInstance({reference_code: referenceCode});
                     //Todo: Send email of approval
                 }else{
@@ -610,6 +611,7 @@ class CandidateController {
         static async createCandidateRequirementForm(req, res) {
             try {
                 const { eventId } = req.params;
+
     
                 let result = null;
     
@@ -621,7 +623,6 @@ class CandidateController {
                 }
     
                 const event = await Event.get({ id: new ObjectId(eventId) })
-    
     
                 if (!event) {
                     console.log(`Event with id: ${eventId} not found.`)
@@ -648,7 +649,7 @@ class CandidateController {
                 }
     
                 let form = null;
-                form = await CandidateForm.get({ eventId: eventId })
+                form = await CandidateForm.get({ event_id: eventId })
                 if (form) {
                     form = CandidateForm.from_object(form)
                     await form.updateInstance(requirements)
@@ -685,7 +686,7 @@ class CandidateController {
          * @param {Request} req - The request object containing query parameters.
          * @param {Response} res - The response object.
          */
-        static async getCandidateForm(req, res) {
+        static async getCandidateRequirementForm(req, res) {
             try {
                 const { eventId } = req.params;
     
@@ -697,7 +698,7 @@ class CandidateController {
                 }
     
                 const form = await CandidateForm.get({
-                    eventId: eventId,
+                    event_id: eventId,
                 });
     
                 if (!form) {

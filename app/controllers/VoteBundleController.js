@@ -6,7 +6,7 @@
  */
 
 import VoteBundle from "../models/voteBundle.js";
-
+import { ObjectId } from "mongodb";
 class VoteBundleController {
   /**
    * Create a new vote bundle.
@@ -91,7 +91,7 @@ class VoteBundleController {
         });
       }
 
-      let bundle = await VoteBundle.get({ id });
+      let bundle = await VoteBundle.get({ id: new ObjectId(id) });
 
       if (!bundle) {
         return res.status(404).send({
@@ -106,6 +106,72 @@ class VoteBundleController {
       return res.status(200).send({
         success: true,
         bundle: bundle.to_object(),
+      });
+    } catch (e) {
+      return res.status(500).send({ success: false, error: e.message });
+    }
+  }
+
+  /**
+   * Get a specific vote bundle by ID.
+   * 
+   */
+  static async getVoteBundle(req, res) {
+    try {
+      const { id } = req.params;
+
+      if (!id) {
+        return res.status(400).send({
+          success: false,
+          error: "Missing vote bundle ID",
+        });
+      }
+
+      const bundle = await VoteBundle.get({ id: new ObjectId(id) });
+
+      if (!bundle) {
+        return res.status(404).send({
+          success: false,
+          error: "Vote bundle not found",
+        });
+      }
+
+      return res.status(200).send({
+        success: true,
+        bundle: bundle,
+      });
+    } catch (e) {
+      return res.status(500).send({ success: false, error: e.message });
+    }
+  }
+  /**
+   * Delete a vote bundle.
+   */
+  static async deleteVoteBundle(req, res) {
+    try {
+      const { id } = req.params;
+
+      if (!id) {
+        return res.status(400).send({
+          success: false,
+          error: "Missing vote bundle ID",
+        });
+      }
+
+      const bundle = await VoteBundle.get({ id });
+
+      if (!bundle) {
+        return res.status(404).send({
+          success: false,
+          error: "Vote bundle not found",
+        });
+      }
+
+      await bundle.delete();
+
+      return res.status(200).send({
+        success: true,
+        message: "Vote bundle deleted successfully",
       });
     } catch (e) {
       return res.status(500).send({ success: false, error: e.message });

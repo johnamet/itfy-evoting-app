@@ -8,6 +8,7 @@
  */
 
 import fetch from "node-fetch"; // Ensure node-fetch is installed: npm install node-fetch
+const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL;
 
 class BalanceController {
   /**
@@ -20,7 +21,6 @@ class BalanceController {
    */
   static async listTransactions(req, res) {
     try {
-      const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL;
       if (!paymentServiceUrl) {
         return res.status(500).send({
           success: false,
@@ -72,7 +72,6 @@ class BalanceController {
    */
   static async getAggregateBalance(req, res) {
     try {
-      const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL;
       if (!paymentServiceUrl) {
         return res.status(500).send({
           success: false,
@@ -138,6 +137,55 @@ class BalanceController {
       return res.status(500).send({
         success: false,
         error: e.message,
+      });
+    }
+  }
+
+  /**
+   * 
+   * @param {Request} req - The request object containing payment details.
+   * @param {Response} res - The response object.
+   */
+  static async initialisePayment(req, res) {
+    if (!paymentServiceUrl){
+      return res.status(500).send({
+        success: false,
+        error: "Payment service URL not configured",
+      });
+    }
+
+    const data = req.body;
+
+    if (!data){
+      return res.status(400).send({
+        success: false,
+        error: "Missing payment data",
+      });
+    }
+
+    const response = await fetch(`${paymentServiceUrl}/initialise-payment`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      return res.status(500).send({
+        success: false,
+        error: `Failed to initialise payment. Status: ${response.status}`,
+      });
+    }
+    const paymentResponse = await response.json();
+    if (paymentResponse.success) {
+      return res.status(200).send({
+        success: true,
+        paymentResponse,
+      });
+    } else {
+      return res.status(500).send({
+        success: false,
+        error: paymentResponse.error,
       });
     }
   }

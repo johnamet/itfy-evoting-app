@@ -64,7 +64,13 @@ class UserManagementApp(cmd.Cmd):
             return
 
         description = input("Enter role description: ")
-        role = Role(name, description)
+
+        permissions = input("Enter role permissions (comma-separated): ")
+        permissions = [perm.strip() for perm in permissions.split(",")]
+        if not permissions:
+            print("Role must have at least one permission.")
+            return
+        role = Role(name, description, permissions)
         role.save()
         print(f"Role created: {role.to_dict()}")
 

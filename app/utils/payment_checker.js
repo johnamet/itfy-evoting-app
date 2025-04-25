@@ -1,4 +1,5 @@
 import Payment from "../models/payment.js";
+import { ObjectId } from "mongodb";
 
 /**
  * Verifies payment using external service and ensures it's saved locally.
@@ -16,7 +17,7 @@ async function verifyPayment(reference_code) {
     }
 
     // 1. Fetch from external payment service
-    const response = await fetch(`${paymentServiceUrl}/verify/${reference_code}`);
+    const response = await fetch(`${paymentServiceUrl}/verify-payment/${reference_code}`);
 
     if (!response.ok) {
       throw new Error(`Payment verification failed with status: ${response.status}`);
@@ -32,10 +33,10 @@ async function verifyPayment(reference_code) {
     }
 
     const paymentData = responseBody.data;
-    const metadata = paymentData.metadata || {};
+    const metadata = paymentData.metadata;
 
     // 2. Check for existing local payment
-    let localPayment = await Payment.get({ id: reference_code });
+    let localPayment = await Payment.get({ _id: reference_code });
 
     if (!localPayment) {
       // 3. Create and save new payment
@@ -47,13 +48,12 @@ async function verifyPayment(reference_code) {
         false,
         {
           _id: reference_code,
-          customer_id: paymentData.customer?.id || null,
-          metadata: metadata,
-          currency: paymentData.currency || "NGN",
+          currency: paymentData.currency || "GHS",
           created_at: new Date(paymentData.created_at || Date.now()),
+          ...paymentData,
         }
       );
-      await localPayment.save();
+      localPayment.metadata = metadata || {};
     }
 
     return {

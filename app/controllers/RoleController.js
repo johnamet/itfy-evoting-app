@@ -6,6 +6,7 @@
  */
 
 import Role from "../models/role.js";
+import { ObjectId } from "mongodb";
 
 class RoleController {
   /**
@@ -142,7 +143,7 @@ class RoleController {
         });
       }
 
-      let role = await Role.get({ id: roleId });
+      let role = await Role.get({ id: new ObjectId(roleId) });
 
       if (!role) {
         return res.status(404).send({

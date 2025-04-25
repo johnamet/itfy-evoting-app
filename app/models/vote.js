@@ -32,7 +32,7 @@ class Vote extends Basemodel{
     constructor(candidate_id, event_id,
                 category_id, number_of_votes= 1,
                 voter_ip, bundle_id = null, ...kwargs) {
-        super(kwargs);
+        super(...kwargs);
         this.candidate_id = candidate_id;
         this.event_id = event_id;
         this.category_id = category_id;

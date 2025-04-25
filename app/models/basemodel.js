@@ -31,6 +31,7 @@ class Basemodel {
             this[key] = data[key];
         });
         this.updated_at = new Date();
+        
     }
 
     /**

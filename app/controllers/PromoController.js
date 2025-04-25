@@ -13,12 +13,14 @@ class PromoCodeController {
    */
   static async createPromoCode(req, res) {
     try {
-      const { code, discount_percent, expires_at, description } = req.body;
+      const { code, discount, expiration_date,
+         description, usage_limit,
+          applicable_bundle_ids } = req.body;
 
-      if (!code || !discount_percent || !expires_at) {
+      if (!code || !discount || !expiration_date) {
         return res.status(400).send({
           success: false,
-          error: "Missing required fields: code, discount_percent or expires_at",
+          error: "Missing required fields: code, discount or expiration date",
         });
       }
 
@@ -30,7 +32,10 @@ class PromoCodeController {
         });
       }
 
-      const promo = new PromoCode(code, discount_percent, expires_at, description);
+      const promo = new PromoCode(code, discount,
+         applicable_bundle_ids,
+        expiration_date, usage_limit, [], true,
+        {description});
       const result = await promo.save();
 
       if (!result) {
@@ -121,6 +126,37 @@ class PromoCodeController {
       return res.status(200).send({
         success: true,
         message: "Promo code deactivated",
+      });
+    } catch (e) {
+      return res.status(500).send({ success: false, error: e.message });
+    }
+  }
+
+  /**
+   * Retrieve a single promo code
+   */
+  static async getPromoCode(req, res) {
+    try {
+      const { code } = req.params;
+
+      if (!code) {
+        return res.status(400).send({
+          success: false,
+          error: "Missing promo code identifier",
+        });
+      }
+
+      const promo = await PromoCode.get({ code });
+      if (!promo) {
+        return res.status(404).send({
+          success: false,
+          error: "Promo code not found",
+        });
+      }
+
+      return res.status(200).send({
+        success: true,
+        promo: promo,
       });
     } catch (e) {
       return res.status(500).send({ success: false, error: e.message });

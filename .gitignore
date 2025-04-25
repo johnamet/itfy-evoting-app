@@ -10,3 +10,5 @@ package-lock.json
 playground.js
 test.py
 evoting_env/
+user_mgmt_app.log
+app/models/__pycache__/*

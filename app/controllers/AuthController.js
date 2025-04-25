@@ -111,6 +111,8 @@ class AuthController {
     return async (req, res, next) => {
       try {
         const { user } = req;
+
+        console.log(user);
         if (!user || !user.role || !allowedRoles.includes(user.role.name)) {
           return res.status(403).send({ success: false, error: "Access denied: invalid role" });
         }
@@ -130,6 +132,8 @@ class AuthController {
         }
   
         const rolePermissions = user.role.permissions || [];
+
+        console.log("Role Permissions:", rolePermissions);
   
         if (!rolePermissions.includes(requiredPermission)) {
           return res.status(403).send({ success: false, error: `Access denied: missing '${requiredPermission}' permission` });

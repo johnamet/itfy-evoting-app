@@ -270,6 +270,61 @@ class UserManagementApp(cmd.Cmd):
         else:
             print(f"No {entity}s found.")
 
+    def do_update_role_permissions(self, arg):
+        """
+        Update the permissions of a role.
+        Usage:
+        -------
+        update_role_permissions role_id=<role_id> permissions=perm1,perm2,perm3
+        or
+        update_role_permissions role_name=<role_name> permissions=perm1,perm2,perm3
+        """
+        if not self._require_login():
+            return
+
+        if not self.is_key_holder:
+            print("Error: Only the key-holder can update role permissions.")
+            return
+
+        if not arg:
+            print("Error: Missing parameters.")
+            self._error_usage("update_role_permissions")
+            return
+
+        # Parse key-value pairs from the arguments.
+        params = self._key_value_parser(arg)
+        role_identifier = params.get("role_id") or params.get("role_name")
+        permissions_str = params.get("permissions")
+        if not role_identifier or not permissions_str:
+            print("Error: Both role identifier and permissions are required.")
+            self._error_usage("update_role_permissions")
+            return
+
+        # Retrieve the role by id (if provided) or by name.
+        from models.role import Role  # Ensure Role is imported if not already.
+        role = Role.get({"id": role_identifier}) if params.get("role_id") else Role.get({"name": role_identifier})
+        if not role:
+            print(f"Error: Role with identifier '{role_identifier}' not found.")
+            return
+
+        # Parse permissions; assume a comma-separated string.
+        permissions = [perm.strip() for perm in permissions_str.split(",") if perm.strip()]
+        if not permissions:
+            print("Error: No valid permissions provided.")
+            self._error_usage("update_role_permissions")
+            return
+
+        try:
+            # Transform the retrieved role into a Role instance and update its permissions.
+            role_instance = Role(**role)
+            role_instance.update({"permissions": permissions})
+            print(f"Role '{role_instance.name}' updated with permissions: {', '.join(permissions)}")
+        except Exception as e:
+            print(f"Error updating role permissions: {str(e)}")
+            logging.error("Failed to update role permissions: %s", str(e))
+            self._error_usage("update_role_permissions")
+
+
 
     def do_delete(self, arg):
         """Delete an existing document or entity.

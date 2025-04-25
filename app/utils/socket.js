@@ -1,4 +1,6 @@
+let io;
 const setupSocket = (io) => {
+    io = io;
     io.on("connection", (socket) => {
       console.log("Client connected:", socket.id);
   
@@ -13,6 +15,10 @@ const setupSocket = (io) => {
       });
     });
   };
+
+
   
   export default setupSocket;
+
+  export {io};
   

@@ -23,5 +23,13 @@ candidateRouter.put('/:candidateId', AuthController.verifyToken,
 candidateRouter.delete('/:candidateId', AuthController.verifyToken,
     AuthController.verifyRole(["admin", "superuser"]),CandidateController.deleteCandidate);
 
+candidateRouter.post('/form/:eventId', AuthController.verifyToken, AuthController.verifyRole(["admin", "superuser"]),
+    CandidateController.createCandidateRequirementForm);
+
+candidateRouter.get('/form/:eventId', CandidateController.getCandidateRequirementForm);
+
+candidateRouter.post('/open-registration', CandidateController.registerCandidate);
+
+
 export default candidateRouter;
 

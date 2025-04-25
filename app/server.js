@@ -9,7 +9,7 @@ import slowDown from "express-slow-down";
 import router from "./routes/index.js";
 import setupSocket from "./utils/socket.js";
 import app from "./swagger.js";
-import "utils/promo-cleanup.js"; // Import the cron job for promo code cleanup
+import "./utils/promo-cleanup.js"; // Import the cron job for promo code cleanup
 
 const PORT = process.env.PORT || 8000;
 
