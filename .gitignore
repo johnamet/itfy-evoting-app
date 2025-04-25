@@ -12,3 +12,4 @@ test.py
 evoting_env/
 user_mgmt_app.log
 app/models/__pycache__/*
+app/controllers/__pycache__/*
