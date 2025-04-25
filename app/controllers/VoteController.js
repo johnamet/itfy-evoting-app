@@ -141,7 +141,11 @@ class VoteController {
       const vote_result = await voteEntry.save();
       if (!vote_result)
         return res.status(500).send({ success: false, error: "Vote not saved" });
-  
+
+      req.io.emit("newVote", vote);
+      req.io.emit(`voteUpdate:${candidate.id}`, vote);
+
+      console.log(`voteUpdate:${candidate.to_object().id}`)
       // 9. Update payment
       payment.redeemed = true;
       payment.redeemed_at = new Date();
@@ -269,16 +273,31 @@ class VoteController {
         total_votes,
         voter_ip,
         null,
-        { vote_bundle_ids: vote_bundle_ids.map(bundle => bundle.bundle_id) }
+        { vote_bundle_ids: vote_bundle_ids.map(bundle => bundle.bundle_id),
+        payment_reference_code: payment_reference_code,
+         }
       );
-  
+
+      const existing_vote = Vote.get({payment_reference_code: payment_reference_code})
+
+      if (existing_vote) {
+        // 9. Mark payment as redeemed
+      payment.data.redeemed = true;
+      payment.data.redeemed_at = new Date();
+      payment.data.redeemed_for = candidate.id;
+      payment.data.redeemed_by = voter_ip;
+      
+       await payment.data.save();
+        return res.status(400).send({ success: false, error: "Payment already redeemed." });
+      }
       const vote_result = await vote.save();
 
       
       if (!vote_result)
         return res.status(500).send({ success: false, error: "Vote not saved" });
 
-      // io.emit(`voteUpdate${candidate.id}`)
+      req.io.emit("newVote", vote);
+      req.io.emit(`voteUpdate:${candidate.id}`, vote);
       // 9. Mark payment as redeemed
       payment.data.redeemed = true;
       payment.data.redeemed_at = new Date();
