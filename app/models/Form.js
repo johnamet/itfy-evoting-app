@@ -3,8 +3,10 @@
  * Forms model class for the application.
  * This file defines the Forms class which extends the BaseModel class.
  */
+import BaseModel from "./BaseModel.js";
+import mongoose from "mongoose";
 
-class Forms extends BaseModel {
+class Form extends BaseModel {
      
     constructor(){
         const schemaDefinition = {
@@ -54,4 +56,4 @@ class Forms extends BaseModel {
     }
 }
 
-export default mongoose.model('Forms', Forms.getSchema());
+export default mongoose.model('Form', Form.getSchema());

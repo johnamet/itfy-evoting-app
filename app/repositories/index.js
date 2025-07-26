@@ -13,6 +13,10 @@ import VoteRepository from './VoteRepository.js';
 import EventRepository from './EventRepository.js';
 import CandidateRepository from './CandidateRepository.js';
 import CouponUsageRepository from './CouponUsageRepository.js';
+import RoleRepository from './RoleRepository.js';
+import SlideRepository from './SlideRepository.js';
+import CategoryRepository from './CategoryRepository.js';
+import ActivityRepository from './ActivityRepository.js';
 
 export {
     BaseRepository,
@@ -21,8 +25,11 @@ export {
     VoteRepository,
     EventRepository,
     CandidateRepository,
-    CouponRepository,
-    CouponUsageRepository
+    CouponUsageRepository,
+    RoleRepository,
+    SlideRepository,
+    CategoryRepository,
+    ActivityRepository
 };
 
 export default {
@@ -32,6 +39,9 @@ export default {
     VoteRepository,
     EventRepository,
     CandidateRepository,
-    CouponRepository,
-    CouponUsageRepository
+    CouponUsageRepository,
+    RoleRepository,
+    SlideRepository,
+    CategoryRepository,
+    ActivityRepository
 };

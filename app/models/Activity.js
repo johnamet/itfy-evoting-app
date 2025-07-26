@@ -4,7 +4,7 @@
  * Activity Tracker
  */
 
-import BaseModel from "./BaseModel";
+import BaseModel from "./BaseModel.js";
 import mongoose from "mongoose";
 
 class Activity extends BaseModel{
@@ -14,17 +14,17 @@ class Activity extends BaseModel{
             user: {
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'User',
-                required: true
+                required: false // Made optional to support anonymous site visits
             },
             action: {
                 type: String,
                 required: true,
-                enum: ['create', 'update', 'delete', 'view']
+                enum: ['create', 'update', 'delete', 'view', 'site_visit']
             },
             targetType: {
                 type: String,
                 required: true,
-                enum: ['user', 'candidate', 'event', 'vote']
+                enum: ['user', 'candidate', 'event', 'vote', 'site']
             },
             targetId: {
                 type: mongoose.Schema.Types.ObjectId,
@@ -33,6 +33,39 @@ class Activity extends BaseModel{
             timestamp: {
                 type: Date,
                 default: Date.now
+            },
+            siteVisits: {
+                date: String,
+                totalVisits: {
+                    type: Number,
+                    default: 0
+                },
+                pages: {
+                    type: Map,
+                    of: Number,
+                    default: {}
+                },
+                hourly: {
+                    type: Map,
+                    of: Number,
+                    default: {}
+                },
+                users: [{
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: 'User'
+                }],
+                anonymousVisits: {
+                    type: Number,
+                    default: 0
+                },
+                lastUpdated: {
+                    type: Date,
+                    default: Date.now
+                },
+                metadata: [{
+                    type: mongoose.Schema.Types.Mixed,
+                    default: []
+                }]
             }
         }
 
@@ -42,8 +75,13 @@ class Activity extends BaseModel{
     getSchema(){
         const schema = super.getSchema();
         schema.index({ user: 1, timestamp: -1 });
+        schema.index({ action: 1, targetType: 1 });
+        schema.index({ action: 1, 'siteVisits.date': 1 }); // For site visit queries
+        schema.index({ targetType: 1, targetId: 1 });
+        schema.index({ timestamp: -1 }); // For recent activities
         return schema;
     }
 }
 
 export default mongoose.model('Activity', Activity.getSchema());
+

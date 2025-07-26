@@ -17,7 +17,8 @@ class Candidate extends BaseModel {
             name: {
                 type: String,
                 required: true,
-                trim: true
+                trim: true,
+                index: true // Index for faster lookups
             },
             bio: {
                 type: String,
@@ -98,7 +99,8 @@ class Candidate extends BaseModel {
                 type: String,
                 required: true,
                 unique: true,
-                trim: true
+                trim: true,
+                index: true // Index for faster lookups
             }
         };
 
@@ -120,7 +122,6 @@ class Candidate extends BaseModel {
         schema.index({ event: 1 });
         schema.index({ isActive: 1 });
         schema.index({ isDeleted: 1 });
-        schema.index({ cId: 1 }, { unique: true });
 
         return schema;
     }

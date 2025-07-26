@@ -3,7 +3,7 @@
  * Vote bundle class for the application
  * 
  * */
-import BaseModel from "./BaseModel";
+import BaseModel from "./BaseModel.js";
 import mongoose from "mongoose";
 
 class VoteBundle extends BaseModel {
@@ -24,9 +24,10 @@ class VoteBundle extends BaseModel {
             type: Number,
             required: true
         },
-        coupon: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'Coupon', 
+        applicableCoupons: {
+            type: [mongoose.Schema.Types.ObjectId],
+            ref: 'Coupon',
+            default: []
         },
         popular: {
             type: Boolean,
@@ -36,12 +37,46 @@ class VoteBundle extends BaseModel {
             type: Number,
             required: true,
         },
+        currency: {
+            type: String,
+            required: true,
+            default: "GHS"
+        },
+        isActive: {
+            type: Boolean,
+            default: true
+        },
         features:{
             type: [String],
             required: true,
             default: []
-        }
+        },
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true
+        },
+        applicableEvents: {
+            type: [mongoose.Schema.Types.ObjectId],
+            ref: 'Event',
+            required: true
+        },
+        applicableCategories: {
+            type: [mongoose.Schema.Types.ObjectId],
+            ref: 'Category',
+            required: true
+        },
        }
+         super(schemaDefinition, {collection: 'voteBundles'});
+    }
+    getSchema() {
+        const schema = super.getSchema();
+
+        schema.index({name: 1});
+        schema.index({popular: 1});
+        schema.index({price: 1});
+
+        return schema;
     }
 }
 

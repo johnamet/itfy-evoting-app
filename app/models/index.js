@@ -3,7 +3,7 @@
 export { default as User } from './User';
 export { default as Coupon } from './Coupon'
 export { default as Candidate } from './Candidate'
-export { default as Form } from './Forms'
+export { default as Form } from './Form'
 export { default as Role } from './Role'
 export { default as Event } from './Event'
 export { default as Activity } from './Activity'

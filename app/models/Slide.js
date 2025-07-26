@@ -28,10 +28,15 @@ class Slide  extends BaseModel{
                 trim: true
             }
         }
+
+        super(schemaDefinition, {collection: 'slides'})
     }
 
     getSchema(){
         const schema = super.getSchema()
+        schema.index({ title: 1 }, { unique: true });
+        schema.index({ subtitle: 1 });
+        schema.index({title: "text", subtitle: "text"}, {name: "text_index"});
         return schema
     }
 }

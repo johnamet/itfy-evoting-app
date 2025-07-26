@@ -58,7 +58,7 @@ class CouponRepository extends BaseRepository {
             }
 
             // Check expiration date
-            if (coupon.expiresAt && new Date() > coupon.expiresAt) {
+            if (coupon.expiryDate && new Date() > coupon.expiryDate) {
                 return {
                     isValid: false,
                     error: 'Coupon has expired',
@@ -134,12 +134,12 @@ class CouponRepository extends BaseRepository {
             // Calculate discount
             let discountAmount = 0;
             if (coupon.discountType === 'percentage') {
-                discountAmount = (orderAmount * coupon.discountValue) / 100;
+                discountAmount = (orderAmount * coupon.discount) / 100;
                 if (coupon.maxDiscountAmount && discountAmount > coupon.maxDiscountAmount) {
                     discountAmount = coupon.maxDiscountAmount;
                 }
             } else if (coupon.discountType === 'fixed') {
-                discountAmount = Math.min(coupon.discountValue, orderAmount);
+                discountAmount = Math.min(coupon.discount, orderAmount);
             }
 
             // Record usage
@@ -192,8 +192,8 @@ class CouponRepository extends BaseRepository {
             const criteria = {
                 isActive: true,
                 $or: [
-                    { expiresAt: { $gt: new Date() } },
-                    { expiresAt: null }
+                    { expiryDate: { $gt: new Date() } },
+                    { expiryDate: null }
                 ]
             };
 
@@ -214,12 +214,12 @@ class CouponRepository extends BaseRepository {
     async getExpiredCoupons(options = {}) {
         try {
             const criteria = {
-                expiresAt: { $lt: new Date() }
+                expiryDate: { $lt: new Date() }
             };
 
             return await this.find(criteria, {
                 ...options,
-                sort: { expiresAt: -1 }
+                sort: { expiryDate: -1 }
             });
         } catch (error) {
             throw this._handleError(error, 'getExpiredCoupons');
@@ -245,7 +245,7 @@ class CouponRepository extends BaseRepository {
                 maxUses: coupon.maxUses,
                 remainingUses: coupon.maxUses ? coupon.maxUses - (coupon.usedCount || 0) : null,
                 isActive: coupon.isActive,
-                expiresAt: coupon.expiresAt,
+                expiryDate: coupon.expiryDate,
             };
         } catch (error) {
             throw this._handleError(error, 'getCouponStats');
@@ -260,7 +260,7 @@ class CouponRepository extends BaseRepository {
         try {
             const criteria = {
                 isActive: true,
-                expiresAt: { $lt: new Date() }
+                expiryDate: { $lt: new Date() }
             };
 
             return await this.updateMany(criteria, { isActive: false });

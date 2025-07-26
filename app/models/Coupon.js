@@ -3,7 +3,7 @@
  * The Coupon model for the application
  * 
  **/
-import BaseModel from "./BaseModel";
+import BaseModel from './BaseModel.js';
 import mongoose from "mongoose";
 
 class Coupon extends BaseModel {
@@ -49,7 +49,7 @@ class Coupon extends BaseModel {
                 ref: 'Category',
                 required: true
             },
-            maxUse: {
+            maxUses: {
                 type: Number,
                 default: 1,
                 validate: {
@@ -58,7 +58,7 @@ class Coupon extends BaseModel {
                     }
                 }
             },
-            useCount: {
+            usedCount: {
                 type: Number,
                 default: 0,
                 validate: {

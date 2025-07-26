@@ -16,7 +16,8 @@ class Role extends BaseModel {
                 type: String,
                 required: true,
                 unique: true,
-                trim: true
+                trim: true,
+                index: true // Index for faster lookups
             },
             level : {
                 type: Number,
@@ -29,7 +30,6 @@ class Role extends BaseModel {
 
     getSchema() {
         const schema = super.getSchema();
-        schema.index({name: 1}, {unique: true});
 
         return schema;
     }
