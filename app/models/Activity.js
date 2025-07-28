@@ -83,5 +83,5 @@ class Activity extends BaseModel{
     }
 }
 
-export default mongoose.model('Activity', Activity.getSchema());
+export default mongoose.model('Activity', new Activity().getSchema());
 

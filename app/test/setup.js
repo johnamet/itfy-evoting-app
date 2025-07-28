@@ -7,6 +7,11 @@
 
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
+import chai from 'chai';
+import sinonChai from 'chai-sinon';
+
+// Configure chai with sinon support
+chai.use(sinonChai);
 
 let mongoServer;
 

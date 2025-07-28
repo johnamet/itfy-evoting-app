@@ -56,4 +56,4 @@ class Form extends BaseModel {
     }
 }
 
-export default mongoose.model('Form', Form.getSchema());
+export default mongoose.model('Form', new Form().getSchema());

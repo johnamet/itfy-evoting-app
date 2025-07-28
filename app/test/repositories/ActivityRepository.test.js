@@ -51,14 +51,14 @@ describe('ActivityRepository', () => {
                 targetId: mockCandidate
             };
 
-            sandbox.stub(activityRepository, 'validateActivityData').resolves(true);
-            sandbox.stub(activityRepository, 'create').resolves(mockActivity);
+            const validateStub = sandbox.stub(activityRepository, 'validateActivityData').resolves(true);
+            const createStub = sandbox.stub(activityRepository, 'create').resolves(mockActivity);
 
             const result = await activityRepository.logActivity(activityData);
 
             expect(result).to.deep.equal(mockActivity);
-            expect(activityRepository.validateActivityData).to.have.been.calledWith(activityData);
-            expect(activityRepository.create).to.have.been.called;
+            expect(validateStub.calledWith(activityData)).to.be.true;
+            expect(createStub.called).to.be.true;
         });
 
         it('should add timestamp if not provided', async () => {
@@ -108,13 +108,13 @@ describe('ActivityRepository', () => {
             const result = await activityRepository.getActivitiesByUser(mockUser);
 
             expect(result).to.deep.equal(expectedActivities);
-            expect(findStub).to.have.been.calledWith(
+            expect(findStub.calledWith(
                 { user: mockUser },
                 {
                     populate: [{ path: 'user', select: 'name email' }],
                     sort: { timestamp: -1 }
                 }
-            );
+            )).to.be.true;
         });
 
         it('should handle options parameter', async () => {
@@ -123,14 +123,14 @@ describe('ActivityRepository', () => {
 
             await activityRepository.getActivitiesByUser(mockUser, options);
 
-            expect(findStub).to.have.been.calledWith(
+            expect(findStub.calledWith(
                 { user: mockUser },
                 {
                     ...options,
                     populate: [{ path: 'user', select: 'name email' }],
                     sort: { timestamp: -1 }
                 }
-            );
+            )).to.be.true;
         });
     });
 
@@ -142,7 +142,7 @@ describe('ActivityRepository', () => {
             const result = await activityRepository.getActivitiesByAction('create');
 
             expect(result).to.deep.equal(expectedActivities);
-            expect(findStub).to.have.been.calledWith(
+            expect(findStub.calledWith(
                 { action: 'create' },
                 {
                     populate: [{ path: 'user', select: 'name email' }],
@@ -160,7 +160,7 @@ describe('ActivityRepository', () => {
             const result = await activityRepository.getActivitiesByTargetType('candidate');
 
             expect(result).to.deep.equal(expectedActivities);
-            expect(findStub).to.have.been.calledWith(
+            expect(findStub.calledWith(
                 { targetType: 'candidate' },
                 {
                     populate: [{ path: 'user', select: 'name email' }],
@@ -178,7 +178,7 @@ describe('ActivityRepository', () => {
             const result = await activityRepository.getActivitiesForTarget('candidate', mockCandidate);
 
             expect(result).to.deep.equal(expectedActivities);
-            expect(findStub).to.have.been.calledWith(
+            expect(findStub.calledWith(
                 { targetType: 'candidate', targetId: mockCandidate },
                 {
                     populate: [{ path: 'user', select: 'name email' }],
@@ -198,7 +198,7 @@ describe('ActivityRepository', () => {
             const result = await activityRepository.getActivitiesByDateRange(startDate, endDate);
 
             expect(result).to.deep.equal(expectedActivities);
-            expect(findStub).to.have.been.calledWith(
+            expect(findStub.calledWith(
                 {
                     timestamp: {
                         $gte: startDate,
@@ -221,7 +221,7 @@ describe('ActivityRepository', () => {
             const result = await activityRepository.getRecentActivities();
 
             expect(result).to.deep.equal(expectedActivities);
-            expect(findStub).to.have.been.calledWith(
+            expect(findStub.calledWith(
                 {},
                 {
                     limit: 50,
@@ -238,7 +238,7 @@ describe('ActivityRepository', () => {
 
             await activityRepository.getRecentActivities(limit, filter);
 
-            expect(findStub).to.have.been.calledWith(
+            expect(findStub.calledWith(
                 filter,
                 {
                     limit: limit,
@@ -281,7 +281,7 @@ describe('ActivityRepository', () => {
                 actionBreakdown: mockActionStats,
                 targetTypeBreakdown: mockTargetTypeStats
             });
-            expect(aggregateStub).to.have.been.calledThrice;
+            expect(aggregateStub.called).to.be.trueThrice;
         });
 
         it('should handle empty statistics gracefully', async () => {
@@ -354,7 +354,7 @@ describe('ActivityRepository', () => {
                 hasPrevPage: false
             });
 
-            expect(findStub).to.have.been.calledWith(
+            expect(findStub.calledWith(
                 {},
                 {
                     skip: 0,
@@ -363,7 +363,7 @@ describe('ActivityRepository', () => {
                     sort: { timestamp: -1 }
                 }
             );
-            expect(countStub).to.have.been.calledWith({});
+            expect(countStub.calledWith({})).to.be.true;
         });
 
         it('should handle different page numbers correctly', async () => {
@@ -372,7 +372,7 @@ describe('ActivityRepository', () => {
 
             await activityRepository.getActivitiesWithPagination(3, 20);
 
-            expect(findStub).to.have.been.calledWith(
+            expect(findStub.calledWith(
                 {},
                 {
                     skip: 40, // (3-1) * 20
@@ -397,7 +397,7 @@ describe('ActivityRepository', () => {
                 deletedCount: 50,
                 deletedBefore: olderThan
             });
-            expect(deleteManyStub).to.have.been.calledWith({
+            expect(deleteManyStub.calledWith({
                 timestamp: { $lt: olderThan }
             });
         });
@@ -425,7 +425,7 @@ describe('ActivityRepository', () => {
             const result = await activityRepository.getUserActivityTimeline(mockUser, 30);
 
             expect(result).to.deep.equal(mockTimeline);
-            expect(aggregateStub).to.have.been.called;
+            expect(aggregateStub.called).to.be.true;
         });
     });
 
@@ -575,7 +575,7 @@ describe('ActivityRepository', () => {
             expect(result).to.have.property('errors');
             expect(result.successCount).to.equal(2);
             expect(result.errorCount).to.equal(0);
-            expect(logActivityStub).to.have.been.calledTwice;
+            expect(logActivityStub.called).to.be.trueTwice;
         });
 
         it('should handle mixed success and errors', async () => {
@@ -623,7 +623,7 @@ describe('ActivityRepository', () => {
             const result = await activityRepository.getMostActiveUsers(10);
 
             expect(result).to.deep.equal(mockActiveUsers);
-            expect(aggregateStub).to.have.been.called;
+            expect(aggregateStub.called).to.be.true;
         });
 
         it('should respect limit parameter', async () => {
@@ -673,8 +673,8 @@ describe('ActivityRepository', () => {
 
                 expect(result.success).to.be.true;
                 expect(result.isUpdate).to.be.false;
-                expect(findOneStub).to.have.been.called;
-                expect(createStub).to.have.been.called;
+                expect(findOneStub.called).to.be.true;
+                expect(createStub.called).to.be.true;
             });
 
             it('should update existing site visit document', async () => {
@@ -710,8 +710,8 @@ describe('ActivityRepository', () => {
 
                 expect(result.success).to.be.true;
                 expect(result.isUpdate).to.be.true;
-                expect(findOneStub).to.have.been.called;
-                expect(findOneAndUpdateStub).to.have.been.called;
+                expect(findOneStub.called).to.be.true;
+                expect(findOneAndUpdateStub.called).to.be.true;
             });
 
             it('should handle anonymous visits', async () => {
@@ -734,7 +734,7 @@ describe('ActivityRepository', () => {
 
                 expect(result.success).to.be.true;
                 expect(result.isUpdate).to.be.false;
-                expect(createStub).to.have.been.called;
+                expect(createStub.called).to.be.true;
             });
         });
 
@@ -819,7 +819,7 @@ describe('ActivityRepository', () => {
                 expect(result[10]).to.deep.equal({ hour: 10, visits: 8 });
                 expect(result[14]).to.deep.equal({ hour: 14, visits: 12 });
                 expect(result[0]).to.deep.equal({ hour: 0, visits: 0 });
-                expect(findOneStub).to.have.been.called;
+                expect(findOneStub.called).to.be.true;
             });
 
             it('should return zero pattern when no data exists', async () => {
@@ -831,7 +831,7 @@ describe('ActivityRepository', () => {
                 result.forEach((hourData, index) => {
                     expect(hourData).to.deep.equal({ hour: index, visits: 0 });
                 });
-                expect(findOneStub).to.have.been.called;
+                expect(findOneStub.called).to.be.true;
             });
 
             it('should handle specific date parameter', async () => {
@@ -869,8 +869,8 @@ describe('ActivityRepository', () => {
 
                 expect(result.cleanedDocuments).to.equal(1);
                 expect(result.maxMetadataEntries).to.equal(100);
-                expect(findStub).to.have.been.called;
-                expect(updateOneStub).to.have.been.calledOnce;
+                expect(findStub.called).to.be.true;
+                expect(updateOneStub.called).to.be.trueOnce;
             });
 
             it('should not clean documents with metadata under limit', async () => {

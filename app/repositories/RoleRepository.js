@@ -198,8 +198,7 @@ class RoleRepository extends BaseRepository {
      * @returns {Promise<Object>} Role statistics
      */
     async getRoleStatistics() {
-        try {
-=            
+        try {         
             const pipeline = [
                 {
                     $group: {
