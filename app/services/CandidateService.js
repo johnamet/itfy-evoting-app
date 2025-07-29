@@ -12,6 +12,7 @@ import EventRepository from '../repositories/EventRepository.js';
 import CategoryRepository from '../repositories/CategoryRepository.js';
 import VoteRepository from '../repositories/VoteRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
+import FileService from './FileService.js';
 
 class CandidateService extends BaseService {
     constructor() {
@@ -21,6 +22,7 @@ class CandidateService extends BaseService {
         this.categoryRepository = new CategoryRepository();
         this.voteRepository = new VoteRepository();
         this.activityRepository = new ActivityRepository();
+        this.fileService = new FileService();
     }
 
     /**
@@ -483,6 +485,377 @@ class CandidateService extends BaseService {
             throw this._handleError(error, 'bulk_create_candidates', { 
                 count: candidatesData.length 
             });
+        }
+    }
+
+    /**
+     * Move candidate to another category
+     * @param {String} candidateId - Candidate ID
+     * @param {String} newCategoryId - New category ID
+     * @param {String} movedBy - ID of user moving the candidate
+     * @returns {Promise<Object>} Move result
+     */
+    async moveCandidateToCategory(candidateId, newCategoryId, movedBy) {
+        try {
+            this._log('move_candidate_to_category', { 
+                candidateId, 
+                newCategoryId, 
+                movedBy 
+            });
+
+            this._validateObjectId(candidateId, 'Candidate ID');
+            this._validateObjectId(newCategoryId, 'New Category ID');
+            this._validateObjectId(movedBy, 'Moved By User ID');
+
+            // Get current candidate
+            const candidate = await this.candidateRepository.findById(candidateId);
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            // Check if candidate already in the target category
+            if (candidate.categories.map(cat => cat.toString()).includes(newCategoryId)) {
+                throw new Error('Candidate is already in the specified category');
+            }
+
+            // Check if candidate has any votes
+            const voteCount = await this.voteRepository.countVotesForCandidate(candidateId);
+            if (voteCount > 0) {
+                throw new Error('Cannot move candidate to another category as votes have already been cast for this candidate');
+            }
+
+            // Check if associated event allows category changes
+            const event = await this.eventRepository.findById(candidate.event);
+            if (!event) {
+                throw new Error('Associated event not found');
+            }
+
+            if (event.status === 'active') {
+                throw new Error('Cannot move candidate category in active event');
+            }
+
+            if (event.status === 'completed') {
+                throw new Error('Cannot move candidate category in completed event');
+            }
+
+            // Verify new category exists and belongs to the same event
+            const newCategory = await this.categoryRepository.findById(newCategoryId);
+            if (!newCategory) {
+                throw new Error('New category not found');
+            }
+
+            if (newCategory.event.toString() !== candidate.event.toString()) {
+                throw new Error('New category must belong to the same event');
+            }
+
+            // Get old category for logging
+            const oldCategory = await this.categoryRepository.findById(candidate.category);
+
+            // Update candidate category
+            const updatedCandidate = await this.candidateRepository.updateCandidateCategories(candidateId, newCategoryId);
+
+            // Log activity
+            await this.activityRepository.logActivity({
+                user: movedBy,
+                action: 'candidate_category_move',
+                targetType: 'candidate',
+                targetId: candidateId,
+                metadata: { 
+                    candidateName: candidate.name,
+                    eventId: candidate.event,
+                    oldCategoryId: candidate.category,
+                    oldCategoryName: oldCategory ? oldCategory.name : 'Unknown',
+                    newCategoryId: newCategoryId,
+                    newCategoryName: newCategory.name
+                }
+            });
+
+            this._log('move_candidate_to_category_success', { 
+                candidateId,
+                oldCategory: oldCategory ? oldCategory.name : 'Unknown',
+                newCategory: newCategory.name
+            });
+
+            return {
+                success: true,
+                message: 'Candidate moved to new category successfully',
+                data: {
+                    candidateId: updatedCandidate._id,
+                    candidateName: updatedCandidate.name,
+                    oldCategory: {
+                        id: candidate.category,
+                        name: oldCategory ? oldCategory.name : 'Unknown'
+                    },
+                    newCategory: {
+                        id: newCategory._id,
+                        name: newCategory.name
+                    },
+                    movedAt: updatedCandidate.updatedAt
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'move_candidate_to_category', { 
+                candidateId, 
+                newCategoryId 
+            });
+        }
+    }
+
+    /**
+     * Update candidate photo
+     * @param {String} candidateId - Candidate ID
+     * @param {Object} imageData - Image file data
+     * @param {String} updatedBy - ID of user updating the photo
+     * @returns {Promise<Object>} Update result
+     */
+    async updateCandidatePhoto(candidateId, imageData, updatedBy) {
+        try {
+            this._log('update_candidate_photo', { candidateId, updatedBy });
+
+            this._validateObjectId(candidateId, 'Candidate ID');
+            this._validateObjectId(updatedBy, 'Updated By User ID');
+
+            // Get current candidate
+            const candidate = await this.candidateRepository.findById(candidateId);
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            // Check if associated event allows updates
+            const event = await this.eventRepository.findById(candidate.event);
+            if (!event) {
+                throw new Error('Associated event not found');
+            }
+
+            if (event.status === 'completed') {
+                throw new Error('Cannot update candidate photo in completed event');
+            }
+
+            // Backup old image if it exists
+            let oldImageBackup = null;
+            if (candidate.image) {
+                try {
+                    oldImageBackup = await this.fileService.createBackup(candidate.image);
+                } catch (error) {
+                    console.warn('Failed to backup old image:', error.message);
+                }
+            }
+
+            // Upload new image
+            const uploadResult = await this.fileService.uploadCandidateImage(
+                imageData, 
+                candidateId, 
+                updatedBy
+            );
+
+            if (!uploadResult.success) {
+                throw new Error('Failed to upload image');
+            }
+
+            // Update candidate with new image path
+            const updateData = {
+                image: uploadResult.image.relativePath,
+                updatedAt: new Date()
+            };
+
+            const updatedCandidate = await this.candidateRepository.updateById(candidateId, updateData);
+
+            // Delete old image file if it exists and upload was successful
+            if (candidate.image && candidate.image !== uploadResult.image.relativePath) {
+                try {
+                    await this.fileService.deleteFile(candidate.image);
+                    console.log(`Deleted old candidate image: ${candidate.image}`);
+                } catch (error) {
+                    console.warn('Failed to delete old image:', error.message);
+                }
+            }
+
+            // Log activity
+            await this.activityRepository.logActivity({
+                user: updatedBy,
+                action: 'candidate_photo_update',
+                targetType: 'candidate',
+                targetId: candidateId,
+                metadata: { 
+                    candidateName: candidate.name,
+                    eventId: candidate.event,
+                    oldImage: candidate.image,
+                    newImage: uploadResult.image.relativePath,
+                    imageSize: uploadResult.image.size,
+                    imageMimetype: uploadResult.image.mimetype
+                }
+            });
+
+            this._log('update_candidate_photo_success', { 
+                candidateId,
+                newImagePath: uploadResult.image.relativePath
+            });
+
+            return {
+                success: true,
+                message: 'Candidate photo updated successfully',
+                data: {
+                    candidateId: updatedCandidate._id,
+                    candidateName: updatedCandidate.name,
+                    image: {
+                        path: uploadResult.image.relativePath,
+                        filename: uploadResult.image.filename,
+                        size: uploadResult.image.size,
+                        mimetype: uploadResult.image.mimetype,
+                        uploadedAt: uploadResult.image.uploadedAt
+                    },
+                    oldImageBackup: oldImageBackup ? oldImageBackup.backup : null,
+                    updatedAt: updatedCandidate.updatedAt
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'update_candidate_photo', { candidateId });
+        }
+    }
+
+    /**
+     * Remove candidate photo
+     * @param {String} candidateId - Candidate ID
+     * @param {String} updatedBy - ID of user removing the photo
+     * @returns {Promise<Object>} Removal result
+     */
+    async removeCandidatePhoto(candidateId, updatedBy) {
+        try {
+            this._log('remove_candidate_photo', { candidateId, updatedBy });
+
+            this._validateObjectId(candidateId, 'Candidate ID');
+            this._validateObjectId(updatedBy, 'Updated By User ID');
+
+            // Get current candidate
+            const candidate = await this.candidateRepository.findById(candidateId);
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            if (!candidate.image) {
+                throw new Error('Candidate has no photo to remove');
+            }
+
+            // Check if associated event allows updates
+            const event = await this.eventRepository.findById(candidate.event);
+            if (event.status === 'completed') {
+                throw new Error('Cannot remove candidate photo in completed event');
+            }
+
+            // Create backup before removal
+            let imageBackup = null;
+            try {
+                imageBackup = await this.fileService.createBackup(candidate.image);
+            } catch (error) {
+                console.warn('Failed to backup image before removal:', error.message);
+            }
+
+            // Update candidate to remove image
+            const updateData = {
+                image: null,
+                updatedAt: new Date()
+            };
+
+            const updatedCandidate = await this.candidateRepository.updateById(candidateId, updateData);
+
+            // Delete image file
+            try {
+                await this.fileService.deleteFile(candidate.image);
+                console.log(`Deleted candidate image: ${candidate.image}`);
+            } catch (error) {
+                console.warn('Failed to delete image file:', error.message);
+            }
+
+            // Log activity
+            await this.activityRepository.logActivity({
+                user: updatedBy,
+                action: 'candidate_photo_remove',
+                targetType: 'candidate',
+                targetId: candidateId,
+                metadata: { 
+                    candidateName: candidate.name,
+                    eventId: candidate.event,
+                    removedImage: candidate.image,
+                    backupCreated: !!imageBackup
+                }
+            });
+
+            this._log('remove_candidate_photo_success', { 
+                candidateId,
+                removedImagePath: candidate.image
+            });
+
+            return {
+                success: true,
+                message: 'Candidate photo removed successfully',
+                data: {
+                    candidateId: updatedCandidate._id,
+                    candidateName: updatedCandidate.name,
+                    removedImage: candidate.image,
+                    imageBackup: imageBackup ? imageBackup.backup : null,
+                    updatedAt: updatedCandidate.updatedAt
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'remove_candidate_photo', { candidateId });
+        }
+    }
+
+    /**
+     * @private
+     * Handle errors uniformly
+     * @param {Error} error - Error object
+     * @param {String} context - Context of the error (e.g., method name)
+     * @param {Object} [data] - Additional data to log
+     * @returns {Error} - Formatted error
+     */
+    _handleError(error, context, data) {
+        this._log('error', { 
+            message: error.message, 
+            stack: error.stack, 
+            context, 
+            data 
+        });
+
+        return new Error(`Error in ${context}: ${error.message}`);
+    }
+
+    /**
+     * @private
+     * Sanitize data by removing sensitive fields
+     * @param {Object} data - Data to sanitize
+     * @returns {Object} - Sanitized data
+     */
+    _sanitizeData(data) {
+        const { password, ...sanitizedData } = data;
+        return sanitizedData;
+    }
+
+    /**
+     * @private
+     * Validate required fields in an object
+     * @param {Object} obj - Object to validate
+     * @param {Array<String>} fields - Array of field names
+     * @throws {Error} - If a required field is missing
+     */
+    _validateRequiredFields(obj, fields) {
+        for (const field of fields) {
+            if (!obj[field]) {
+                throw new Error(`Missing required field: ${field}`);
+            }
+        }
+    }
+
+    /**
+     * @private
+     * Validate if a string is a valid ObjectId
+     * @param {String} id - ID to validate
+     * @param {String} [name] - Optional name for the ID (for error messages)
+     * @throws {Error} - If the ID is not valid
+     */
+    _validateObjectId(id, name) {
+        if (!id || typeof id !== 'string' || !id.match(/^[0-9a-fA-F]{24}$/)) {
+            throw new Error(`Invalid ${name || 'ID'}`);
         }
     }
 }

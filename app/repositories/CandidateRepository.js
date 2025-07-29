@@ -504,6 +504,32 @@ class CandidateRepository extends BaseRepository {
     }
 
     /**
+     * Update the candidate's categories
+     * @param {String|ObjectId} candidateId - Candidate ID
+     * @param {String|ObjectId} newCategoryId - New category ID
+     * @returns {Promise<Object|null>} Updated candidate
+     */
+    async updateCandidateCategories(candidateId, newCategoryId) {
+        try {
+           this._validateObjectId(newCategoryId, 'newCategoryId');
+
+            // Get the candidate
+            const candidate = await this.findById(candidateId);
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            // Update the categories
+            candidate.categories.add(newCategoryId);
+            await candidate.save();
+
+            return candidate;
+        } catch (error) {
+            throw this._handleError(error, 'updateCandidateCategory');
+        }
+    }
+
+    /**
      * Delete candidate (only if no votes exist)
      * @param {String|ObjectId} candidateId - Candidate ID
      * @returns {Promise<Object|null>} Deleted candidate

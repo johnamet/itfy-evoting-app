@@ -13,6 +13,12 @@ import EventService from './EventService.js';
 import VotingService from './VotingService.js';
 import CandidateService from './CandidateService.js';
 import CacheService from './CacheService.js';
+import FileService from './FileService.js';
+import CategoryService from './CategoryService.js';
+import ActivityService from './ActivityService.js';
+import CouponService from './CouponService.js';
+import FormService from './FormService.js';
+import SlideService from './SlideService.js';
 
 export {
     BaseService,
@@ -21,7 +27,13 @@ export {
     EventService,
     VotingService,
     CandidateService,
-    CacheService
+    CacheService,
+    FileService,
+    CategoryService,
+    ActivityService,
+    CouponService,
+    FormService,
+    SlideService
 };
 
 export default {
@@ -31,5 +43,11 @@ export default {
     EventService,
     VotingService,
     CandidateService,
-    CacheService
+    CacheService,
+    FileService,
+    CategoryService,
+    ActivityService,
+    CouponService,
+    FormService,
+    SlideService
 };
