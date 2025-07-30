@@ -320,7 +320,7 @@ class VotingService extends BaseService {
             throw new Error('Candidate does not belong to this event');
         }
 
-        if (candidate.category.toString() !== voteData.category) {
+        if (!candidate.categories.map(cat => cat.toString()).includes(voteData.category)) {
             throw new Error('Candidate does not belong to this category');
         }
     }

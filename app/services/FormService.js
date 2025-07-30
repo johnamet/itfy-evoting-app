@@ -603,6 +603,270 @@ class FormService extends BaseService {
             }
         }
     }
+
+    /**
+     * Get form by model type and model ID
+     * @param {String} model - Model type (e.g., 'event', 'nomination', 'registration')
+     * @param {String} modelId - ID of the specific model instance
+     * @param {Boolean} includeSubmissions - Whether to include submission data
+     * @returns {Promise<Object>} Form details for the specified model
+     */
+    async getFormByModelAndModelID(model, modelId, includeSubmissions = false) {
+        try {
+            this._log('get_form_by_model_and_modelid', { model, modelId, includeSubmissions });
+
+            // Validate inputs
+            if (!model || typeof model !== 'string') {
+                throw new Error('Model type is required and must be a string');
+            }
+            this._validateObjectId(modelId, 'Model ID');
+
+            // Check cache first
+            const cacheKey = `form:${model}:${modelId}`;
+            let form = CacheService.get(cacheKey);
+
+            if (!form) {
+                // Find form by model and modelId
+                form = await this.formsRepository.findOne({ 
+                    model: model.toLowerCase(), 
+                    modelId: modelId,
+                    isActive: true,
+                    isDeleted: false 
+                });
+
+                if (!form) {
+                    throw new Error(`No active form found for ${model} with ID ${modelId}`);
+                }
+
+                // Cache the form
+                CacheService.set(cacheKey, form, 1800000); // 30 minutes
+            }
+
+            const formData = {
+                id: form._id,
+                title: form.title,
+                description: form.description,
+                fields: form.fields,
+                status: form.status,
+                submissionCount: form.submissionCount,
+                settings: form.settings,
+                model: form.model,
+                modelId: form.modelId,
+                createdAt: form.createdAt,
+                updatedAt: form.updatedAt
+            };
+
+            // Include submissions if requested
+            if (includeSubmissions) {
+                const submissions = await this.formsRepository.getFormSubmissions(form._id);
+                formData.submissions = submissions.map(submission => ({
+                    id: submission._id,
+                    data: submission.data,
+                    submittedBy: submission.submittedBy,
+                    submittedAt: submission.submittedAt,
+                    ipAddress: submission.ipAddress
+                }));
+            }
+
+            this._log('get_form_by_model_and_modelid_success', { 
+                formId: form._id, 
+                model, 
+                modelId 
+            });
+
+            return {
+                success: true,
+                form: formData
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_form_by_model_and_modelid', { model, modelId });
+        }
+    }
+
+    /**
+     * Create a form for a specific model and model ID
+     * @param {String} model - Model type (e.g., 'event', 'nomination', 'registration')
+     * @param {String} modelId - ID of the specific model instance
+     * @param {Object} formData - Form data (title, description, fields, etc.)
+     * @param {String} createdBy - ID of user creating the form
+     * @returns {Promise<Object>} Created form
+     */
+    async createFormForModel(model, modelId, formData, createdBy) {
+        try {
+            this._log('create_form_for_model', { 
+                model, 
+                modelId, 
+                title: formData.title, 
+                createdBy 
+            });
+
+            // Validate inputs
+            if (!model || typeof model !== 'string') {
+                throw new Error('Model type is required and must be a string');
+            }
+            this._validateObjectId(modelId, 'Model ID');
+            this._validateRequiredFields(formData, ['title', 'fields']);
+            this._validateObjectId(createdBy, 'Created By User ID');
+
+            // Validate form fields
+            this._validateFormFields(formData.fields);
+
+            // Check if a form already exists for this model and modelId
+            const existingForm = await this.formsRepository.findOne({
+                model: model.toLowerCase(),
+                modelId: modelId,
+                isActive: true,
+                isDeleted: false
+            });
+
+            if (existingForm) {
+                throw new Error(`A form already exists for ${model} with ID ${modelId}`);
+            }
+
+            // Create form with model association
+            const formToCreate = {
+                ...this._sanitizeData(formData),
+                model: model.toLowerCase(),
+                modelId: modelId,
+                status: formData.status || 'draft',
+                submissionCount: 0,
+                createdBy,
+                createdAt: new Date()
+            };
+
+            const form = await this.formsRepository.create(formToCreate);
+
+            // Log activity
+            await this.activityRepository.logActivity({
+                user: createdBy,
+                action: 'form_create_for_model',
+                targetType: 'form',
+                targetId: form._id,
+                metadata: { 
+                    formTitle: form.title,
+                    model: form.model,
+                    modelId: form.modelId,
+                    fieldsCount: form.fields.length
+                }
+            });
+
+            this._log('create_form_for_model_success', { 
+                formId: form._id, 
+                model, 
+                modelId, 
+                title: form.title 
+            });
+
+            return {
+                success: true,
+                form: {
+                    id: form._id,
+                    title: form.title,
+                    description: form.description,
+                    fields: form.fields,
+                    status: form.status,
+                    submissionCount: form.submissionCount,
+                    model: form.model,
+                    modelId: form.modelId,
+                    createdAt: form.createdAt
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'create_form_for_model', { 
+                model, 
+                modelId, 
+                title: formData.title 
+            });
+        }
+    }
+
+    /**
+     * Get all forms for a specific model type
+     * @param {String} model - Model type (e.g., 'event', 'nomination', 'registration')
+     * @param {Object} query - Query parameters for filtering and pagination
+     * @returns {Promise<Object>} Paginated forms for the model type
+     */
+    async getFormsByModel(model, query = {}) {
+        try {
+            this._log('get_forms_by_model', { model, query });
+
+            // Validate input
+            if (!model || typeof model !== 'string') {
+                throw new Error('Model type is required and must be a string');
+            }
+
+            const { page, limit } = this._generatePaginationOptions(
+                query.page, 
+                query.limit, 
+                50
+            );
+
+            // Create filter based on query
+            const filter = this._createSearchFilter(query, ['title', 'description']);
+            filter.model = model.toLowerCase();
+            filter.isActive = true;
+            filter.isDeleted = false;
+
+            // Add specific filters
+            if (query.status) {
+                filter.status = query.status;
+            }
+
+            if (query.createdBy) {
+                this._validateObjectId(query.createdBy, 'Created By User ID');
+                filter.createdBy = query.createdBy;
+            }
+
+            if (query.modelId) {
+                this._validateObjectId(query.modelId, 'Model ID');
+                filter.modelId = query.modelId;
+            }
+
+            const forms = await this.formsRepository.find(filter, {
+                skip: (page - 1) * limit,
+                limit,
+                sort: { createdAt: -1 },
+                populate: [
+                    { path: 'createdBy', select: 'username email' }
+                ]
+            });
+
+            // Get total count for pagination
+            const total = await this.formsRepository.countDocuments(filter);
+
+            // Format forms
+            const formattedForms = forms.map(form => ({
+                id: form._id,
+                title: form.title,
+                description: form.description,
+                status: form.status,
+                submissionCount: form.submissionCount,
+                fieldsCount: form.fields ? form.fields.length : 0,
+                model: form.model,
+                modelId: form.modelId,
+                createdBy: form.createdBy ? {
+                    id: form.createdBy._id,
+                    username: form.createdBy.username,
+                    email: form.createdBy.email
+                } : null,
+                createdAt: form.createdAt,
+                updatedAt: form.updatedAt
+            }));
+
+            this._log('get_forms_by_model_success', { 
+                model, 
+                count: formattedForms.length, 
+                total 
+            });
+
+            return {
+                success: true,
+                data: this._formatPaginationResponse(formattedForms, total, page, limit)
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_forms_by_model', { model, query });
+        }
+    }
 }
 
 export default FormService;

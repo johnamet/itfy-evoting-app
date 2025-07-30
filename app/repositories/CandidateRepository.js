@@ -45,10 +45,10 @@ class CandidateRepository extends BaseRepository {
             return await this.find(criteria, {
                 ...options,
                 populate: [
-                    { path: 'category', select: 'name description' },
+                    { path: 'categories', select: 'name description' },
                     { path: 'event', select: 'name status' }
                 ],
-                sort: { category: 1, name: 1 }
+                sort: { name: 1 }
             });
         } catch (error) {
             throw this._handleError(error, 'findByEvent');
@@ -63,12 +63,12 @@ class CandidateRepository extends BaseRepository {
      */
     async findByCategory(categoryId, options = {}) {
         try {
-            const criteria = { category: categoryId };
+            const criteria = { categories: categoryId };
             return await this.find(criteria, {
                 ...options,
                 populate: [
                     { path: 'event', select: 'name status' },
-                    { path: 'category', select: 'name description' }
+                    { path: 'categories', select: 'name description' }
                 ],
                 sort: { name: 1 }
             });
@@ -88,7 +88,7 @@ class CandidateRepository extends BaseRepository {
         try {
             const criteria = { 
                 event: eventId,
-                category: categoryId 
+                categories: categoryId 
             };
             return await this.find(criteria, {
                 ...options,
@@ -119,7 +119,7 @@ class CandidateRepository extends BaseRepository {
                 {
                     $lookup: {
                         from: 'categories',
-                        localField: 'category',
+                        localField: 'categories',
                         foreignField: '_id',
                         as: 'categoryInfo'
                     }
@@ -135,7 +135,7 @@ class CandidateRepository extends BaseRepository {
                 {
                     $addFields: {
                         voteCount: { $size: '$votes' },
-                        category: { $arrayElemAt: ['$categoryInfo', 0] },
+                        categories: '$categoryInfo',
                         event: { $arrayElemAt: ['$eventInfo', 0] }
                     }
                 },
@@ -175,7 +175,7 @@ class CandidateRepository extends BaseRepository {
                 {
                     $lookup: {
                         from: 'categories',
-                        localField: 'category',
+                        localField: 'categories',
                         foreignField: '_id',
                         as: 'categoryInfo'
                     }
@@ -183,20 +183,27 @@ class CandidateRepository extends BaseRepository {
                 {
                     $addFields: {
                         voteCount: { $size: '$votes' },
-                        category: { $arrayElemAt: ['$categoryInfo', 0] }
+                        categories: '$categoryInfo'
+                    }
+                },
+                {
+                    $unwind: {
+                        path: '$categories',
+                        preserveNullAndEmptyArrays: false
                     }
                 },
                 {
                     $group: {
-                        _id: '$category._id',
-                        categoryName: { $first: '$category.name' },
+                        _id: '$categories._id',
+                        categoryName: { $first: '$categories.name' },
                         candidates: {
                             $push: {
                                 _id: '$_id',
                                 name: '$name',
                                 description: '$description',
                                 image: '$image',
-                                voteCount: '$voteCount'
+                                voteCount: '$voteCount',
+                                allCategories: '$categoryInfo'
                             }
                         },
                         totalVotes: { $sum: '$voteCount' }
@@ -256,11 +263,11 @@ class CandidateRepository extends BaseRepository {
     async updateCandidate(candidateId, updateData) {
         try {
             // Remove fields that shouldn't be updated directly
-            const { event, category, ...safeUpdateData } = updateData;
+            const { event, ...safeUpdateData } = updateData;
             
             return await this.updateById(candidateId, safeUpdateData, {
                 populate: [
-                    { path: 'category', select: 'name' },
+                    { path: 'categories', select: 'name' },
                     { path: 'event', select: 'name status' }
                 ]
             });
@@ -309,7 +316,7 @@ class CandidateRepository extends BaseRepository {
                 {
                     $lookup: {
                         from: 'categories',
-                        localField: 'category',
+                        localField: 'categories',
                         foreignField: '_id',
                         as: 'categoryInfo'
                     }
@@ -324,7 +331,7 @@ class CandidateRepository extends BaseRepository {
                 },
                 {
                     $addFields: {
-                        category: { $arrayElemAt: ['$categoryInfo', 0] },
+                        categories: '$categoryInfo',
                         event: { $arrayElemAt: ['$eventInfo', 0] }
                     }
                 },
@@ -355,42 +362,11 @@ class CandidateRepository extends BaseRepository {
     }
 
     /**
-     * Search candidates by name
-     * @param {String} searchTerm - Search term
-     * @param {String|ObjectId} eventId - Event ID (optional)
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Matching candidates
-     */
-    async searchByName(searchTerm, eventId = null, options = {}) {
-        try {
-            const searchRegex = new RegExp(searchTerm, 'i');
-            const criteria = {
-                name: { $regex: searchRegex }
-            };
-
-            if (eventId) {
-                criteria.event = eventId;
-            }
-
-            return await this.find(criteria, {
-                ...options,
-                populate: [
-                    { path: 'category', select: 'name' },
-                    { path: 'event', select: 'name status' }
-                ],
-                sort: { name: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'searchByName');
-        }
-    }
-
-    /**
-     * Get candidate statistics
+     * Get candidate with detailed statistics
      * @param {String|ObjectId} candidateId - Candidate ID
-     * @returns {Promise<Object>} Candidate statistics
+     * @returns {Promise<Object|null>} Candidate with detailed statistics
      */
-    async getCandidateStats(candidateId) {
+    async getCandidateWithStatistics(candidateId) {
         try {
             const pipeline = [
                 { $match: { _id: new mongoose.Types.ObjectId(candidateId) } },
@@ -404,84 +380,198 @@ class CandidateRepository extends BaseRepository {
                 },
                 {
                     $lookup: {
-                        from: 'votes',
-                        let: { eventId: '$event', categoryId: '$category' },
-                        pipeline: [
-                            {
-                                $match: {
-                                    $expr: {
-                                        $and: [
-                                            { $eq: ['$event', '$$eventId'] },
-                                            { $eq: ['$category', '$$categoryId'] }
-                                        ]
-                                    }
-                                }
-                            }
-                        ],
-                        as: 'categoryVotes'
+                        from: 'categories',
+                        localField: 'categories',
+                        foreignField: '_id',
+                        as: 'categoryInfo'
+                    }
+                },
+                {
+                    $lookup: {
+                        from: 'events',
+                        localField: 'event',
+                        foreignField: '_id',
+                        as: 'eventInfo'
                     }
                 },
                 {
                     $addFields: {
-                        voteCount: {
-                            $sum: {
-                                $map: {
-                                    input: '$votes',
-                                    as: 'vote',
-                                    in: {
-                                        $size: {
-                                            $ifNull: ['$$vote.voteBundle.votes', []]
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        totalCategoryVotes: {
-                            $sum: {
-                                $map: {
-                                    input: '$categoryVotes',
-                                    as: 'vote',
-                                    in: {
-                                        $size: {
-                                            $ifNull: ['$$vote.voteBundle.votes', []]
-                                        }
-                                    }
-                                }
+                        voteCount: { $size: '$votes' },
+                        categories: '$categoryInfo',
+                        event: { $arrayElemAt: ['$eventInfo', 0] }
+                    }
+                },
+                {
+                    $project: {
+                        categoryInfo: 0,
+                        eventInfo: 0,
+                        votes: 0
+                    }
+                }
+            ];
+
+            const [candidate] = await this.aggregate(pipeline);
+            return candidate || null;
+        } catch (error) {
+            throw this._handleError(error, 'getCandidateWithStatistics');
+        }
+    }
+
+    /**
+     * Get candidates with statistics for an event
+     * @param {String|ObjectId} eventId - Event ID
+     * @returns {Promise<Array>} Candidates with statistics grouped by category
+     */
+    async getCandidatesWithStatisticsForEvent(eventId) {
+        try {
+            const pipeline = [
+                { $match: { event: new mongoose.Types.ObjectId(eventId) } },
+                {
+                    $lookup: {
+                        from: 'votes',
+                        localField: '_id',
+                        foreignField: 'candidate',
+                        as: 'votes'
+                    }
+                },
+                {
+                    $lookup: {
+                        from: 'categories',
+                        localField: 'categories',
+                        foreignField: '_id',
+                        as: 'categoryInfo'
+                    }
+                },
+                {
+                    $addFields: {
+                        voteCount: { $size: '$votes' },
+                        categories: '$categoryInfo'
+                    }
+                },
+                {
+                    $unwind: {
+                        path: '$categories',
+                        preserveNullAndEmptyArrays: false
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$categories._id',
+                        categoryName: { $first: '$categories.name' },
+                        candidates: {
+                            $push: {
+                                _id: '$_id',
+                                name: '$name',
+                                description: '$description',
+                                image: '$image',
+                                voteCount: '$voteCount',
+                                allCategories: '$categoryInfo'
                             }
                         }
                     }
                 },
                 {
+                    $sort: { categoryName: 1 }
+                }
+            ];
+
+            return await this.aggregate(pipeline);
+        } catch (error) {
+            throw this._handleError(error, 'getCandidatesWithStatisticsForEvent');
+        }
+    }
+
+
+    /**
+     * Search candidates by name
+     * @param {String} searchTerm - Search term
+     * @param {Object} options - Search options
+     * @returns {Promise<Array>} Matching candidates
+     */
+    async searchCandidatesByName(searchTerm, options = {}) {
+        try {
+            return await this.searchByName(searchTerm, options.eventId, options);
+        } catch (error) {
+            throw this._handleError(error, 'searchCandidatesByName');
+        }
+    }
+
+    /**
+     * Search candidates by name within a specific event
+     * @param {String} searchTerm - Search term
+     * @param {String|ObjectId} eventId - Event ID
+     * @param {Object} options - Search options
+     * @returns {Promise<Array>} Matching candidates
+     */
+    async searchByName(searchTerm, eventId, options = {}) {
+        try {
+            const criteria = {
+                name: { $regex: new RegExp(searchTerm, 'i') },
+                event: eventId
+            };
+
+            return await this.find(criteria, options);
+        } catch (error) {
+            throw this._handleError(error, 'searchByName');
+        }
+    }
+
+    /**
+     * Get detailed candidate statistics
+     * @param {String|ObjectId} candidateId - Candidate ID
+     * @returns {Promise<Object>} Detailed candidate statistics
+     */
+    async getCandidateStatistics(candidateId) {
+        try {
+            const pipeline = [
+                { $match: { _id: new mongoose.Types.ObjectId(candidateId) } },
+                {
+                    $lookup: {
+                        from: 'votes',
+                        localField: '_id',
+                        foreignField: 'candidate',
+                        as: 'votes'
+                    }
+                },
+                {
+                    $lookup: {
+                        from: 'categories',
+                        localField: 'categories',
+                        foreignField: '_id',
+                        as: 'categories'
+                    }
+                },
+                {
+                    $lookup: {
+                        from: 'events',
+                        localField: 'event',
+                        foreignField: '_id',
+                        as: 'event'
+                    }
+                },
+                {
+                    $addFields: {
+                        totalVotes: { $size: '$votes' },
+                        event: { $arrayElemAt: ['$event', 0] }
+                    }
+                },
+                {
                     $project: {
                         name: 1,
-                        voteCount: 1,
-                        totalCategoryVotes: 1,
-                        percentage: {
-                            $cond: [
-                                { $eq: ['$totalCategoryVotes', 0] },
-                                0,
-                                {
-                                    $round: [
-                                        {
-                                            $multiply: [
-                                                { $divide: ['$voteCount', '$totalCategoryVotes'] },
-                                                100
-                                            ]
-                                        },
-                                        2
-                                    ]
-                                }
-                            ]
-                        },
-                        ranking: 1 // Would need additional logic to calculate ranking
+                        description: 1,
+                        image: 1,
+                        totalVotes: 1,
+                        categories: { $map: { input: '$categories', as: 'cat', in: { name: '$$cat.name', _id: '$$cat._id' } } },
+                        event: { name: '$event.name', _id: '$event._id' },
+                        createdAt: 1
                     }
                 }
             ];
 
-            const [stats] = await this.aggregate(pipeline);
-            return stats || null;
+            const [statistics] = await this.aggregate(pipeline);
+            return statistics || null;
         } catch (error) {
-            throw this._handleError(error, 'getCandidateStats');
+            throw this._handleError(error, 'getCandidateStatistics');
         }
     }
 
@@ -504,28 +594,29 @@ class CandidateRepository extends BaseRepository {
     }
 
     /**
-     * Update the candidate's categories
+     * Update the candidate's categories (not used with new multiple categories approach)
+     * @deprecated Use direct updateById method instead
      * @param {String|ObjectId} candidateId - Candidate ID
-     * @param {String|ObjectId} newCategoryId - New category ID
+     * @param {Array} categoryIds - Category IDs array
      * @returns {Promise<Object|null>} Updated candidate
      */
-    async updateCandidateCategories(candidateId, newCategoryId) {
+    async updateCandidateCategories(candidateId, categoryIds) {
         try {
-           this._validateObjectId(newCategoryId, 'newCategoryId');
-
-            // Get the candidate
-            const candidate = await this.findById(candidateId);
-            if (!candidate) {
-                throw new Error('Candidate not found');
+            if (!Array.isArray(categoryIds)) {
+                categoryIds = [categoryIds];
             }
 
-            // Update the categories
-            candidate.categories.add(newCategoryId);
-            await candidate.save();
+            // Validate each category ID
+            for (const categoryId of categoryIds) {
+                this._validateObjectId(categoryId, 'categoryId');
+            }
 
-            return candidate;
+            return await this.updateById(candidateId, { 
+                categories: categoryIds,
+                updatedAt: new Date()
+            });
         } catch (error) {
-            throw this._handleError(error, 'updateCandidateCategory');
+            throw this._handleError(error, 'updateCandidateCategories');
         }
     }
 
@@ -550,25 +641,32 @@ class CandidateRepository extends BaseRepository {
     }
 
     /**
-     * Validate unique candidate in category for event
+     * Validate unique candidate in categories for event
      * @private
      * @param {Object} candidateData - Candidate data
      */
     async _validateUniqueCandidate(candidateData) {
-        const { name, event, category } = candidateData;
+        const { name, event, categories } = candidateData;
         
-        if (!name || !event || !category) {
-            throw new Error('Name, event, and category are required');
+        if (!name || !event || !categories) {
+            throw new Error('Name, event, and categories are required');
         }
 
+        if (!Array.isArray(categories) || categories.length === 0) {
+            throw new Error('Categories must be a non-empty array');
+        }
+
+        // Check if candidate with same name exists in the same event
+        // We'll allow candidates with same name in different categories of the same event
+        // but prevent exact duplicates across all categories
         const existingCandidate = await this.findOne({
             name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
             event,
-            category
+            categories: { $in: categories }
         });
 
         if (existingCandidate) {
-            throw new Error(`Candidate "${name}" already exists in this category for this event`);
+            throw new Error(`Candidate "${name}" already exists with overlapping categories in this event`);
         }
     }
 }

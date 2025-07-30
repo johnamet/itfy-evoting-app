@@ -21,10 +21,11 @@ class BaseService {
      * @param {Error} error - The error to handle
      * @param {String} operation - The operation that failed
      * @param {Object} context - Additional context for the error
+     * @param {Boolean} useCleanMessage - If true, uses the original error message without prefix
      * @returns {Error} Formatted error
      */
-    _handleError(error, operation, context = {}) {
-        const errorMessage = `${operation} failed: ${error.message}`;
+    _handleError(error, operation, context = {}, useCleanMessage = false) {
+        const errorMessage = useCleanMessage ? error.message : `${operation} failed: ${error.message}`;
         const serviceError = new Error(errorMessage);
         
         // Preserve original error properties
@@ -56,6 +57,18 @@ class BaseService {
         });
 
         return serviceError;
+    }
+
+    /**
+     * Throw an error with clean message (for validation errors expected by tests)
+     * @param {String} message - Error message
+     * @param {String} operation - Operation context
+     * @param {Object} context - Additional context
+     * @throws {Error} Clean error message
+     */
+    _throwCleanError(message, operation, context = {}) {
+        const error = new Error(message);
+        throw this._handleError(error, operation, context, true);
     }
 
     /**

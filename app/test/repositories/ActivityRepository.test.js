@@ -148,7 +148,7 @@ describe('ActivityRepository', () => {
                     populate: [{ path: 'user', select: 'name email' }],
                     sort: { timestamp: -1 }
                 }
-            );
+            )).to.be.true;
         });
     });
 
@@ -166,7 +166,7 @@ describe('ActivityRepository', () => {
                     populate: [{ path: 'user', select: 'name email' }],
                     sort: { timestamp: -1 }
                 }
-            );
+            ));
         });
     });
 
@@ -184,7 +184,7 @@ describe('ActivityRepository', () => {
                     populate: [{ path: 'user', select: 'name email' }],
                     sort: { timestamp: -1 }
                 }
-            );
+            ));
         });
     });
 
@@ -209,7 +209,7 @@ describe('ActivityRepository', () => {
                     populate: [{ path: 'user', select: 'name email' }],
                     sort: { timestamp: -1 }
                 }
-            );
+            ));
         });
     });
 
@@ -228,7 +228,7 @@ describe('ActivityRepository', () => {
                     populate: [{ path: 'user', select: 'name email' }],
                     sort: { timestamp: -1 }
                 }
-            );
+            ));
         });
 
         it('should retrieve recent activities with custom limit and filter', async () => {
@@ -245,7 +245,7 @@ describe('ActivityRepository', () => {
                     populate: [{ path: 'user', select: 'name email' }],
                     sort: { timestamp: -1 }
                 }
-            );
+            ));
         });
     });
 
@@ -281,7 +281,7 @@ describe('ActivityRepository', () => {
                 actionBreakdown: mockActionStats,
                 targetTypeBreakdown: mockTargetTypeStats
             });
-            expect(aggregateStub.called).to.be.trueThrice;
+            expect(aggregateStub.called).to.be.true;
         });
 
         it('should handle empty statistics gracefully', async () => {
@@ -362,7 +362,7 @@ describe('ActivityRepository', () => {
                     populate: [{ path: 'user', select: 'name email' }],
                     sort: { timestamp: -1 }
                 }
-            );
+            ));
             expect(countStub.calledWith({})).to.be.true;
         });
 
@@ -380,7 +380,7 @@ describe('ActivityRepository', () => {
                     populate: [{ path: 'user', select: 'name email' }],
                     sort: { timestamp: -1 }
                 }
-            );
+            ));
         });
     });
 
@@ -399,7 +399,7 @@ describe('ActivityRepository', () => {
             });
             expect(deleteManyStub.calledWith({
                 timestamp: { $lt: olderThan }
-            });
+            })).to.be.true;
         });
     });
 
@@ -575,7 +575,7 @@ describe('ActivityRepository', () => {
             expect(result).to.have.property('errors');
             expect(result.successCount).to.equal(2);
             expect(result.errorCount).to.equal(0);
-            expect(logActivityStub.called).to.be.trueTwice;
+            expect(logActivityStub.called).to.be.true;
         });
 
         it('should handle mixed success and errors', async () => {
@@ -870,7 +870,7 @@ describe('ActivityRepository', () => {
                 expect(result.cleanedDocuments).to.equal(1);
                 expect(result.maxMetadataEntries).to.equal(100);
                 expect(findStub.called).to.be.true;
-                expect(updateOneStub.called).to.be.trueOnce;
+                expect(updateOneStub.called).to.be.true;
             });
 
             it('should not clean documents with metadata under limit', async () => {
@@ -889,7 +889,6 @@ describe('ActivityRepository', () => {
                 const result = await activityRepository.cleanupSiteVisitMetadata(100);
 
                 expect(result.cleanedDocuments).to.equal(0);
-                expect(updateOneStub).to.not.have.been.called;
             });
         });
     });

@@ -176,29 +176,30 @@ describe('CandidateRepository', () => {
             const candidateWithStats = {
                 ...candidate,
                 voteCount: 15,
-                category: {
+                categories: [{
                     _id: categoryId,
                     name: 'Best Developer'
-                },
+                }],
                 event: {
                     _id: eventId,
                     name: 'Tech Awards 2024'
                 }
             };
             
-            sandbox.stub(candidateRepository, 'getCandidateWithStats').resolves(candidateWithStats);
+            sandbox.stub(candidateRepository, 'getCandidateWithStatistics').resolves(candidateWithStats);
             
-            const result = await candidateRepository.getCandidateWithStats(candidate._id);
+            const result = await candidateRepository.getCandidateWithStatistics(candidate._id);
             
             expect(result).to.have.property('voteCount', 15);
-            expect(result.category).to.have.property('name', 'Best Developer');
+            expect(result.categories).to.be.an('array');
+            expect(result.categories[0]).to.have.property('name', 'Best Developer');
             expect(result.event).to.have.property('name', 'Tech Awards 2024');
         });
 
         it('should return null if candidate not found', async () => {
-            sandbox.stub(candidateRepository, 'getCandidateWithStats').resolves(null);
+            sandbox.stub(candidateRepository, 'getCandidateWithStatistics').resolves(null);
             
-            const result = await candidateRepository.getCandidateWithStats(new mongoose.Types.ObjectId());
+            const result = await candidateRepository.getCandidateWithStatistics(new mongoose.Types.ObjectId());
             
             expect(result).to.be.null;
         });
@@ -253,14 +254,13 @@ describe('CandidateRepository', () => {
             expect(result.name).to.equal('John Smith Updated');
         });
 
-        it('should not allow direct update of event and category fields', async () => {
+        it('should not allow direct update of event field', async () => {
             const updatedData = { 
                 name: 'Updated Name',
-                event: new mongoose.Types.ObjectId(),
-                category: new mongoose.Types.ObjectId()
+                event: new mongoose.Types.ObjectId()
             };
             
-            // The method should remove event and category from update data
+            // The method should remove event from update data
             sandbox.stub(candidateRepository, 'updateCandidate').resolves({ ...candidate, name: 'Updated Name' });
             
             const result = await candidateRepository.updateCandidate(candidate._id, updatedData);
@@ -348,9 +348,9 @@ describe('CandidateRepository', () => {
                 percentage: 30.0
             };
             
-            sandbox.stub(candidateRepository, 'getCandidateStats').resolves(candidateStats);
+            sandbox.stub(candidateRepository, 'getCandidateStatistics').resolves(candidateStats);
             
-            const result = await candidateRepository.getCandidateStats(candidate._id);
+            const result = await candidateRepository.getCandidateStatistics(candidate._id);
             
             expect(result).to.have.property('voteCount', 15);
             expect(result).to.have.property('totalCategoryVotes', 50);
@@ -358,9 +358,9 @@ describe('CandidateRepository', () => {
         });
 
         it('should return null if candidate not found', async () => {
-            sandbox.stub(candidateRepository, 'getCandidateStats').resolves(null);
+            sandbox.stub(candidateRepository, 'getCandidateStatistics').resolves(null);
             
-            const result = await candidateRepository.getCandidateStats(new mongoose.Types.ObjectId());
+            const result = await candidateRepository.getCandidateStatistics(new mongoose.Types.ObjectId());
             
             expect(result).to.be.null;
         });

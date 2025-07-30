@@ -40,10 +40,19 @@ class CandidateService extends BaseService {
             });
 
             // Validate required fields
-            this._validateRequiredFields(candidateData, ['name', 'event', 'category']);
+            this._validateRequiredFields(candidateData, ['name', 'event', 'categories']);
             this._validateObjectId(candidateData.event, 'Event ID');
-            this._validateObjectId(candidateData.category, 'Category ID');
             this._validateObjectId(createdBy, 'Created By User ID');
+            
+            // Validate categories array
+            if (!Array.isArray(candidateData.categories) || candidateData.categories.length === 0) {
+                throw new Error('Categories must be a non-empty array');
+            }
+            
+            // Validate each category ID
+            for (const categoryId of candidateData.categories) {
+                this._validateObjectId(categoryId, 'Category ID');
+            }
 
             // Check if event exists and is not completed
             const event = await this.eventRepository.findById(candidateData.event);
@@ -87,7 +96,7 @@ class CandidateService extends BaseService {
                 metadata: { 
                     candidateName: candidate.name,
                     eventId: candidate.event,
-                    categoryId: candidate.category
+                    categoryIds: candidate.categories
                 }
             });
 
@@ -104,7 +113,7 @@ class CandidateService extends BaseService {
                     bio: candidate.bio,
                     image: candidate.image,
                     event: candidate.event,
-                    category: candidate.category,
+                    categories: candidate.categories,
                     createdAt: candidate.createdAt
                 }
             };
@@ -153,12 +162,23 @@ class CandidateService extends BaseService {
                 updateData.name = updateData.name.trim();
             }
 
+            // Validate categories if being updated
+            if (updateData.categories) {
+                if (!Array.isArray(updateData.categories) || updateData.categories.length === 0) {
+                    throw new Error('Categories must be a non-empty array');
+                }
+                
+                // Validate each category ID
+                for (const categoryId of updateData.categories) {
+                    this._validateObjectId(categoryId, 'Category ID');
+                }
+            }
+
             // Sanitize update data
             const sanitizedData = this._sanitizeData(updateData);
             
             // Remove fields that shouldn't be updated
             delete sanitizedData.event;
-            delete sanitizedData.category;
             delete sanitizedData._id;
             delete sanitizedData.createdAt;
             delete sanitizedData.createdBy;
@@ -240,7 +260,7 @@ class CandidateService extends BaseService {
                 metadata: { 
                     candidateName: candidate.name,
                     eventId: candidate.event,
-                    categoryId: candidate.category
+                    categoryIds: candidate.categories
                 }
             });
 
@@ -337,6 +357,46 @@ class CandidateService extends BaseService {
             };
         } catch (error) {
             throw this._handleError(error, 'get_candidates_by_category', { categoryId });
+        }
+    }
+
+    /**
+     * Get all candidates with optional search and pagination
+     * @param {Object} query - Query parameters
+     * @returns {Promise<Object>} All candidates
+     */
+    async getCandidates(query = {}) {
+        try {
+            this._log('get_candidates', { query });
+
+            // Validate pagination parameters
+            const {page, limit } = this._generatePaginationOptions(
+                query.page,
+                query.limit,
+                50
+            );
+
+            // Create filter based on query
+            const filter = this._createSearchFilter(query);
+
+            // Get all candidates with pagination
+            const candidates = await this.candidateRepository.find(
+                filter,
+                {
+                    page,
+                    limit,
+                    sort: query.sort || { createdAt: -1 } // Default sort by creation date
+                }
+            );
+
+            const total =  await this.candidateRepository.countDocuments(filter);
+
+            return {
+                success: true,
+                data: this._formatPaginationResponse(candidates, total, page, limit),
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_candidates', { query });
         }
     }
 
@@ -442,9 +502,18 @@ class CandidateService extends BaseService {
 
             // Validate each candidate data
             for (const candidateData of candidatesData) {
-                this._validateRequiredFields(candidateData, ['name', 'event', 'category']);
+                this._validateRequiredFields(candidateData, ['name', 'event', 'categories']);
                 this._validateObjectId(candidateData.event, 'Event ID');
-                this._validateObjectId(candidateData.category, 'Category ID');
+                
+                // Validate categories array
+                if (!Array.isArray(candidateData.categories) || candidateData.categories.length === 0) {
+                    throw new Error(`Categories must be a non-empty array for candidate: ${candidateData.name}`);
+                }
+                
+                // Validate each category ID
+                for (const categoryId of candidateData.categories) {
+                    this._validateObjectId(categoryId, 'Category ID');
+                }
             }
 
             // Add creation metadata to each candidate
@@ -489,23 +558,23 @@ class CandidateService extends BaseService {
     }
 
     /**
-     * Move candidate to another category
+     * Add category to candidate
      * @param {String} candidateId - Candidate ID
-     * @param {String} newCategoryId - New category ID
-     * @param {String} movedBy - ID of user moving the candidate
-     * @returns {Promise<Object>} Move result
+     * @param {String} categoryId - Category ID to add
+     * @param {String} updatedBy - ID of user adding the category
+     * @returns {Promise<Object>} Update result
      */
-    async moveCandidateToCategory(candidateId, newCategoryId, movedBy) {
+    async addCategoryToCandidate(candidateId, categoryId, updatedBy) {
         try {
-            this._log('move_candidate_to_category', { 
+            this._log('add_category_to_candidate', { 
                 candidateId, 
-                newCategoryId, 
-                movedBy 
+                categoryId, 
+                updatedBy 
             });
 
             this._validateObjectId(candidateId, 'Candidate ID');
-            this._validateObjectId(newCategoryId, 'New Category ID');
-            this._validateObjectId(movedBy, 'Moved By User ID');
+            this._validateObjectId(categoryId, 'Category ID');
+            this._validateObjectId(updatedBy, 'Updated By User ID');
 
             // Get current candidate
             const candidate = await this.candidateRepository.findById(candidateId);
@@ -513,15 +582,15 @@ class CandidateService extends BaseService {
                 throw new Error('Candidate not found');
             }
 
-            // Check if candidate already in the target category
-            if (candidate.categories.map(cat => cat.toString()).includes(newCategoryId)) {
-                throw new Error('Candidate is already in the specified category');
+            // Check if candidate already has the category
+            if (candidate.categories.map(cat => cat.toString()).includes(categoryId)) {
+                throw new Error('Candidate already has this category');
             }
 
             // Check if candidate has any votes
             const voteCount = await this.voteRepository.countVotesForCandidate(candidateId);
             if (voteCount > 0) {
-                throw new Error('Cannot move candidate to another category as votes have already been cast for this candidate');
+                throw new Error('Cannot modify candidate categories as votes have already been cast for this candidate');
             }
 
             // Check if associated event allows category changes
@@ -531,72 +600,177 @@ class CandidateService extends BaseService {
             }
 
             if (event.status === 'active') {
-                throw new Error('Cannot move candidate category in active event');
+                throw new Error('Cannot modify candidate categories in active event');
             }
 
             if (event.status === 'completed') {
-                throw new Error('Cannot move candidate category in completed event');
+                throw new Error('Cannot modify candidate categories in completed event');
             }
 
-            // Verify new category exists and belongs to the same event
-            const newCategory = await this.categoryRepository.findById(newCategoryId);
-            if (!newCategory) {
-                throw new Error('New category not found');
+            // Verify category exists and belongs to the same event
+            const category = await this.categoryRepository.findById(categoryId);
+            if (!category) {
+                throw new Error('Category not found');
             }
 
-            if (newCategory.event.toString() !== candidate.event.toString()) {
-                throw new Error('New category must belong to the same event');
+            if (category.event.toString() !== candidate.event.toString()) {
+                throw new Error('Category must belong to the same event');
             }
 
-            // Get old category for logging
-            const oldCategory = await this.categoryRepository.findById(candidate.category);
-
-            // Update candidate category
-            const updatedCandidate = await this.candidateRepository.updateCandidateCategories(candidateId, newCategoryId);
+            // Add category to candidate
+            const updatedCategories = [...candidate.categories, categoryId];
+            const updatedCandidate = await this.candidateRepository.updateById(candidateId, {
+                categories: updatedCategories,
+                updatedAt: new Date()
+            });
 
             // Log activity
             await this.activityRepository.logActivity({
-                user: movedBy,
-                action: 'candidate_category_move',
+                user: updatedBy,
+                action: 'candidate_category_add',
                 targetType: 'candidate',
                 targetId: candidateId,
                 metadata: { 
                     candidateName: candidate.name,
                     eventId: candidate.event,
-                    oldCategoryId: candidate.category,
-                    oldCategoryName: oldCategory ? oldCategory.name : 'Unknown',
-                    newCategoryId: newCategoryId,
-                    newCategoryName: newCategory.name
+                    addedCategoryId: categoryId,
+                    addedCategoryName: category.name,
+                    totalCategories: updatedCategories.length
                 }
             });
 
-            this._log('move_candidate_to_category_success', { 
+            this._log('add_category_to_candidate_success', { 
                 candidateId,
-                oldCategory: oldCategory ? oldCategory.name : 'Unknown',
-                newCategory: newCategory.name
+                categoryAdded: category.name,
+                totalCategories: updatedCategories.length
             });
 
             return {
                 success: true,
-                message: 'Candidate moved to new category successfully',
+                message: 'Category added to candidate successfully',
                 data: {
                     candidateId: updatedCandidate._id,
                     candidateName: updatedCandidate.name,
-                    oldCategory: {
-                        id: candidate.category,
-                        name: oldCategory ? oldCategory.name : 'Unknown'
+                    addedCategory: {
+                        id: category._id,
+                        name: category.name
                     },
-                    newCategory: {
-                        id: newCategory._id,
-                        name: newCategory.name
-                    },
-                    movedAt: updatedCandidate.updatedAt
+                    totalCategories: updatedCategories.length,
+                    updatedAt: updatedCandidate.updatedAt
                 }
             };
         } catch (error) {
-            throw this._handleError(error, 'move_candidate_to_category', { 
+            throw this._handleError(error, 'add_category_to_candidate', { 
                 candidateId, 
-                newCategoryId 
+                categoryId 
+            });
+        }
+    }
+
+    /**
+     * Remove category from candidate
+     * @param {String} candidateId - Candidate ID
+     * @param {String} categoryId - Category ID to remove
+     * @param {String} updatedBy - ID of user removing the category
+     * @returns {Promise<Object>} Update result
+     */
+    async removeCategoryFromCandidate(candidateId, categoryId, updatedBy) {
+        try {
+            this._log('remove_category_from_candidate', { 
+                candidateId, 
+                categoryId, 
+                updatedBy 
+            });
+
+            this._validateObjectId(candidateId, 'Candidate ID');
+            this._validateObjectId(categoryId, 'Category ID');
+            this._validateObjectId(updatedBy, 'Updated By User ID');
+
+            // Get current candidate
+            const candidate = await this.candidateRepository.findById(candidateId);
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            // Check if candidate has the category
+            if (!candidate.categories.map(cat => cat.toString()).includes(categoryId)) {
+                throw new Error('Candidate does not have this category');
+            }
+
+            // Check if removing this category would leave candidate with no categories
+            if (candidate.categories.length <= 1) {
+                throw new Error('Cannot remove category: candidate must have at least one category');
+            }
+
+            // Check if candidate has any votes
+            const voteCount = await this.voteRepository.countVotesForCandidate(candidateId);
+            if (voteCount > 0) {
+                throw new Error('Cannot modify candidate categories as votes have already been cast for this candidate');
+            }
+
+            // Check if associated event allows category changes
+            const event = await this.eventRepository.findById(candidate.event);
+            if (!event) {
+                throw new Error('Associated event not found');
+            }
+
+            if (event.status === 'active') {
+                throw new Error('Cannot modify candidate categories in active event');
+            }
+
+            if (event.status === 'completed') {
+                throw new Error('Cannot modify candidate categories in completed event');
+            }
+
+            // Get category for logging
+            const category = await this.categoryRepository.findById(categoryId);
+
+            // Remove category from candidate
+            const updatedCategories = candidate.categories.filter(cat => cat.toString() !== categoryId);
+            const updatedCandidate = await this.candidateRepository.updateById(candidateId, {
+                categories: updatedCategories,
+                updatedAt: new Date()
+            });
+
+            // Log activity
+            await this.activityRepository.logActivity({
+                user: updatedBy,
+                action: 'candidate_category_remove',
+                targetType: 'candidate',
+                targetId: candidateId,
+                metadata: { 
+                    candidateName: candidate.name,
+                    eventId: candidate.event,
+                    removedCategoryId: categoryId,
+                    removedCategoryName: category ? category.name : 'Unknown',
+                    totalCategories: updatedCategories.length
+                }
+            });
+
+            this._log('remove_category_from_candidate_success', { 
+                candidateId,
+                categoryRemoved: category ? category.name : 'Unknown',
+                totalCategories: updatedCategories.length
+            });
+
+            return {
+                success: true,
+                message: 'Category removed from candidate successfully',
+                data: {
+                    candidateId: updatedCandidate._id,
+                    candidateName: updatedCandidate.name,
+                    removedCategory: {
+                        id: categoryId,
+                        name: category ? category.name : 'Unknown'
+                    },
+                    totalCategories: updatedCategories.length,
+                    updatedAt: updatedCandidate.updatedAt
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'remove_category_from_candidate', { 
+                candidateId, 
+                categoryId 
             });
         }
     }

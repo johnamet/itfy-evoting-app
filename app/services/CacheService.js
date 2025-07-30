@@ -328,6 +328,18 @@ class CacheService {
         eventCache.clear();
         console.log('All caches cleared');
     }
+
+    static _getMainCache() {
+        return mainCache;
+    }
+
+    static _getUserCache() {
+        return userCache;
+    }
+
+    static _getEventCache() {
+        return eventCache;
+    }
 }
 
 export default CacheService;

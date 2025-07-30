@@ -10,6 +10,7 @@ import Config from './config/config.js';
 import dbConnection from './utils/engine/db.js';
 import dbInitializer from './utils/engine/dbInitializer.js';
 import { cacheStatsMiddleware, cacheManagementMiddleware, cacheMiddleware } from './utils/engine/cacheMiddleware.js';
+import apiRoutes from './routes/index.js';
 
 const app = express()
 
@@ -22,6 +23,9 @@ app.use('/api', cacheMiddleware({
     ttl: 1800000, // 30 minutes
     condition: (req) => req.method === 'GET'
 }))
+
+// Mount API routes
+app.use('/api/v1', apiRoutes)
 
 // Cache statistics endpoint
 app.get('/cache/stats', cacheStatsMiddleware())

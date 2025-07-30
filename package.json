@@ -7,18 +7,25 @@
   "type": "module",
   "main": "app.js",
   "scripts": {
-    "start": "node ./app/app.js",
+    "start": "nodemon ./app/app.js",
     "test": "npx mocha --recursive --exit --timeout 5000 --require @babel/register ./app/test/**/*.js --reporter spec",
     "dev": "nodemon --exec babel-node --presets @babel/preset-env",
     "lint": "./node_modules/.bin/eslint ."
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.0",
     "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
     "mongodb-memory-server": "^10.1.4",
     "mongoose": "^8.16.3",
-    "validator": "^13.15.15"
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "validator": "^13.15.15",
+    "winston": "^3.17.0"
   },
   "devDependencies": {
     "@babel/cli": "^7.28.0",
@@ -30,6 +37,7 @@
     "@types/chai": "^5.2.2",
     "@types/sinon": "^17.0.4",
     "chai": "^5.2.1",
+    "chai-sinon": "^2.8.1",
     "mocha": "^11.7.1",
     "nodemon": "^3.1.10",
     "sinon": "^21.0.0"
