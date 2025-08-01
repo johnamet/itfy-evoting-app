@@ -1,0 +1,62 @@
+<div class="warning-box">
+    <h2>🚨 Admin Alert: {{alertType}}</h2>
+    <p>Dear Admin,</p>
+    <p>This is an automated notification regarding important system activity that requires your attention.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Alert Type</th>
+        <td>{{alertType}}</td>
+    </tr>
+    <tr>
+        <th>Severity</th>
+        <td>{{severity}}</td>
+    </tr>
+    <tr>
+        <th>Timestamp</th>
+        <td>{{timestamp}}</td>
+    </tr>
+    <tr>
+        <th>Source</th>
+        <td>{{source}}</td>
+    </tr>
+    {{#if affectedUser}}
+    <tr>
+        <th>Affected User</th>
+        <td>{{affectedUser}}</td>
+    </tr>
+    {{/if}}
+    {{#if eventId}}
+    <tr>
+        <th>Event ID</th>
+        <td>{{eventId}}</td>
+    </tr>
+    {{/if}}
+</table>
+
+<div class="info-box">
+    <h3>Details</h3>
+    <p>{{message}}</p>
+    
+    {{#if additionalInfo}}
+    <h4>Additional Information:</h4>
+    <pre>{{additionalInfo}}</pre>
+    {{/if}}
+</div>
+
+{{#if actionRequired}}
+<div class="warning-box">
+    <h3>⚠️ Action Required</h3>
+    <p>{{actionRequired}}</p>
+</div>
+{{/if}}
+
+<p style="text-align: center;">
+    <a href="{{adminUrl}}" class="button">View Admin Dashboard</a>
+</p>
+
+<p>This is an automated message from the {{appName}} system monitoring service.</p>
+
+<p>System Administrator<br>
+{{appName}}</p>

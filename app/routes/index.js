@@ -18,6 +18,7 @@ import formRoutes from './formRoutes.js';
 import slideRoutes from './slideRoutes.js';
 import userRoutes from './userRoutes.js';
 import votingRoutes from './votingRoutes.js';
+import paymentRoutes from './paymentRoutes.js';
 
 const router = express.Router();
 
@@ -34,6 +35,7 @@ router.use('/forms', formRoutes);
 router.use('/slides', slideRoutes);
 router.use('/users', userRoutes);
 router.use('/voting', votingRoutes);
+router.use('/payments', paymentRoutes);
 
 // Health check for API routes
 router.get('/health', (req, res) => {

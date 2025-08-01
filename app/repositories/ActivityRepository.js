@@ -468,7 +468,7 @@ class ActivityRepository extends BaseRepository {
             }
 
             // Validate action
-            const validActions = ['create', 'update', 'delete', 'view', 'site_visit'];
+            const validActions = ['create', 'update', 'delete', 'view', 'site_visit', 'end', 'cancel', 'publish', 'start'];
             if (!activityData.action || !validActions.includes(activityData.action)) {
                 errors.push(`Action must be one of: ${validActions.join(', ')}`);
             }

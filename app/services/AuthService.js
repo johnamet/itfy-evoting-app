@@ -11,12 +11,14 @@ import bcrypt from 'bcryptjs';
 import BaseService from './BaseService.js';
 import UserRepository from '../repositories/UserRepository.js';
 import RoleRepository from '../repositories/RoleRepository.js';
+import EmailService from './EmailService.js';
 
 class AuthService extends BaseService {
     constructor() {
         super();
         this.userRepository = new UserRepository();
         this.roleRepository = new RoleRepository();
+        this.emailService = new EmailService();
         this.jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
         this.jwtExpiresIn = process.env.JWT_EXPIRES_IN || '24h';
         this.refreshTokenExpiresIn = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
@@ -375,6 +377,121 @@ class AuthService extends BaseService {
             this.jwtSecret,
             { expiresIn: this.refreshTokenExpiresIn }
         );
+    }
+
+    /**
+     * Request password reset
+     * @param {String} email - User email
+     * @param {String} ipAddress - Request IP address for security
+     * @returns {Promise<Object>} Password reset result
+     */
+    async requestPasswordReset(email, ipAddress = 'Unknown') {
+        try {
+            this._log('password_reset_request', { email, ipAddress });
+
+            // Validate email
+            this._validateEmail(email);
+
+            // Find user
+            const user = await this.userRepository.findByEmail(email);
+            if (!user) {
+                // Don't reveal if email exists or not for security
+                return {
+                    success: true,
+                    message: 'If this email exists in our system, you will receive a password reset link'
+                };
+            }
+
+            // Generate reset token
+            const resetToken = this._generateSecureToken();
+            const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+
+            // Store reset token (you might want to add a password reset table/field)
+            await this.userRepository.updateUser(user._id, {
+                passwordResetToken: resetToken,
+                passwordResetExpires: expiresAt
+            });
+
+            // Send password reset email
+            try {
+                await this.emailService.sendPasswordResetEmail({
+                    name: user.name,
+                    email: user.email,
+                    ipAddress
+                }, resetToken, 30);
+                
+                this._log('password_reset_email_sent', { userId: user._id, email });
+            } catch (emailError) {
+                this._logError('password_reset_email_failed', emailError, { userId: user._id, email });
+                // Continue - don't fail the request if email fails
+            }
+
+            return {
+                success: true,
+                message: 'If this email exists in our system, you will receive a password reset link'
+            };
+        } catch (error) {
+            throw this._handleError(error, 'password_reset_request', { email });
+        }
+    }
+
+    /**
+     * Reset password using token
+     * @param {String} token - Reset token
+     * @param {String} email - User email
+     * @param {String} newPassword - New password
+     * @returns {Promise<Object>} Password reset result
+     */
+    async resetPassword(token, email, newPassword) {
+        try {
+            this._log('password_reset', { email, token: token.substring(0, 8) + '...' });
+
+            // Validate inputs
+            this._validateRequiredFields({ token, email, newPassword }, ['token', 'email', 'newPassword']);
+            this._validateEmail(email);
+            this._validatePassword(newPassword);
+
+            // Find user with valid reset token
+            const user = await this.userRepository.findOne({
+                email,
+                passwordResetToken: token,
+                passwordResetExpires: { $gt: new Date() }
+            });
+
+            if (!user) {
+                throw new Error('Invalid or expired reset token');
+            }
+
+            // Hash new password
+            const saltRounds = 12;
+            const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+            // Update password and clear reset token
+            await this.userRepository.updateUser(user._id, {
+                password: hashedPassword,
+                passwordResetToken: null,
+                passwordResetExpires: null,
+                updatedAt: new Date()
+            });
+
+            this._log('password_reset_success', { userId: user._id, email });
+
+            return {
+                success: true,
+                message: 'Password reset successfully'
+            };
+        } catch (error) {
+            throw this._handleError(error, 'password_reset', { email });
+        }
+    }
+
+    /**
+     * Generate secure random token
+     * @returns {String} Secure token
+     * @private
+     */
+    _generateSecureToken() {
+        return require('crypto').randomBytes(32).toString('hex');
     }
 
     /**

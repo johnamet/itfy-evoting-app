@@ -424,9 +424,11 @@ class BaseRepository {
      */
     _handleError(error, operation) {
         const errorMessage = `${operation} operation failed in ${this.model.modelName} repository`;
-        
+        console.error(errorMessage, error);
         if (error.name === 'ValidationError') {
-            const validationErrors = Object.values(error.errors).map(err => err.message);
+            const validationErrors = error.errors && typeof error.errors === 'object' 
+                ? Object.values(error.errors).map(err => err.message)
+                : ['Validation failed'];
             const customError = new Error(`${errorMessage}: ${validationErrors.join(', ')}`);
             customError.name = 'ValidationError';
             customError.details = validationErrors;
@@ -434,7 +436,9 @@ class BaseRepository {
         }
         
         if (error.code === 11000) {
-            const field = Object.keys(error.keyPattern)[0];
+            const field = error.keyPattern && typeof error.keyPattern === 'object' 
+                ? Object.keys(error.keyPattern)[0] 
+                : 'unknown field';
             const customError = new Error(`${errorMessage}: Duplicate value for field '${field}'`);
             customError.name = 'DuplicateError';
             customError.field = field;

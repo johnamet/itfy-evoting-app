@@ -11,6 +11,8 @@ import EventRepository from '../repositories/EventRepository.js';
 import CandidateRepository from '../repositories/CandidateRepository.js';
 import VoteRepository from '../repositories/VoteRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
+import EmailService from './EmailService.js';
+import { populate } from 'dotenv';
 
 class EventService extends BaseService {
     constructor() {
@@ -19,6 +21,8 @@ class EventService extends BaseService {
         this.candidateRepository = new CandidateRepository();
         this.voteRepository = new VoteRepository();
         this.activityRepository = new ActivityRepository();
+        this.emailService = new EmailService();
+        this.adminEmail = process.env.ADMIN_EMAIL || 'admin@itfy.com';
     }
 
     /**
@@ -53,14 +57,28 @@ class EventService extends BaseService {
 
             const event = await this.eventRepository.createEvent(eventToCreate);
 
+
             // Log activity
             await this.activityRepository.logActivity({
                 user: createdBy,
-                action: 'event_create',
+                action: 'create',
                 targetType: 'event',
                 targetId: event._id,
                 metadata: { eventName: event.name, status: event.status }
             });
+
+            // Send event creation email
+            await this.emailService.sendEventNotification(
+                { email: this.adminEmail, name: 'Admin' },
+                {
+                    id: event._id,
+                    name: event.name,
+                    description: event.description,
+                    startDate: event.startDate,
+                    endDate: event.endDate,
+                    status: event.status
+                }
+            );
 
             this._log('create_event_success', { eventId: event._id, name: event.name });
 
@@ -130,7 +148,7 @@ class EventService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: updatedBy,
-                action: 'event_update',
+                action: 'update',
                 targetType: 'event',
                 targetId: eventId,
                 metadata: { 
@@ -138,6 +156,19 @@ class EventService extends BaseService {
                     updatedFields: Object.keys(sanitizedData)
                 }
             });
+
+            // Send event update email
+            await this.emailService.sendEventNotification(
+                { email: this.adminEmail, name: 'Admin' },
+                {
+                    id: updatedEvent._id,
+                    name: updatedEvent.name,
+                    description: updatedEvent.description,
+                    startDate: updatedEvent.startDate,
+                    endDate: updatedEvent.endDate,
+                    status: updatedEvent.status
+                }
+            );
 
             this._log('update_event_success', { eventId });
 
@@ -183,13 +214,18 @@ class EventService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: startedBy,
-                action: 'event_start',
+                action: 'start',
                 targetType: 'event',
                 targetId: eventId,
                 metadata: { 
                     eventName: event.name,
                     candidatesCount: candidates.length
                 }
+            });
+
+            // Send event notification to users (in the background)
+            this._sendEventNotificationEmails(event, 'started').catch(emailError => {
+                this._logError('event_notification_email_failed', emailError, { eventId });
             });
 
             this._log('start_event_success', { eventId });
@@ -228,11 +264,23 @@ class EventService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: endedBy,
-                action: 'event_end',
+                action: 'end',
                 targetType: 'event',
                 targetId: eventId,
                 metadata: { eventName: event.name }
             });
+
+            // Send event end email
+            await this.emailService.sendEventNotification(
+                { email: this.adminEmail, name: 'Admin' },
+                {
+                    id: event._id,
+                    name: event.name,
+                    description: event.description,
+                    status: event.status,
+                    completedAt: event.completedAt
+                }
+            );
 
             this._log('end_event_success', { eventId });
 
@@ -271,7 +319,7 @@ class EventService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: cancelledBy,
-                action: 'event_cancel',
+                action: 'cancel',
                 targetType: 'event',
                 targetId: eventId,
                 metadata: { 
@@ -279,6 +327,19 @@ class EventService extends BaseService {
                     reason: reason || 'No reason provided'
                 }
             });
+
+            // Send event cancellation email
+            await this.emailService.sendEventNotification(
+                { email: this.adminEmail, name: 'Admin' },
+                {
+                    id: event._id,
+                    name: event.name,
+                    description: event.description,
+                    status: event.status,
+                    cancelledAt: event.cancelledAt,
+                    cancellationReason: event.cancellationReason
+                }
+            );
 
             this._log('cancel_event_success', { eventId });
 
@@ -397,7 +458,8 @@ class EventService extends BaseService {
                 events = await this.eventRepository.find(filter, {
                     skip: (page - 1) * limit,
                     limit,
-                    sort: { createdAt: -1 }
+                    sort: { createdAt: -1 },
+                    ...query.populate ? { populate: query.populate } : {}
                 });
             }
 
@@ -416,7 +478,8 @@ class EventService extends BaseService {
                         endDate: event.endDate,
                         status: event.status,
                         candidatesCount: candidates.length,
-                        createdAt: event.createdAt
+                        createdAt: event.createdAt,
+                        createdBy: event.createdBy,
                     };
                 })
             );
@@ -492,7 +555,7 @@ class EventService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: updatedBy,
-                action: 'event_dates_update',
+                action: 'update',
                 targetType: 'event',
                 targetId: eventId,
                 metadata: { 
@@ -517,6 +580,159 @@ class EventService extends BaseService {
             };
         } catch (error) {
             throw this._handleError(error, 'update_event_dates', { eventId });
+        }
+    }
+
+    /**
+     * Send event notification emails to all eligible users
+     * @param {Object} event - Event object
+     * @param {String} notificationType - Type of notification (started, created, reminder)
+     * @private
+     */
+    async _sendEventNotificationEmails(event, notificationType = 'created') {
+        try {
+            this._log('send_event_notifications', { eventId: event._id, type: notificationType });
+
+            // For now, we'll need to get users from UserRepository
+            // In a real implementation, you might have a subscription system
+            const UserRepository = (await import('../repositories/UserRepository.js')).default;
+            const userRepository = new UserRepository();
+            
+            // Get all active users (you might want to filter based on event eligibility)
+            const users = await userRepository.findActiveUsers({ limit: 1000 });
+            
+            if (users.length === 0) {
+                this._log('no_users_for_notification', { eventId: event._id });
+                return;
+            }
+
+            // Prepare email data
+            const eventData = {
+                id: event._id,
+                _id: event._id,
+                name: event.name,
+                title: event.name,
+                description: event.description,
+                registrationStartDate: event.registrationStartDate || event.startDate,
+                registrationEndDate: event.registrationEndDate || event.startDate,
+                votingStartDate: event.startDate,
+                votingEndDate: event.endDate,
+                entryFee: event.entryFee || 0,
+                currency: event.currency || 'GHS',
+                categories: [], // You might want to populate this from categories
+                paymentDeadline: event.registrationEndDate || event.startDate,
+                details: event.details
+            };
+
+            // Send emails in batches to avoid overwhelming the email service
+            const batchSize = 10;
+            let emailsSent = 0;
+            let emailsFailed = 0;
+
+            for (let i = 0; i < users.length; i += batchSize) {
+                const batch = users.slice(i, i + batchSize);
+                const batchPromises = batch.map(user => 
+                    this.emailService.sendEventNotification(
+                        {
+                            name: user.name,
+                            fullName: user.name,
+                            email: user.email
+                        },
+                        eventData
+                    ).then(() => {
+                        emailsSent++;
+                    }).catch(error => {
+                        emailsFailed++;
+                        this._logError('individual_event_notification_failed', error, { 
+                            userId: user._id, 
+                            email: user.email,
+                            eventId: event._id 
+                        });
+                    })
+                );
+
+                await Promise.allSettled(batchPromises);
+                
+                // Small delay between batches to respect rate limits
+                if (i + batchSize < users.length) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
+
+            this._log('event_notifications_completed', { 
+                eventId: event._id, 
+                totalUsers: users.length,
+                emailsSent,
+                emailsFailed,
+                type: notificationType 
+            });
+
+        } catch (error) {
+            this._logError('send_event_notifications_error', error, { eventId: event._id });
+        }
+    }
+
+    /**
+     * Publish an event (make it available for registration)
+     * @param {String} eventId - Event ID
+     * @param {String} publishedBy - ID of user publishing the event
+     * @returns {Promise<Object>} Publish result
+     */
+    async publishEvent(eventId, publishedBy) {
+        try {
+            this._log('publish_event', { eventId, publishedBy });
+
+            this._validateObjectId(eventId, 'Event ID');
+            this._validateObjectId(publishedBy, 'Published By User ID');
+
+            // Get current event
+            const currentEvent = await this.eventRepository.findById(eventId);
+            if (!currentEvent) {
+                throw new Error('Event not found');
+            }
+
+            if (currentEvent.status !== 'draft') {
+                throw new Error('Only draft events can be published');
+            }
+
+            // Update event status to published
+            const event = await this.eventRepository.updateById(eventId, {
+                status: 'published',
+                publishedAt: new Date(),
+                publishedBy
+            });
+
+            // Log activity
+            await this.activityRepository.logActivity({
+                user: publishedBy,
+                action: 'publish',
+                targetType: 'event',
+                targetId: eventId,
+                metadata: { 
+                    eventName: event.name,
+                    publishedAt: event.publishedAt
+                }
+            });
+
+            // Send event notification emails (async)
+            this._sendEventNotificationEmails(event, 'published').catch(emailError => {
+                this._logError('event_publish_notification_failed', emailError, { eventId });
+            });
+
+            this._log('publish_event_success', { eventId });
+
+            return {
+                success: true,
+                event: {
+                    id: event._id,
+                    name: event.name,
+                    status: event.status,
+                    publishedAt: event.publishedAt
+                },
+                message: 'Event published successfully'
+            };
+        } catch (error) {
+            throw this._handleError(error, 'publish_event', { eventId });
         }
     }
 }

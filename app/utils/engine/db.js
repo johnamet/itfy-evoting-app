@@ -143,7 +143,12 @@ class DatabaseConnection {
      */
     getConnectionStats() {
         if (!this.connection) {
-            return { connected: false, readyState: 'disconnected' };
+            return { 
+                connected: false, 
+                readyState: 'disconnected',
+                status: 'disconnected',
+                activeConnections: 0
+            };
         }
 
         const readyStates = {
@@ -156,9 +161,11 @@ class DatabaseConnection {
         return {
             connected: this.isConnected,
             readyState: readyStates[mongoose.connection.readyState],
+            status: this.isConnected ? 'Connected' : 'Disconnected',
             host: mongoose.connection.host,
             port: mongoose.connection.port,
-            name: mongoose.connection.name
+            name: mongoose.connection.name,
+            activeConnections: mongoose.connection.readyState === 1 ? 1 : 0
         };
     }
 }

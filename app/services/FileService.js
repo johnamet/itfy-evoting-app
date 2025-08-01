@@ -501,6 +501,56 @@ class FileService extends BaseService {
             throw this._handleError(error, 'create_backup', { filePath });
         }
     }
+
+    /**
+     * Get files from a specific directory
+     * @param {Object} query - Query parameters
+     * @param {String} query.type - Type of files (images, documents, etc.)
+     * @param {Number} query.limit - Number of files to return
+     * @param {Number} query.page - Page number for pagination
+     * @returns {Promise<Object>} List of files
+     */
+
+    async getFiles(query = {}) {
+        try {
+            this._log('get_files', { query });
+
+            const {page, limit} = this._generatePaginationOptions(query.page, query.limit, 100);
+
+            const { type } = query;
+            const targetPath = path.join(this.uploadPath, type || 'images');
+            const files = await fs.readdir(targetPath);
+            const fileDetails = [];
+
+            for (const file of files) {
+                const filePath = path.join(targetPath, file);
+                const stats = await fs.stat(filePath);
+
+                if (stats.isFile()) {
+                    fileDetails.push({
+                        name: file,
+                        size: stats.size,
+                        createdAt: stats.birthtime,
+                        updatedAt: stats.mtime
+                    });
+                }
+            }
+
+            // Apply pagination
+            const totalFiles = fileDetails.length;
+            const totalPages = Math.ceil(totalFiles / limit);
+            const start = (page - 1) * limit;
+            const end = start + limit;
+
+            return {
+                success: true,
+                data: this._formatPaginationResponse(fileDetails, totalFiles, page, limit),
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_files', { query });
+        }
+    }
+
 }
 
 export default FileService;

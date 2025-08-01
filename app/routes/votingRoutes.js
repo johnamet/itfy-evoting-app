@@ -23,6 +23,11 @@ const votingController = new VotingController();
 router.post('/vote', requireCreate, (req, res) => votingController.castVote(req, res));
 router.get('/history', requireRead, (req, res) => votingController.getUserVotingHistory(req, res));
 
+// Payment-based voting operations
+router.post('/initialize-payment', (req, res) => votingController.initializeVotingPayment(req, res));
+router.post('/complete-payment-vote', (req, res) => votingController.completeVotingAfterPayment(req, res));
+router.post('/estimate-cost', (req, res) => votingController.getVotingCostEstimate(req, res));
+
 // Results (public access for transparency)
 router.get('/results/event/:eventId', optionalAuth, (req, res) => votingController.getEventResults(req, res));
 router.get('/results/category/:categoryId', optionalAuth, (req, res) => votingController.getCategoryResults(req, res));

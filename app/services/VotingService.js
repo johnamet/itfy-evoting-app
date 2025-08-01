@@ -13,6 +13,7 @@ import EventRepository from '../repositories/EventRepository.js';
 import CandidateRepository from '../repositories/CandidateRepository.js';
 import UserRepository from '../repositories/UserRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
+import EmailService from './EmailService.js';
 
 class VotingService extends BaseService {
     constructor() {
@@ -23,6 +24,7 @@ class VotingService extends BaseService {
         this.candidateRepository = new CandidateRepository();
         this.userRepository = new UserRepository();
         this.activityRepository = new ActivityRepository();
+        this.emailService = new EmailService();
     }
 
     /**
@@ -78,6 +80,46 @@ class VotingService extends BaseService {
                         voteBundle: voteData.voteBundle
                     }
                 });
+
+                // Send vote confirmation email
+                try {
+                    const voter = typeof voteData.voter === 'object' ? voteData.voter : 
+                        await this.userRepository.findById(voteData.voter.id || voteData.voter);
+                    const event = await this.eventRepository.findById(voteData.event);
+                    const candidate = await this.candidateRepository.findById(voteData.candidate);
+
+                    await this.emailService.sendVoteConfirmation(
+                        {
+                            name: voter.name,
+                            fullName: voter.name,
+                            email: voter.email
+                        },
+                        {
+                            id: vote._id,
+                            _id: vote._id,
+                            createdAt: vote.votedAt,
+                            categories: [voteData.category],
+                            votes: [{ candidate: candidate.name, category: voteData.category }],
+                            hash: vote.verificationHash || vote._id.toString(),
+                            verificationHash: vote.verificationHash || vote._id.toString()
+                        },
+                        {
+                            id: event._id,
+                            _id: event._id,
+                            name: event.name,
+                            title: event.name
+                        }
+                    );
+                    
+                    this._log('vote_confirmation_email_sent', { 
+                        voteId: vote._id,
+                        userId: voter._id, 
+                        email: voter.email 
+                    });
+                } catch (emailError) {
+                    this._logError('vote_confirmation_email_failed', emailError, { voteId: vote._id });
+                    // Don't fail the vote if email fails
+                }
 
                 this._log('cast_vote_success', { 
                     voteId: vote._id,

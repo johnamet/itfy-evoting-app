@@ -1,0 +1,58 @@
+<div class="info-box">
+    <h2>🗳️ New Voting Event Available!</h2>
+    <p>Dear {{recipientName}},</p>
+    <p>A new voting event has been created and is now available for participation.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Event Name</th>
+        <td>{{eventName}}</td>
+    </tr>
+    <tr>
+        <th>Description</th>
+        <td>{{eventDescription}}</td>
+    </tr>
+    <tr>
+        <th>Registration Period</th>
+        <td>{{registrationStart}} to {{registrationEnd}}</td>
+    </tr>
+    <tr>
+        <th>Voting Period</th>
+        <td>{{votingStart}} to {{votingEnd}}</td>
+    </tr>
+    <tr>
+        <th>Entry Fee</th>
+        <td>{{currency}} {{entryFee}}</td>
+    </tr>
+    <tr>
+        <th>Categories</th>
+        <td>{{categoriesCount}} categories available</td>
+    </tr>
+</table>
+
+<div class="warning-box">
+    <h3>⏰ Important Dates</h3>
+    <ul>
+        <li><strong>Registration Deadline:</strong> {{registrationEnd}}</li>
+        <li><strong>Payment Deadline:</strong> {{paymentDeadline}}</li>
+        <li><strong>Voting Opens:</strong> {{votingStart}}</li>
+        <li><strong>Voting Closes:</strong> {{votingEnd}}</li>
+    </ul>
+</div>
+
+<p style="text-align: center;">
+    <a href="{{registrationUrl}}" class="button">Register Now</a>
+</p>
+
+{{#if eventDetails}}
+<div class="info-box">
+    <h3>Event Details</h3>
+    <p>{{eventDetails}}</p>
+</div>
+{{/if}}
+
+<p>Don't miss this opportunity to participate in the democratic process! Register early to secure your spot.</p>
+
+<p>Best regards,<br>
+{{appName}} Team</p>

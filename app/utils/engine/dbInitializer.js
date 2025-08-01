@@ -193,6 +193,14 @@ class DatabaseInitializer {
             };
         }
     }
+
+    /**
+     * Alias for initialize method
+     * @returns {Promise<void>}
+     */
+    async init() {
+        return await this.initialize();
+    }
 }
 
 // Create a singleton instance

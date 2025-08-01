@@ -10,6 +10,7 @@ import BaseService from './BaseService.js';
 import UserRepository from '../repositories/UserRepository.js';
 import RoleRepository from '../repositories/RoleRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
+import EmailService from './EmailService.js';
 
 class UserService extends BaseService {
     constructor() {
@@ -17,6 +18,7 @@ class UserService extends BaseService {
         this.userRepository = new UserRepository();
         this.roleRepository = new RoleRepository();
         this.activityRepository = new ActivityRepository();
+        this.emailService = new EmailService();
     }
 
     /**
@@ -65,6 +67,20 @@ class UserService extends BaseService {
                     targetId: user._id,
                     metadata: { userEmail: user.email, roleName: role.name }
                 });
+            }
+
+            // Send welcome email
+            try {
+                await this.emailService.sendWelcomeEmail({
+                    name: user.name,
+                    email: user.email,
+                    role: role.name,
+                    createdAt: user.createdAt
+                });
+                this._log('welcome_email_sent', { userId: user._id, email: user.email });
+            } catch (emailError) {
+                this._logError('welcome_email_failed', emailError, { userId: user._id, email: user.email });
+                // Don't throw error - user creation should succeed even if email fails
             }
 
             this._log('create_user_success', { userId: user._id, email: user.email });

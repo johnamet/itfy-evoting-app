@@ -19,6 +19,8 @@ import ActivityService from './ActivityService.js';
 import CouponService from './CouponService.js';
 import FormService from './FormService.js';
 import SlideService from './SlideService.js';
+import PaymentService from './PaymentService.js';
+import EmailService from './EmailService.js';
 
 export {
     BaseService,
@@ -33,7 +35,9 @@ export {
     ActivityService,
     CouponService,
     FormService,
-    SlideService
+    SlideService,
+    PaymentService,
+    EmailService
 };
 
 export default {
@@ -49,5 +53,7 @@ export default {
     ActivityService,
     CouponService,
     FormService,
-    SlideService
+    SlideService,
+    PaymentService,
+    EmailService
 };

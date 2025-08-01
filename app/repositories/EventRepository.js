@@ -39,7 +39,8 @@ class EventRepository extends BaseRepository {
         try {
             // Validate event dates
             this._validateEventDates(eventData);
-            
+
+
             return await this.create({
                 ...eventData,
                 status: eventData.status || 'draft'

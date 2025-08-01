@@ -138,7 +138,7 @@ class ActivityService extends BaseService {
                 limit,
                 sort: { timestamp: -1 },
                 populate: [
-                    { path: 'user', select: 'username email profile.firstName profile.lastName' }
+                    { path: 'user', select: 'name email' }
                 ]
             });
 
@@ -150,11 +150,8 @@ class ActivityService extends BaseService {
                 id: activity._id,
                 user: {
                     id: activity.user._id,
-                    username: activity.user.username,
                     email: activity.user.email,
-                    name: activity.user.profile ? 
-                        `${activity.user.profile.firstName} ${activity.user.profile.lastName}`.trim() 
-                        : activity.user.username
+                    name: activity.user.name
                 },
                 action: activity.action,
                 targetType: activity.targetType,
@@ -286,7 +283,7 @@ class ActivityService extends BaseService {
                     $project: {
                         userId: '$_id',
                         count: 1,
-                        username: { $arrayElemAt: ['$userInfo.username', 0] },
+                        name: { $arrayElemAt: ['$userInfo.name', 0] },
                         email: { $arrayElemAt: ['$userInfo.email', 0] }
                     }
                 }
@@ -313,7 +310,7 @@ class ActivityService extends BaseService {
                     })),
                     mostActiveUsers: userStats.map(stat => ({
                         userId: stat.userId,
-                        username: stat.username,
+                        name: stat.name,
                         email: stat.email,
                         activityCount: stat.count
                     }))

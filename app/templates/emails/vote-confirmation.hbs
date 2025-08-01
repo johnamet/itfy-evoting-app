@@ -1,0 +1,54 @@
+<div class="success-box">
+    <h2>✅ Vote Successfully Cast!</h2>
+    <p>Dear {{voterName}},</p>
+    <p>Thank you for participating in our democratic process. Your vote has been successfully recorded and verified.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Vote ID</th>
+        <td>{{voteId}}</td>
+    </tr>
+    <tr>
+        <th>Event</th>
+        <td>{{eventName}}</td>
+    </tr>
+    <tr>
+        <th>Categories Voted</th>
+        <td>{{categoriesCount}}</td>
+    </tr>
+    <tr>
+        <th>Vote Date & Time</th>
+        <td>{{voteDate}}</td>
+    </tr>
+    <tr>
+        <th>Verification Hash</th>
+        <td><code>{{verificationHash}}</code></td>
+    </tr>
+</table>
+
+<div class="info-box">
+    <h3>Important Information</h3>
+    <ul>
+        <li>Your vote is completely anonymous and secure</li>
+        <li>Keep the verification hash above for your records</li>
+        <li>You cannot change your vote once submitted</li>
+        <li>Results will be announced after the voting period ends</li>
+    </ul>
+</div>
+
+{{#if hasReceipt}}
+<p style="text-align: center;">
+    <a href="{{receiptUrl}}" class="button">Download Vote Receipt</a>
+</p>
+{{/if}}
+
+<div class="warning-box">
+    <h3>🔒 Security Notice</h3>
+    <p>For security reasons, please do not share your verification hash with anyone. This hash is unique to your vote and helps ensure the integrity of the voting process.</p>
+</div>
+
+<p>Thank you for making your voice heard in this important election!</p>
+
+<p>Best regards,<br>
+{{appName}} Team</p>
