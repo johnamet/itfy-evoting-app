@@ -2,8 +2,8 @@
 /**
  * Voting Service
  * 
- * Core voting business logic including vote casting, validation,
- * vote bundle management, and voting eligibility checks.
+ * Core voting business logic including vote initiation, payment integration,
+ * vote casting, and eligibility checks.
  */
 
 import BaseService from './BaseService.js';
@@ -14,6 +14,7 @@ import CandidateRepository from '../repositories/CandidateRepository.js';
 import UserRepository from '../repositories/UserRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import EmailService from './EmailService.js';
+import PaymentService from './PaymentService.js';
 
 class VotingService extends BaseService {
     constructor() {
@@ -25,263 +26,318 @@ class VotingService extends BaseService {
         this.userRepository = new UserRepository();
         this.activityRepository = new ActivityRepository();
         this.emailService = new EmailService();
+        this.paymentService = new PaymentService();
     }
 
     /**
-     * Cast a vote for a candidate
-     * @param {Object} voteData - Vote data
-     * @returns {Promise<Object>} Vote result
+     * Initiate a vote and trigger payment
      */
-    async castVote(voteData) {
+    async initiateVote(voteData) {
         return await this._withTransaction(async (session) => {
             try {
-                this._log('cast_vote', { 
-                    voter: voteData.voter?.id, 
-                    candidate: voteData.candidate,
-                    event: voteData.event 
+                this._log('initiate_vote', {
+                    email: voteData.email,
+                    eventId: voteData.eventId,
+                    candidateId: voteData.candidateId
                 });
 
                 // Validate vote data
                 await this._validateVoteData(voteData);
 
-                // Check voting eligibility
-                await this._checkVotingEligibility(voteData);
-
-                // Check if user already voted in this category
-                const existingVote = await this.voteRepository.findExistingVote(
-                    voteData.voter.id,
-                    voteData.event,
-                    voteData.category
-                );
-
-                if (existingVote) {
-                    throw new Error('You have already voted in this category');
+                // Check event status
+                const eventStatus = await this.eventRepository.checkVotingStatus(voteData.eventId);
+                if (!eventStatus.canVote) {
+                    throw new Error(eventStatus.reason);
                 }
 
-                // Validate vote bundle usage
-                await this._validateVoteBundleUsage(voteData);
+                // Validate bundles
+                const bundleCalculation = await this._calculateBundleCosts(
+                    voteData.bundles,
+                    voteData.eventId,
+                    voteData.categoryId
+                );
 
-                // Cast the vote
-                const vote = await this.voteRepository.castVote({
-                    ...voteData,
-                    votedAt: new Date(),
-                    ipAddress: voteData.ipAddress || 'unknown'
-                });
+                // Prepare payment data
+                const paymentData = {
+                    email: voteData.email,
+                    bundles: voteData.bundles,
+                    coupons: voteData.coupons,
+                    eventId: voteData.eventId,
+                    categoryId: voteData.categoryId,
+                    candidateId: voteData.candidateId,
+                    callback_url: voteData.callback_url,
+                    voterIp: voteData.voterIp
+                };
+
+                // Initialize payment
+                const paymentResult = await this.paymentService.initializePayment(paymentData, { session });
+
+                // Store vote intent
+                const voteIntent = {
+                    email: voteData.email,
+                    candidateId: voteData.candidateId,
+                    eventId: voteData.eventId,
+                    categoryId: voteData.categoryId,
+                    paymentReference: paymentResult.data.reference,
+                    totalVotes: bundleCalculation.totalVotes,
+                    createdAt: new Date()
+                };
 
                 // Log activity
                 await this.activityRepository.logActivity({
-                    user: voteData.voter.id,
-                    action: 'vote_cast',
+                    user: null,
+                    action: 'vote_intent',
                     targetType: 'candidate',
-                    targetId: voteData.candidate,
+                    targetId: voteData.candidateId,
                     metadata: {
-                        event: voteData.event,
-                        category: voteData.category,
-                        voteBundle: voteData.voteBundle
+                        event: voteData.eventId,
+                        category: voteData.categoryId,
+                        paymentReference: paymentResult.data.reference
                     }
-                });
-
-                // Send vote confirmation email
-                try {
-                    const voter = typeof voteData.voter === 'object' ? voteData.voter : 
-                        await this.userRepository.findById(voteData.voter.id || voteData.voter);
-                    const event = await this.eventRepository.findById(voteData.event);
-                    const candidate = await this.candidateRepository.findById(voteData.candidate);
-
-                    await this.emailService.sendVoteConfirmation(
-                        {
-                            name: voter.name,
-                            fullName: voter.name,
-                            email: voter.email
-                        },
-                        {
-                            id: vote._id,
-                            _id: vote._id,
-                            createdAt: vote.votedAt,
-                            categories: [voteData.category],
-                            votes: [{ candidate: candidate.name, category: voteData.category }],
-                            hash: vote.verificationHash || vote._id.toString(),
-                            verificationHash: vote.verificationHash || vote._id.toString()
-                        },
-                        {
-                            id: event._id,
-                            _id: event._id,
-                            name: event.name,
-                            title: event.name
-                        }
-                    );
-                    
-                    this._log('vote_confirmation_email_sent', { 
-                        voteId: vote._id,
-                        userId: voter._id, 
-                        email: voter.email 
-                    });
-                } catch (emailError) {
-                    this._logError('vote_confirmation_email_failed', emailError, { voteId: vote._id });
-                    // Don't fail the vote if email fails
-                }
-
-                this._log('cast_vote_success', { 
-                    voteId: vote._id,
-                    voter: voteData.voter.id,
-                    candidate: voteData.candidate 
-                });
+                }, { session });
 
                 return {
                     success: true,
-                    vote: {
-                        id: vote._id,
-                        candidate: vote.candidate,
-                        event: vote.event,
-                        category: vote.category,
-                        votedAt: vote.votedAt
-                    },
-                    message: 'Vote cast successfully'
+                    data: {
+                        ...paymentResult.data,
+                        voteIntent
+                    }
                 };
+
             } catch (error) {
-                throw this._handleError(error, 'cast_vote', voteData);
+                throw this._handleError(error, 'initiate_vote', voteData);
             }
         });
     }
 
     /**
-     * Get election results for an event
-     * @param {String} eventId - Event ID
-     * @param {Object} options - Query options
-     * @returns {Promise<Object>} Election results
+     * Complete vote after payment verification
      */
-    async getElectionResults(eventId, options = {}) {
+    async completeVote(reference, candidateId, voterIp) {
+        return await this._withTransaction(async (session) => {
+            try {
+                this._log('complete_vote', { reference, candidateId });
+
+                // Verify payment
+                const paymentResult = await this.paymentService.verifyPayment(reference);
+                if (!paymentResult.verified) {
+                    throw new Error('Payment not verified');
+                }
+
+                const payment = paymentResult.data.payment;
+
+                // Cast vote
+                const vote = await this.voteRepository.castVote({
+                    voter: { email: payment.voter.email },
+                    candidate: candidateId,
+                    event: payment.event,
+                    category: payment.category,
+                    voteBundles: payment.voteBundles,
+                    ipAddress: voterIp
+                }, { session });
+
+                // Update payment
+                await this.paymentRepository.decrementVotes(payment._id, 1, { session });
+
+                // Log activity
+                await this.activityRepository.logActivity({
+                    user: null,
+                    action: 'vote_cast',
+                    targetType: 'candidate',
+                    targetId: candidateId,
+                    metadata: {
+                        event: payment.event,
+                        category: payment.category,
+                        paymentReference: reference
+                    }
+                }, { session });
+
+                // Send vote confirmation email
+                try {
+                    const event = await this.eventRepository.findById(payment.event);
+                    const candidate = await this.candidateRepository.findById(candidateId);
+
+                    await this.emailService.sendVoteConfirmation(
+                        {
+                            email: payment.voter.email,
+                            name: payment.voter.name || 'Voter'
+                        },
+                        {
+                            id: vote._id,
+                            createdAt: vote.votedAt,
+                            categories: [payment.category],
+                            votes: [{ candidate: candidate.name, category: payment.category }],
+                            hash: vote._id.toString(),
+                            verificationHash: vote._id.toString()
+                        },
+                        {
+                            id: event._id,
+                            name: event.name
+                        }
+                    );
+
+                    this._log('vote_confirmation_email_sent', {
+                        voteId: vote._id,
+                        email: payment.voter.email
+                    });
+                } catch (emailError) {
+                    this._logError('vote_confirmation_email_failed', emailError, { voteId: vote._id });
+                }
+
+                return {
+                    success: true,
+                    vote,
+                    message: 'Vote cast successfully'
+                };
+
+            } catch (error) {
+                throw this._handleError(error, 'complete_vote', { reference, candidateId });
+            }
+        });
+    }
+
+    /**
+     * Calculate voting cost
+     */
+    async calculateVotingCost({ bundles, coupons, eventId, categoryId }) {
         try {
-            this._log('get_election_results', { eventId });
+            if (!bundles || !Array.isArray(bundles) || bundles.length === 0) {
+                throw new Error('Bundles array is required');
+            }
+
+            if (!eventId || !categoryId) {
+                throw new Error('Event ID and Category ID are required');
+            }
+
+            const bundleCalculation = await this._calculateBundleCosts(bundles, eventId, categoryId);
+
+            let result = {
+                originalAmount: bundleCalculation.totalAmount,
+                totalVotes: bundleCalculation.totalVotes,
+                bundles: bundleCalculation.validatedBundles,
+                appliedCoupons: [],
+                finalAmount: bundleCalculation.totalAmount,
+                totalDiscount: 0
+            };
+
+            if (coupons && coupons.length > 0) {
+                try {
+                    const couponResult = await this.paymentService._applyCoupons(
+                        coupons,
+                        bundleCalculation.validatedBundles,
+                        eventId,
+                        categoryId,
+                        bundleCalculation.totalAmount
+                    );
+
+                    result.finalAmount = couponResult.discountedAmount;
+                    result.appliedCoupons = couponResult.appliedCoupons;
+                    result.totalDiscount = bundleCalculation.totalAmount - couponResult.discountedAmount;
+
+                } catch (couponError) {
+                    result.couponError = couponError.message;
+                }
+            }
+
+            return result;
+
+        } catch (error) {
+            throw this._handleError(error, 'calculate_voting_cost');
+        }
+    }
+
+    /**
+     * Get election results for an event
+     */
+    async getEventResults(eventId, includeDetails) {
+        try {
+            this._log('get_event_results', { eventId });
 
             this._validateObjectId(eventId, 'Event ID');
 
-            // Check if event exists
             const event = await this.eventRepository.findById(eventId);
             if (!event) {
                 throw new Error('Event not found');
             }
 
-            // Get comprehensive election results
             const results = await this.voteRepository.getElectionResults(eventId);
 
-            // Get voting statistics
-            const statistics = await this.voteRepository.getVotingStatistics(eventId);
-
-            // Format results with additional metadata
-            const formattedResults = {
-                event: {
-                    id: event._id,
-                    name: event.name,
-                    status: event.status,
-                    startDate: event.startDate,
-                    endDate: event.endDate
-                },
-                results: results.map(category => ({
-                    ...category,
-                    candidates: category.candidates.map(candidate => ({
-                        ...candidate,
-                        winnerStatus: candidate.rank === 1 ? 'winner' : 
-                                    candidate.rank <= 3 ? 'runner-up' : 'participant'
-                    }))
-                })),
-                statistics: {
-                    ...statistics,
-                    resultsGeneratedAt: new Date()
+            return {
+                success: true,
+                data: {
+                    event: {
+                        id: event._id,
+                        name: event.name,
+                        status: event.status
+                    },
+                    results: results.categoriesResults,
+                    totalVotes: results.totalVotes,
+                    uniqueVoters: results.uniqueVoters
                 }
             };
 
-            this._log('get_election_results_success', { 
-                eventId, 
-                categoriesCount: results.length,
-                totalVotes: statistics.totalVotes 
-            });
-
-            return {
-                success: true,
-                data: formattedResults
-            };
         } catch (error) {
-            throw this._handleError(error, 'get_election_results', { eventId });
+            throw this._handleError(error, 'get_event_results', { eventId });
         }
     }
 
     /**
-     * Get voting status for a user in an event
-     * @param {String} userId - User ID
-     * @param {String} eventId - Event ID
-     * @returns {Promise<Object>} Voting status
+     * Get voting results for a category
      */
-    async getVotingStatus(userId, eventId) {
+    async getCategoryResults(categoryId, includeDetails) {
         try {
-            this._log('get_voting_status', { userId, eventId });
+            this._log('get_category_results', { categoryId });
 
-            this._validateObjectId(userId, 'User ID');
-            this._validateObjectId(eventId, 'Event ID');
+            this._validateObjectId(categoryId, 'Category ID');
 
-            // Check voting eligibility
-            const eligibility = await this.checkVotingEligibility(userId, eventId);
+            const category = await this.categoryRepository.findById(categoryId);
+            if (!category) {
+                throw new Error('Category not found');
+            }
 
-            // Get user's votes in this event
-            const userVotes = await this.voteRepository.getVotesByEvent(eventId, {
-                filter: { 'voter.id': userId }
-            });
-
-            // Get event categories and check completion
-            const event = await this.eventRepository.findById(eventId);
-            const candidates = await this.candidateRepository.findByEvent(eventId);
-            
-            const categoriesInEvent = [...new Set(candidates.map(c => c.category.toString()))];
-            const votedCategories = userVotes.map(vote => vote.category.toString());
-            const remainingCategories = categoriesInEvent.filter(
-                catId => !votedCategories.includes(catId)
-            );
-
-            const status = {
-                canVote: eligibility.canVote,
-                reason: eligibility.reason,
-                event: {
-                    id: event._id,
-                    name: event.name,
-                    status: event.status,
-                    startDate: event.startDate,
-                    endDate: event.endDate
-                },
-                votingProgress: {
-                    totalCategories: categoriesInEvent.length,
-                    votedCategories: votedCategories.length,
-                    remainingCategories: remainingCategories.length,
-                    isComplete: remainingCategories.length === 0
-                },
-                votes: userVotes.map(vote => ({
-                    id: vote._id,
-                    candidate: vote.candidate,
-                    category: vote.category,
-                    votedAt: vote.votedAt
-                }))
-            };
-
+            const votes = await this.voteRepository.getVotesByCategory(categoryId);
             return {
                 success: true,
-                data: status
+                data: votes
             };
+
         } catch (error) {
-            throw this._handleError(error, 'get_voting_status', { userId, eventId });
+            throw this._handleError(error, 'get_category_results', { categoryId });
         }
     }
 
     /**
-     * Check if user is eligible to vote
-     * @param {String} userId - User ID
-     * @param {String} eventId - Event ID
-     * @returns {Promise<Object>} Eligibility status
+     * Get user's voting history
      */
-    async checkVotingEligibility(userId, eventId) {
+    async getUserVotingHistory(userId, query) {
+        try {
+            this._log('get_user_voting_history', { userId });
+
+            this._validateObjectId(userId, 'User ID');
+
+            const votes = await this.voteRepository.getVotesByVoter(userId, {
+                page: query.page,
+                limit: query.limit
+            });
+
+            return {
+                success: true,
+                data: votes
+            };
+
+        } catch (error) {
+            throw this._handleError(error, 'get_user_voting_history', { userId });
+        }
+    }
+
+    /**
+     * Check if user can vote in an event
+     */
+    async checkVotingEligibility(eventId, userId) {
         try {
             this._validateObjectId(userId, 'User ID');
             this._validateObjectId(eventId, 'Event ID');
 
-            // Check user exists and is active
             const user = await this.userRepository.findById(userId);
             if (!user) {
                 return { canVote: false, reason: 'User not found' };
@@ -291,126 +347,270 @@ class VotingService extends BaseService {
                 return { canVote: false, reason: 'User account is deactivated' };
             }
 
-            // Check event voting status
             const eventStatus = await this.eventRepository.checkVotingStatus(eventId);
             if (!eventStatus.canVote) {
                 return { canVote: false, reason: eventStatus.reason };
             }
 
             return { canVote: true, reason: 'Eligible to vote' };
+
         } catch (error) {
             return { canVote: false, reason: 'Error checking eligibility' };
         }
     }
 
     /**
-     * Get vote statistics for an event
-     * @param {String} eventId - Event ID
-     * @returns {Promise<Object>} Vote statistics
+     * Get vote bundle details
      */
-    async getVoteStatistics(eventId) {
+    async getVoteBundle(bundleId, includeVotes) {
         try {
-            this._log('get_vote_statistics', { eventId });
+            this._log('get_vote_bundle', { bundleId });
+
+            this._validateObjectId(bundleId, 'Bundle ID');
+
+            const bundle = await this.voteBundleRepository.findById(bundleId);
+            if (!bundle) {
+                return null;
+            }
+
+            return {
+                success: true,
+                data: bundle
+            };
+
+        } catch (error) {
+            throw this._handleError(error, 'get_vote_bundle', { bundleId });
+        }
+    }
+
+    /**
+     * Create vote bundle
+     */
+    async createVoteBundle(bundleData) {
+        try {
+            this._log('create_vote_bundle', { createdBy: bundleData.createdBy });
+
+            const bundle = await this.voteBundleRepository.createBundle(bundleData);
+            return {
+                success: true,
+                data: bundle
+            };
+
+        } catch (error) {
+            throw this._handleError(error, 'create_vote_bundle', bundleData);
+        }
+    }
+
+    /**
+     * Get voting statistics for an event
+     */
+    async getVotingStats(eventId) {
+        try {
+            this._log('get_voting_stats', { eventId });
 
             this._validateObjectId(eventId, 'Event ID');
 
-            const statistics = await this.voteRepository.getVotingStatistics(eventId);
-            const voteCounts = await this.voteRepository.getVoteCountsByCategory(eventId);
+            const stats = await this.voteRepository.getVotingStats(eventId);
+            return {
+                success: true,
+                data: stats
+            };
+
+        } catch (error) {
+            throw this._handleError(error, 'get_voting_stats', { eventId });
+        }
+    }
+
+    /**
+     * Verify vote integrity
+     */
+    async verifyVote(voteId) {
+        try {
+            this._log('verify_vote', { voteId });
+
+            this._validateObjectId(voteId, 'Vote ID');
+
+            const vote = await this.voteRepository.findById(voteId);
+            if (!vote) {
+                return null;
+            }
 
             return {
                 success: true,
                 data: {
-                    ...statistics,
-                    categoryBreakdown: voteCounts,
-                    generatedAt: new Date()
+                    voteId: vote._id,
+                    verified: true,
+                    details: {
+                        candidate: vote.candidate,
+                        event: vote.event,
+                        category: vote.category,
+                        votedAt: vote.votedAt
+                    }
                 }
             };
+
         } catch (error) {
-            throw this._handleError(error, 'get_vote_statistics', { eventId });
+            throw this._handleError(error, 'verify_vote', { voteId });
+        }
+    }
+
+    /**
+     * Get real-time voting updates
+     */
+    async getVotingUpdates(eventId, lastUpdate) {
+        try {
+            this._log('get_voting_updates', { eventId, lastUpdate });
+
+            this._validateObjectId(eventId, 'Event ID');
+
+            const votes = await this.voteRepository.findByTimeRange(
+                eventId,
+                new Date(lastUpdate || 0),
+                new Date()
+            );
+
+            return {
+                success: true,
+                data: votes
+            };
+
+        } catch (error) {
+            throw this._handleError(error, 'get_voting_updates', { eventId });
+        }
+    }
+
+    /**
+     * Export voting results
+     */
+    async exportResults(eventId, format) {
+        try {
+            this._log('export_results', { eventId, format });
+
+            this._validateObjectId(eventId, 'Event ID');
+
+            const results = await this.getEventResults(eventId, true);
+            if (format === 'csv') {
+                return this._convertToCSV(results.data.results);
+            }
+            return JSON.stringify(results.data.results, null, 2);
+
+        } catch (error) {
+            throw this._handleError(error, 'export_results', { eventId });
+        }
+    }
+
+    /**
+     * Audit voting activity
+     */
+    async auditVoting(eventId, query) {
+        try {
+            this._log('audit_voting', { eventId });
+
+            this._validateObjectId(eventId, 'Event ID');
+
+            const auditLog = await this.activityRepository.find({
+                targetType: { $in: ['vote_cast', 'vote_intent'] },
+                'metadata.event': eventId
+            });
+
+            return {
+                success: true,
+                data: auditLog
+            };
+
+        } catch (error) {
+            throw this._handleError(error, 'audit_voting', { eventId });
         }
     }
 
     /**
      * Validate vote data
-     * @param {Object} voteData - Vote data to validate
-     * @private
      */
     async _validateVoteData(voteData) {
-        // Check required fields
-        this._validateRequiredFields(voteData, [
-            'voter', 'candidate', 'event', 'category', 'voteBundle'
-        ]);
+        this._validateRequiredFields(voteData, ['email', 'eventId', 'categoryId', 'candidateId', 'bundles']);
+        this._validateObjectId(voteData.eventId, 'Event ID');
+        this._validateObjectId(voteData.categoryId, 'Category ID');
+        this._validateObjectId(voteData.candidateId, 'Candidate ID');
 
-        // Validate ObjectIds
-        this._validateObjectId(voteData.candidate, 'Candidate ID');
-        this._validateObjectId(voteData.event, 'Event ID');
-        this._validateObjectId(voteData.category, 'Category ID');
-        this._validateObjectId(voteData.voteBundle, 'Vote Bundle ID');
-
-        if (voteData.voter?.id) {
-            this._validateObjectId(voteData.voter.id, 'Voter ID');
-        }
-
-        // Check if candidate exists
-        const candidate = await this.candidateRepository.findById(voteData.candidate);
+        const candidate = await this.candidateRepository.findById(voteData.candidateId);
         if (!candidate) {
             throw new Error('Candidate not found');
         }
 
-        // Verify candidate belongs to the event and category
-        if (candidate.event.toString() !== voteData.event) {
+        if (candidate.event.toString() !== voteData.eventId) {
             throw new Error('Candidate does not belong to this event');
         }
 
-        if (!candidate.categories.map(cat => cat.toString()).includes(voteData.category)) {
+        if (!candidate.categories.map(cat => cat.toString()).includes(voteData.categoryId)) {
             throw new Error('Candidate does not belong to this category');
         }
     }
 
     /**
-     * Check voting eligibility for the vote
-     * @param {Object} voteData - Vote data
-     * @private
+     * Calculate bundle costs
      */
-    async _checkVotingEligibility(voteData) {
-        if (voteData.voter?.id) {
-            const eligibility = await this.checkVotingEligibility(
-                voteData.voter.id, 
-                voteData.event
-            );
+    async _calculateBundleCosts(bundles, eventId, categoryId) {
+        const validatedBundles = [];
+        let totalAmount = 0;
+        let totalVotes = 0;
 
-            if (!eligibility.canVote) {
-                throw new Error(eligibility.reason);
+        for (const bundle of bundles) {
+            if (!bundle.bundleId || !bundle.quantity || bundle.quantity <= 0) {
+                throw new Error('Each bundle must have bundleId and positive quantity');
             }
+
+            const bundleDoc = await this.voteBundleRepository.findById(bundle.bundleId);
+            if (!bundleDoc) {
+                throw new Error(`Bundle ${bundle.bundleId} not found`);
+            }
+
+            if (!bundleDoc.isActive) {
+                throw new Error(`Bundle ${bundle.bundleId} is not active`);
+            }
+
+            if (bundleDoc.applicableEvents.length > 0 && !bundleDoc.applicableEvents.some(id => id.toString() === eventId)) {
+                throw new Error(`Bundle ${bundle.bundleId} not applicable to event`);
+            }
+
+            if (bundleDoc.applicableCategories.length > 0 && !bundleDoc.applicableCategories.some(id => id.toString() === categoryId)) {
+                throw new Error(`Bundle ${bundle.bundleId} not applicable to category`);
+            }
+
+            validatedBundles.push({
+                bundleId: bundle.bundleId,
+                quantity: bundle.quantity,
+                price: bundleDoc.price,
+                votes: bundleDoc.votes
+            });
+
+            totalAmount += bundleDoc.price * bundle.quantity;
+            totalVotes += bundleDoc.votes * bundle.quantity;
         }
+
+        return {
+            totalAmount,
+            totalVotes,
+            validatedBundles
+        };
     }
 
     /**
-     * Validate vote bundle usage
-     * @param {Object} voteData - Vote data
-     * @private
+     * Convert results to CSV
      */
-    async _validateVoteBundleUsage(voteData) {
-        const voteBundle = await this.voteBundleRepository.findById(voteData.voteBundle);
-        if (!voteBundle) {
-            throw new Error('Vote bundle not found');
-        }
-
-        if (!voteBundle.isActive) {
-            throw new Error('Vote bundle is not active');
-        }
-
-        // Check if bundle is applicable to this event
-        if (voteBundle.applicableEvents.length > 0 && 
-            !voteBundle.applicableEvents.includes(voteData.event)) {
-            throw new Error('Vote bundle is not applicable to this event');
-        }
-
-        // Check if bundle is applicable to this category
-        if (voteBundle.applicableCategories.length > 0 && 
-            !voteBundle.applicableCategories.includes(voteData.category)) {
-            throw new Error('Vote bundle is not applicable to this category');
-        }
+    _convertToCSV(results) {
+        const headers = ['Category', 'Candidate', 'VoteCount', 'Percentage', 'WinnerStatus'];
+        const rows = results.flatMap(category =>
+            category.candidates.map(c =>
+                [
+                    category.categoryName,
+                    c.candidateName,
+                    c.voteCount,
+                    c.percentage,
+                    c.winnerStatus
+                ].join(',')
+            )
+        );
+        return [headers.join(','), ...rows].join('\n');
     }
 }
 

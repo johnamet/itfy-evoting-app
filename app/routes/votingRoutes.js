@@ -7,26 +7,29 @@
 
 import express from 'express';
 import VotingController from '../controllers/VotingController.js';
+import PaymentController from '../controllers/PaymentController.js';
 import { 
     optionalAuth, 
     requireRead, 
     requireCreate, 
-    requireUpdate,
-    requireDelete,
     requireLevel 
 } from '../middleware/auth.js';
 
 const router = express.Router();
 const votingController = new VotingController();
+const paymentController = new PaymentController();
 
 // Voting operations
-router.post('/vote', requireCreate, (req, res) => votingController.castVote(req, res));
+router.post('/initiate-vote', optionalAuth, (req, res) => votingController.initiateVote(req, res));
 router.get('/history', requireRead, (req, res) => votingController.getUserVotingHistory(req, res));
 
-// Payment-based voting operations
-router.post('/initialize-payment', (req, res) => votingController.initializeVotingPayment(req, res));
-router.post('/complete-payment-vote', (req, res) => votingController.completeVotingAfterPayment(req, res));
-router.post('/estimate-cost', (req, res) => votingController.getVotingCostEstimate(req, res));
+// Payment operations
+router.get('/verify/:reference', optionalAuth, (req, res) => paymentController.verifyPayment(req, res));
+router.post('/webhook', (req, res) => paymentController.handleWebhook(req, res));
+router.get('/payment/:reference', optionalAuth, (req, res) => paymentController.getPaymentDetails(req, res));
+
+// Cost estimation
+router.post('/estimate-cost', optionalAuth, (req, res) => votingController.getVotingCostEstimate(req, res));
 
 // Results (public access for transparency)
 router.get('/results/event/:eventId', optionalAuth, (req, res) => votingController.getEventResults(req, res));
@@ -34,7 +37,7 @@ router.get('/results/category/:categoryId', optionalAuth, (req, res) => votingCo
 
 // Eligibility and verification
 router.get('/eligibility/:eventId', requireRead, (req, res) => votingController.checkVotingEligibility(req, res));
-router.get('/verify/:voteId', requireRead, (req, res) => votingController.verifyVote(req, res));
+router.get('/verify-vote/:voteId', requireRead, (req, res) => votingController.verifyVote(req, res));
 
 // Vote bundles (admin operations)
 router.post('/bundles', requireLevel(3), (req, res) => votingController.createVoteBundle(req, res));
@@ -47,5 +50,9 @@ router.get('/updates/:eventId', optionalAuth, (req, res) => votingController.get
 // Export and audit (admin operations)
 router.get('/export/:eventId', requireLevel(3), (req, res) => votingController.exportResults(req, res));
 router.get('/audit/:eventId', requireLevel(3), (req, res) => votingController.auditVoting(req, res));
+
+// Payment statistics (admin only)
+router.get('/payment-stats', requireLevel(3), (req, res) => paymentController.getPaymentStats(req, res));
+router.get('/payments', requireLevel(3), (req, res) => paymentController.listPayments(req, res));
 
 export default router;

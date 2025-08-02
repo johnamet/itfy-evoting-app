@@ -45,7 +45,7 @@ class DatabaseInitializer {
             
             // User collection indexes
             await db.collection('users').createIndex({ email: 1 }, { unique: true });
-            await db.collection('users').createIndex({ username: 1 }, { unique: true });
+            await db.collection('users').createIndex({ name: 1 }, { unique: true });
             await db.collection('users').createIndex({ 'profile.phone': 1 });
             await db.collection('users').createIndex({ role: 1 });
             await db.collection('users').createIndex({ isActive: 1 });
@@ -57,10 +57,9 @@ class DatabaseInitializer {
             await db.collection('events').createIndex({ createdBy: 1 });
             
             // Vote collection indexes
-            await db.collection('votes').createIndex({ eventId: 1, voterId: 1 }, { unique: true });
-            await db.collection('votes').createIndex({ eventId: 1 });
-            await db.collection('votes').createIndex({ candidateId: 1 });
-            await db.collection('votes').createIndex({ voterId: 1 });
+            await db.collection('votes').createIndex({ event: 1, candidate: 1 });
+            await db.collection('votes').createIndex({ event: 1 });
+            await db.collection('votes').createIndex({ candidate: 1 });
             await db.collection('votes').createIndex({ createdAt: 1 });
             
             // Candidate collection indexes

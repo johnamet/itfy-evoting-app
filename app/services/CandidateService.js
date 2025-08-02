@@ -13,6 +13,7 @@ import CategoryRepository from '../repositories/CategoryRepository.js';
 import VoteRepository from '../repositories/VoteRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import FileService from './FileService.js';
+import { populate } from 'dotenv';
 
 class CandidateService extends BaseService {
     constructor() {
@@ -385,7 +386,17 @@ class CandidateService extends BaseService {
                 {
                     page,
                     limit,
-                    sort: query.sort || { createdAt: -1 } // Default sort by creation date
+                    sort: query.sort || { createdAt: -1 },
+                    populate: [
+                        {
+                            path: 'event',
+                            select: 'name date location'
+                        },
+                        {
+                            path: 'categories',
+                            select: 'id name'
+                        }
+                    ]
                 }
             );
 
@@ -478,6 +489,22 @@ class CandidateService extends BaseService {
             };
         } catch (error) {
             throw this._handleError(error, 'get_candidate_statistics', { candidateId });
+        }
+    }
+
+    /**
+     * Get candidate statistics (alias for getCandidateStatistics)
+     * @param {String} candidateId - Candidate ID
+     * @returns {Promise<Object>} Candidate statistics
+     */
+    async getCandidateStats(candidateId) {
+        try {
+            this._log('get_candidate_stats', { candidateId });
+            
+            // Use the existing getCandidateStatistics method
+            return await this.getCandidateStatistics(candidateId);
+        } catch (error) {
+            throw this._handleError(error, 'get_candidate_stats', { candidateId });
         }
     }
 
@@ -972,6 +999,54 @@ class CandidateService extends BaseService {
             };
         } catch (error) {
             throw this._handleError(error, 'remove_candidate_photo', { candidateId });
+        }
+    }
+
+    /**
+     * Get candidate vote count across all categories
+     * @param {String} candidateId - Candidate ID
+     * @returns {Promise<Object>} Vote count with breakdown by category
+     */
+    async getCandidateVoteCount(candidateId) {
+        try {
+            this._log('get_candidate_vote_count', { candidateId });
+
+            this._validateObjectId(candidateId, 'Candidate ID');
+
+            // Verify candidate exists
+            const candidate = await this.candidateRepository.findById(candidateId);
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            // Get votes grouped by category for this candidate
+            const votesByCategory = await this.voteRepository.getVoteCountsForCandidate(candidateId);
+            
+            // Calculate total votes across all categories
+            let totalVotes = 0;
+            const categoryBreakdown = [];
+
+            for (const categoryVote of votesByCategory) {
+                totalVotes += categoryVote.voteCount;
+                categoryBreakdown.push({
+                    categoryId: categoryVote.categoryId,
+                    categoryName: categoryVote.categoryName,
+                    voteCount: categoryVote.voteCount
+                });
+            }
+
+            return {
+                success: true,
+                data: {
+                    candidateId: candidateId,
+                    candidateName: candidate.name,
+                    totalVotes: totalVotes,
+                    categoryBreakdown: categoryBreakdown,
+                    generatedAt: new Date()
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_candidate_vote_count', { candidateId });
         }
     }
 

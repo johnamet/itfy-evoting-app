@@ -1018,12 +1018,17 @@ class AdminConsole {
             const total = result.data.pagination.totalItems;
 
             console.log(chalk.cyan(`📅 Events (Page ${page}, Showing ${events.length} of ${total})`));
+                        console.log(chalk.yellow('='.repeat(80)))
+
             console.log(chalk.yellow('═'.repeat(80)));
 
             events.forEach(event => {
                 const status = event.status === 'active' ? chalk.green('🟢') : chalk.gray('⚪');
                 console.log(`${status} ${event.id} ${event.name.padEnd(20)} ${event.status.padEnd(10)} ${event.startDate.toDateString()}`);
             });
+
+            console.log(events)
+
         } catch (error) {
             console.error(chalk.red('Error listing events:', error.message));
         }

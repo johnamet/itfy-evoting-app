@@ -11,6 +11,7 @@ import UserRepository from '../repositories/UserRepository.js';
 import RoleRepository from '../repositories/RoleRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import EmailService from './EmailService.js';
+import { populate } from 'dotenv';
 
 class UserService extends BaseService {
     constructor() {
@@ -345,7 +346,7 @@ class UserService extends BaseService {
         try {
             this._log('get_users', { query });
 
-            const { page, limit, skip } = this._generatePaginationOptions(
+            const { page, limit } = this._generatePaginationOptions(
                 query.page, 
                 query.limit, 
                 100
@@ -361,35 +362,20 @@ class UserService extends BaseService {
             }
 
             // Get users with pagination
-            const { users, pagination } = await this.userRepository.getUsersWithPagination(
-                page, 
-                limit, 
-                filter
-            );
+            const users = await this.userRepository.find(filter, {
+                skip: (page - 1) * limit,
+                limit,
+                populate: 'role',
+                select: '-password -__v',
+            });
 
-            // Get role information for users
-            const usersWithRoles = await Promise.all(
-                users.map(async (user) => {
-                    const role = await this.roleRepository.findById(user.role);
-                    return {
-                        id: user._id,
-                        name: user.name,
-                        email: user.email,
-                        role: role ? {
-                            id: role._id,
-                            name: role.name,
-                            level: role.level
-                        } : null,
-                        isActive: user.isActive,
-                        lastLogin: user.lastLogin,
-                        createdAt: user.createdAt
-                    };
-                })
-            );
+            const totalItems = await this.userRepository.countDocuments(filter);
+
+            console.log(users);
 
             return {
                 success: true,
-                data: this._formatPaginationResponse(usersWithRoles, pagination.totalItems, page, limit)
+                data: this._formatPaginationResponse(users, totalItems, page, limit)
             };
         } catch (error) {
             throw this._handleError(error, 'get_users', { query });

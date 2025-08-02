@@ -49,6 +49,26 @@ class User extends BaseModel {
             image: {
                 type: String,
                 trim: true
+            },
+            passwordResetToken: {
+                type: String,
+                default: null
+            },
+            passwordResetExpires: {
+                type: Date,
+                default: null
+            },
+            lastLogin: {
+                type: Date,
+                default: null
+            },
+            lastLoginIP: {
+                type: String,
+                default: null
+            },
+            isActive: {
+                type: Boolean,
+                default: true
             }
         };
 

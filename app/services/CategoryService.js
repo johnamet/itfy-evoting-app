@@ -66,6 +66,12 @@ class CategoryService extends BaseService {
 
             const category = await this.categoryRepository.create(categoryToCreate);
 
+            if (category){
+                this.eventRepository.updateById(event._id, {
+                    $push: { categories: category._id }
+                });
+            }
+
             // Log activity
             await this.activityRepository.logActivity({
                 user: createdBy,
@@ -276,14 +282,8 @@ class CategoryService extends BaseService {
                 success: true,
                 category: {
                     id: category._id,
-                    name: category.name,
-                    description: category.description,
-                    eventId: category.eventId,
-                    maxCandidates: category.maxCandidates,
-                    allowMultipleVotes: category.allowMultipleVotes,
+                   ...category.toJSON(),
                     candidatesCount,
-                    createdAt: category.createdAt,
-                    updatedAt: category.updatedAt
                 }
             };
         } catch (error) {
@@ -308,7 +308,11 @@ class CategoryService extends BaseService {
             let categories = CacheService.get(cacheKey);
 
             if (!categories) {
-                categories = await this.categoryRepository.findByEvent(eventId);
+                categories = await this.categoryRepository.find({ event:eventId }, {
+                    skip: query.skip || 0,
+                    limit: query.limit || 50,
+                    sort: { createdAt: -1 }
+                });
                 
                 // Cache the categories
                 CacheService.set(cacheKey, categories, 1800000); // 30 minutes
@@ -320,12 +324,8 @@ class CategoryService extends BaseService {
                     const candidates = await this.candidateRepository.findByCategory(category._id);
                     return {
                         id: category._id,
-                        name: category.name,
-                        description: category.description,
-                        maxCandidates: category.maxCandidates,
-                        allowMultipleVotes: category.allowMultipleVotes,
+                        ...category.toJSON(),
                         candidatesCount: candidates.length,
-                        createdAt: category.createdAt
                     };
                 })
             );

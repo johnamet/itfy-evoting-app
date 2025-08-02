@@ -370,17 +370,41 @@ class EventService extends BaseService {
 
             this._validateObjectId(eventId, 'Event ID');
 
-            const event = await this.eventRepository.findById(eventId);
+            const event = await this.eventRepository.findById(eventId, {
+                populate: [
+                    {
+                        path: 'createdBy',
+                        model: 'User',
+                        select: 'name email'
+                    },
+                    {
+                        path: 'updatedBy',
+                        model: 'User',
+                        select: 'name email'
+                    },
+                    {
+                        path: 'relatedEvents',
+                        model: 'Event',
+                    },
+                    {
+                        path: 'categories',
+                        model: 'Category',
+                        select: 'name candidates'
+                    }
+                ]
+            });
             if (!event) {
                 throw new Error('Event not found');
             }
+
+            console.log(event);
 
             // Get candidates count
             const candidates = await this.candidateRepository.findByEvent(eventId);
             const candidatesCount = candidates.length;
 
             // Get categories
-            const categories = [...new Set(candidates.map(c => c.category.toString()))];
+            const categories = event.categories || [];
             const categoriesCount = categories.length;
 
             // Get votes count if event is active or completed
@@ -390,25 +414,16 @@ class EventService extends BaseService {
                 votesCount = votes.length;
             }
 
+            const eventDetails = {
+                ...event.toJSON(),
+                candidatesCount,
+                categoriesCount,
+                votesCount,
+            }
+
             return {
                 success: true,
-                event: {
-                    id: event._id,
-                    name: event.name,
-                    description: event.description,
-                    startDate: event.startDate,
-                    endDate: event.endDate,
-                    status: event.status,
-                    candidatesCount,
-                    categoriesCount,
-                    votesCount,
-                    createdAt: event.createdAt,
-                    updatedAt: event.updatedAt,
-                    startedAt: event.startedAt,
-                    completedAt: event.completedAt,
-                    cancelledAt: event.cancelledAt,
-                    cancellationReason: event.cancellationReason
-                }
+                data: eventDetails
             };
         } catch (error) {
             throw this._handleError(error, 'get_event_by_id', { eventId });
@@ -471,15 +486,9 @@ class EventService extends BaseService {
                 events.map(async (event) => {
                     const candidates = await this.candidateRepository.findByEvent(event._id);
                     return {
+                        ...event.toJSON(),
                         id: event._id,
-                        name: event.name,
-                        description: event.description,
-                        startDate: event.startDate,
-                        endDate: event.endDate,
-                        status: event.status,
                         candidatesCount: candidates.length,
-                        createdAt: event.createdAt,
-                        createdBy: event.createdBy,
                     };
                 })
             );

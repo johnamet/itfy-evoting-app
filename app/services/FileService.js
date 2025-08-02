@@ -6,9 +6,10 @@
  * compression, and storage management.
  */
 
-import fs from 'fs/promises';
+import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import File from '../models/File.js';
 import BaseService from './BaseService.js';
 
 class FileService extends BaseService {
@@ -34,7 +35,9 @@ class FileService extends BaseService {
                 path.join(this.uploadPath, 'candidates'),
                 path.join(this.uploadPath, 'events'),
                 path.join(this.uploadPath, 'documents'),
-                path.join(this.uploadPath, 'temp')
+                path.join(this.uploadPath, 'temp'),
+                path.join(this.uploadPath, 'backups'),
+            
             ];
 
             for (const dir of directories) {
@@ -58,13 +61,13 @@ class FileService extends BaseService {
      */
     validateFile(fileData, fileType = 'image') {
         try {
-            this._log('validate_file', { fileName: fileData.name, fileType, size: fileData.size });
+            this._log('validate_file', { fileName: fileData.originalname, fileType, size: fileData.size });
 
-            if (!fileData || !fileData.data) {
+            if (!fileData || !fileData.buffer) {
                 throw new Error('No file data provided');
             }
 
-            if (!fileData.name || typeof fileData.name !== 'string') {
+            if (!fileData.originalname || typeof fileData.originalname !== 'string') {
                 throw new Error('Invalid file name');
             }
 
@@ -88,7 +91,7 @@ class FileService extends BaseService {
             }
 
             // Validate file extension
-            const fileExtension = path.extname(fileData.name).toLowerCase();
+            const fileExtension = path.extname(fileData.originalname).toLowerCase();
             const mimeToExt = {
                 'image/jpeg': ['.jpg', '.jpeg'],
                 'image/png': ['.png'],
@@ -107,7 +110,7 @@ class FileService extends BaseService {
             return {
                 valid: true,
                 fileInfo: {
-                    name: fileData.name,
+                    name: fileData.originalname,
                     size: fileData.size,
                     mimetype: fileData.mimetype,
                     extension: fileExtension
@@ -138,23 +141,24 @@ class FileService extends BaseService {
 
     /**
      * Upload file to specified directory
-     * @param {Object} fileData - File data
-     * @param {String} directory - Target directory
-     * @param {String} filename - Optional custom filename
-     * @returns {Promise<Object>} Upload result
+     * @param {Object} fileData - File data from multer
+     * @param {Object} options - Upload options { category, entityType, entityId, uploadedBy }
+     * @returns {Promise<Object>} Upload result with fileId
      */
-    async uploadFile(fileData, directory, filename = null) {
+    async uploadFile(fileData, options) {
         try {
             this._log('upload_file', { 
-                fileName: fileData.name, 
-                directory, 
+                fileName: fileData.originalname, 
+                entityType: options.entityType, 
+                entityId: options.entityId,
                 size: fileData.size 
             });
 
-            // Generate filename if not provided
-            const targetFilename = filename || this.generateUniqueFilename(fileData.name);
+            const { category, entityType, entityId, uploadedBy } = options;
+            const directory = entityType === 'candidate' ? 'candidates' : entityType === 'event' ? 'events' : 'documents';
+            const filename = this.generateUniqueFilename(fileData.originalname, `${entityType}_${entityId}_`);
             const targetPath = path.join(this.uploadPath, directory);
-            const fullPath = path.join(targetPath, targetFilename);
+            const fullPath = path.join(targetPath, filename);
 
             // Ensure target directory exists
             try {
@@ -164,192 +168,188 @@ class FileService extends BaseService {
             }
 
             // Write file
-            await fs.writeFile(fullPath, fileData.data);
+            await fs.writeFile(fullPath, fileData.buffer);
 
             const fileStats = await fs.stat(fullPath);
 
+            // Save to File model
+            const fileDoc = new File({
+                filename,
+                originalName: fileData.originalname,
+                path: fullPath,
+                relativePath: path.join(directory, filename),
+                size: fileStats.size,
+                mimetype: fileData.mimetype,
+                uploadedBy,
+                entityType,
+                entityId,
+                category
+            });
+            const savedFile = await fileDoc.save();
+
             this._log('upload_file_success', { 
-                fileName: targetFilename, 
+                fileId: savedFile.fileId, 
                 path: fullPath,
                 size: fileStats.size 
             });
 
-            return {
-                success: true,
-                file: {
-                    filename: targetFilename,
-                    originalName: fileData.name,
-                    path: fullPath,
-                    relativePath: path.join(directory, targetFilename),
-                    size: fileStats.size,
-                    mimetype: fileData.mimetype,
-                    uploadedAt: new Date()
-                }
-            };
+            return savedFile.toObject();
         } catch (error) {
             throw this._handleError(error, 'upload_file', { 
-                fileName: fileData.name, 
-                directory 
+                fileName: fileData.originalname, 
+                entityType: options.entityType,
+                entityId: options.entityId 
             });
         }
     }
 
     /**
-     * Upload candidate image
-     * @param {Object} imageData - Image file data
-     * @param {String} candidateId - Candidate ID
-     * @param {String} uploadedBy - User ID who uploaded
-     * @returns {Promise<Object>} Upload result
+     * Upload multiple files
+     * @param {Array<Object>} files - Array of file data from multer
+     * @param {Object} options - Upload options { category, entityType, entityId, uploadedBy }
+     * @returns {Promise<Array<Object>>} Array of uploaded file objects
      */
-    async uploadCandidateImage(imageData, candidateId, uploadedBy) {
+    async uploadMultipleFiles(files, options) {
         try {
-            this._log('upload_candidate_image', { candidateId, uploadedBy });
+            this._log('upload_multiple_files', { 
+                fileCount: files.length, 
+                entityType: options.entityType, 
+                entityId: options.entityId 
+            });
 
-            this._validateObjectId(candidateId, 'Candidate ID');
-            this._validateObjectId(uploadedBy, 'Uploaded By User ID');
+            const uploadPromises = files.map(file => this.uploadFile(file, options));
+            const uploadedFiles = await Promise.all(uploadPromises);
 
-            // Validate image
-            const validation = this.validateFile(imageData, 'image');
-            if (!validation.valid) {
-                throw new Error(validation.error);
-            }
-
-            // Generate filename with candidate prefix
-            const filename = this.generateUniqueFilename(imageData.name, `candidate_${candidateId}_`);
-
-            // Upload to candidates directory
-            const uploadResult = await this.uploadFile(imageData, 'candidates', filename);
-
-            return {
-                success: true,
-                image: {
-                    ...uploadResult.file,
-                    candidateId,
-                    uploadedBy,
-                    type: 'candidate_photo'
-                }
-            };
+            return uploadedFiles;
         } catch (error) {
-            throw this._handleError(error, 'upload_candidate_image', { candidateId });
+            throw this._handleError(error, 'upload_multiple_files', { 
+                entityType: options.entityType,
+                entityId: options.entityId 
+            });
         }
     }
+
+    /**
+     * Get file by ID
+     * @param {String} fileId - File ID
+     * @returns {Promise<Object>} File document
+     */
+    async getFileById(fileId) {
+        try {
+            this._log('get_file_by_id', { fileId });
+            const file = await File.findOne({ fileId }).lean();
+            if (!file) throw new Error('File not found');
+            return file;
+        } catch (error) {
+            throw this._handleError(error, 'get_file_by_id', { fileId });
+        }
+    }
+
+    /**
+     * Download file
+     * @param {String} fileId - File ID
+     * @returns {Promise<Object>} Stream and metadata
+     */
+    async downloadFile(fileId) {
+        try {
+            this._log('download_file', { fileId });
+            const file = await File.findOne({ fileId, status: 'processed' });
+            if (!file) throw new Error('File not found');
+
+            const stream = fs.createReadStream(file.path);
+
+            return {
+                stream,
+                mimetype: file.mimetype,
+                originalName: file.originalName
+            };
+        } catch (error) {
+            throw this._handleError(error, 'download_file', { fileId });
+        }
+    }
+
+    
 
     /**
      * Delete file
-     * @param {String} filePath - File path (relative to upload directory)
+     * @param {String} fileId - File ID
+     * @param {String} deletedBy - User ID who deleted
      * @returns {Promise<Object>} Deletion result
      */
-    async deleteFile(filePath) {
+    async deleteFile(fileId, deletedBy) {
         try {
-            this._log('delete_file', { filePath });
+            this._log('delete_file', { fileId });
+            const file = await File.findOneAndUpdate(
+                { fileId, status: 'processed' },
+                { status: 'deleted', updatedBy: deletedBy },
+                { new: true }
+            );
+            if (!file) throw new Error('File not found');
 
-            if (!filePath) {
-                throw new Error('File path is required');
-            }
+            await fs.unlink(file.path);
 
-            // Construct full path
-            const fullPath = path.isAbsolute(filePath) ? filePath : path.join(this.uploadPath, filePath);
+            return { success: true, message: 'File deleted successfully' };
+        } catch (error) {
+            throw this._handleError(error, 'delete_file', { fileId });
+        }
+    }
 
-            // Check if file exists
-            try {
-                await fs.access(fullPath);
-            } catch (error) {
-                throw new Error('File not found');
-            }
+    /**
+     * Update file metadata
+     * @param {String} fileId - File ID
+     * @param {Object} updateData - Metadata to update
+     * @returns {Promise<Object>} Updated file document
+     */
+    async updateFileMetadata(fileId, updateData) {
+        try {
+            this._log('update_file_metadata', { fileId });
+            const file = await File.findOneAndUpdate(
+                { fileId, status: 'processed' },
+                { ...updateData, updatedAt: Date.now() },
+                { new: true, runValidators: true }
+            ).lean();
+            if (!file) throw new Error('File not found');
+            return file;
+        } catch (error) {
+            throw this._handleError(error, 'update_file_metadata', { fileId });
+        }
+    }
 
-            // Delete file
-            await fs.unlink(fullPath);
+    /**
+     * Get file thumbnail
+     * @param {String} fileId - File ID
+     * @param {String} size - Thumbnail size (e.g., 'small', 'medium')
+     * @returns {Promise<Object>} Thumbnail stream and metadata
+     */
+    async getFileThumbnail(fileId, size) {
+        try {
+            this._log('get_file_thumbnail', { fileId, size });
+            const file = await File.findOne({ fileId, status: 'processed' });
+            if (!file || !this.allowedImageTypes.includes(file.mimetype)) throw new Error('Thumbnail not available');
 
-            this._log('delete_file_success', { filePath: fullPath });
-
+            const thumbnailPath = `${file.path}_${size}.jpg`; // Placeholder for thumbnail generation logic
+            const stream = await fs.readFile(thumbnailPath);
             return {
-                success: true,
-                message: 'File deleted successfully',
-                deletedFile: filePath
+                stream,
+                mimetype: 'image/jpeg'
             };
         } catch (error) {
-            throw this._handleError(error, 'delete_file', { filePath });
+            throw this._handleError(error, 'get_file_thumbnail', { fileId, size });
         }
     }
 
     /**
-     * Get file information
-     * @param {String} filePath - File path
-     * @returns {Promise<Object>} File information
-     */
-    async getFileInfo(filePath) {
-        try {
-            this._log('get_file_info', { filePath });
-
-            const fullPath = path.isAbsolute(filePath) ? filePath : path.join(this.uploadPath, filePath);
-
-            // Check if file exists
-            try {
-                const stats = await fs.stat(fullPath);
-                
-                return {
-                    success: true,
-                    file: {
-                        path: filePath,
-                        fullPath,
-                        size: stats.size,
-                        created: stats.birthtime,
-                        modified: stats.mtime,
-                        isFile: stats.isFile(),
-                        isDirectory: stats.isDirectory()
-                    }
-                };
-            } catch (error) {
-                throw new Error('File not found');
-            }
-        } catch (error) {
-            throw this._handleError(error, 'get_file_info', { filePath });
-        }
-    }
-
-    /**
-     * Clean up old files
-     * @param {String} directory - Directory to clean
-     * @param {Number} maxAge - Maximum age in milliseconds
+     * Cleanup temporary files
+     * @param {Number} olderThanHours - Hours to consider files old
      * @returns {Promise<Object>} Cleanup result
      */
-    async cleanupOldFiles(directory, maxAge = 7 * 24 * 60 * 60 * 1000) { // 7 days default
+    async cleanupTempFiles(olderThanHours = 24) {
         try {
-            this._log('cleanup_old_files', { directory, maxAge });
-
-            const targetPath = path.join(this.uploadPath, directory);
-            const cutoffTime = Date.now() - maxAge;
-            let deletedCount = 0;
-
-            try {
-                const files = await fs.readdir(targetPath);
-                
-                for (const file of files) {
-                    const filePath = path.join(targetPath, file);
-                    const stats = await fs.stat(filePath);
-                    
-                    if (stats.isFile() && stats.mtime.getTime() < cutoffTime) {
-                        await fs.unlink(filePath);
-                        deletedCount++;
-                        console.log(`Deleted old file: ${file}`);
-                    }
-                }
-            } catch (error) {
-                console.log(`Directory ${directory} not found or empty`);
-            }
-
-            this._log('cleanup_old_files_success', { 
-                directory, 
-                deletedCount 
-            });
-
-            return {
-                success: true,
-                message: `Cleaned up ${deletedCount} old files from ${directory}`,
-                deletedCount
-            };
+            this._log('cleanup_temp_files', { olderThanHours });
+            const maxAge = olderThanHours * 60 * 60 * 1000;
+            return await this.cleanupOldFiles('temp', maxAge);
         } catch (error) {
-            throw this._handleError(error, 'cleanup_old_files', { directory });
+            throw this._handleError(error, 'cleanup_temp_files', { olderThanHours });
         }
     }
 
@@ -360,7 +360,6 @@ class FileService extends BaseService {
     async getStorageStats() {
         try {
             this._log('get_storage_stats', {});
-
             const stats = {
                 totalFiles: 0,
                 totalSize: 0,
@@ -368,30 +367,20 @@ class FileService extends BaseService {
             };
 
             const directories = ['images', 'candidates', 'events', 'documents', 'temp'];
-
             for (const dir of directories) {
                 const dirPath = path.join(this.uploadPath, dir);
-                const dirStats = {
-                    files: 0,
-                    size: 0
-                };
-
+                const dirStats = { files: 0, size: 0 };
                 try {
                     const files = await fs.readdir(dirPath);
-                    
                     for (const file of files) {
                         const filePath = path.join(dirPath, file);
                         const fileStats = await fs.stat(filePath);
-                        
                         if (fileStats.isFile()) {
                             dirStats.files++;
                             dirStats.size += fileStats.size;
                         }
                     }
-                } catch (error) {
-                    // Directory doesn't exist or is empty
-                }
-
+                } catch (error) {}
                 stats.directories[dir] = dirStats;
                 stats.totalFiles += dirStats.files;
                 stats.totalSize += dirStats.size;
@@ -412,93 +401,65 @@ class FileService extends BaseService {
 
     /**
      * Move file to different directory
-     * @param {String} currentPath - Current file path
+     * @param {String} fileId - File ID
      * @param {String} newDirectory - New directory
-     * @param {String} newFilename - Optional new filename
      * @returns {Promise<Object>} Move result
      */
-    async moveFile(currentPath, newDirectory, newFilename = null) {
+    async moveFile(fileId, newDirectory) {
         try {
-            this._log('move_file', { currentPath, newDirectory, newFilename });
+            this._log('move_file', { fileId, newDirectory });
+            const file = await File.findOne({ fileId, status: 'processed' });
+            if (!file) throw new Error('File not found');
 
-            const currentFullPath = path.isAbsolute(currentPath) ? currentPath : path.join(this.uploadPath, currentPath);
-            const filename = newFilename || path.basename(currentPath);
-            const newPath = path.join(this.uploadPath, newDirectory);
-            const newFullPath = path.join(newPath, filename);
+            const newPath = path.join(this.uploadPath, newDirectory, file.filename);
+            await fs.rename(file.path, newPath);
 
-            // Ensure source file exists
-            await fs.access(currentFullPath);
-
-            // Ensure destination directory exists
-            try {
-                await fs.access(newPath);
-            } catch (error) {
-                await fs.mkdir(newPath, { recursive: true });
-            }
-
-            // Move file
-            await fs.rename(currentFullPath, newFullPath);
-
-            this._log('move_file_success', { 
-                from: currentFullPath, 
-                to: newFullPath 
-            });
+            await File.findOneAndUpdate(
+                { fileId },
+                { path: newPath, relativePath: path.join(newDirectory, file.filename), updatedAt: Date.now() }
+            );
 
             return {
                 success: true,
                 message: 'File moved successfully',
-                file: {
-                    oldPath: currentPath,
-                    newPath: path.join(newDirectory, filename),
-                    filename
-                }
+                file: { oldPath: file.relativePath, newPath: path.join(newDirectory, file.filename) }
             };
         } catch (error) {
-            throw this._handleError(error, 'move_file', { currentPath, newDirectory });
+            throw this._handleError(error, 'move_file', { fileId, newDirectory });
         }
     }
 
     /**
      * Create file backup
-     * @param {String} filePath - File to backup
+     * @param {String} fileId - File ID
      * @returns {Promise<Object>} Backup result
      */
-    async createBackup(filePath) {
+    async createBackup(fileId) {
         try {
-            this._log('create_backup', { filePath });
+            this._log('create_backup', { fileId });
+            const file = await File.findOne({ fileId, status: 'processed' });
+            if (!file) throw new Error('File not found');
 
-            const fullPath = path.isAbsolute(filePath) ? filePath : path.join(this.uploadPath, filePath);
             const backupDir = path.join(this.uploadPath, 'backups');
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const backupFilename = `${timestamp}_${path.basename(filePath)}`;
+            const backupFilename = `${timestamp}_${file.filename}`;
             const backupPath = path.join(backupDir, backupFilename);
 
-            // Ensure backup directory exists
             try {
                 await fs.access(backupDir);
             } catch (error) {
                 await fs.mkdir(backupDir, { recursive: true });
             }
 
-            // Copy file to backup
-            await fs.copyFile(fullPath, backupPath);
-
-            this._log('create_backup_success', { 
-                original: fullPath, 
-                backup: backupPath 
-            });
+            await fs.copyFile(file.path, backupPath);
 
             return {
                 success: true,
                 message: 'Backup created successfully',
-                backup: {
-                    originalPath: filePath,
-                    backupPath: path.join('backups', backupFilename),
-                    createdAt: new Date()
-                }
+                backup: { originalPath: file.relativePath, backupPath: path.join('backups', backupFilename) }
             };
         } catch (error) {
-            throw this._handleError(error, 'create_backup', { filePath });
+            throw this._handleError(error, 'create_backup', { fileId });
         }
     }
 
@@ -510,47 +471,57 @@ class FileService extends BaseService {
      * @param {Number} query.page - Page number for pagination
      * @returns {Promise<Object>} List of files
      */
-
     async getFiles(query = {}) {
         try {
             this._log('get_files', { query });
 
-            const {page, limit} = this._generatePaginationOptions(query.page, query.limit, 100);
-
+            const { page, limit } = this._generatePaginationOptions(query.page, query.limit, 100);
             const { type } = query;
-            const targetPath = path.join(this.uploadPath, type || 'images');
-            const files = await fs.readdir(targetPath);
-            const fileDetails = [];
+            const filter = type ? { entityType: type } : {};
 
-            for (const file of files) {
-                const filePath = path.join(targetPath, file);
-                const stats = await fs.stat(filePath);
+            const files = await File.find(filter)
+                .skip((page - 1) * limit)
+                .limit(limit)
+                .lean();
 
-                if (stats.isFile()) {
-                    fileDetails.push({
-                        name: file,
-                        size: stats.size,
-                        createdAt: stats.birthtime,
-                        updatedAt: stats.mtime
-                    });
-                }
-            }
-
-            // Apply pagination
-            const totalFiles = fileDetails.length;
-            const totalPages = Math.ceil(totalFiles / limit);
-            const start = (page - 1) * limit;
-            const end = start + limit;
+            const totalFiles = await File.countDocuments(filter);
 
             return {
                 success: true,
-                data: this._formatPaginationResponse(fileDetails, totalFiles, page, limit),
+                data: this._formatPaginationResponse(files, totalFiles, page, limit)
             };
         } catch (error) {
             throw this._handleError(error, 'get_files', { query });
         }
     }
 
+    /**
+     * Get files by entity
+     * @param {String} entityType - Entity type
+     * @param {String} entityId - Entity ID
+     * @param {Object} query - Query parameters
+     * @returns {Promise<Object>} List of files
+     */
+    async getFilesByEntity(entityType, entityId, query = {}) {
+        try {
+            this._log('get_files_by_entity', { entityType, entityId, query });
+
+            const { page, limit } = this._generatePaginationOptions(query.page, query.limit, 100);
+            const files = await File.find({ entityType, entityId, status: 'processed' })
+                .skip((page - 1) * limit)
+                .limit(limit)
+                .lean();
+
+            const totalFiles = await File.countDocuments({ entityType, entityId, status: 'processed' });
+
+            return {
+                success: true,
+                data: this._formatPaginationResponse(files, totalFiles, page, limit)
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_files_by_entity', { entityType, entityId });
+        }
+    }
 }
 
 export default FileService;

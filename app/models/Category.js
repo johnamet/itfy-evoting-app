@@ -68,6 +68,11 @@ class Category extends BaseModel {
             status: {
                 type: String,
                 default: "active"
+            },
+            event:{
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Event',
+                required: true
             }
         };
 

@@ -6,6 +6,7 @@
  */
 
 import express from 'express';
+import cors from 'cors';
 import Config from './config/config.js';
 import dbConnection from './utils/engine/db.js';
 import dbInitializer from './utils/engine/dbInitializer.js';
@@ -16,6 +17,22 @@ const app = express()
 
 const PORT = Config.serverConfig.port
 
+// Configure CORS
+const corsOptions = {
+    origin: [
+        'http://localhost:3001',
+        'http://127.0.0.1:3001',
+        'http://192.168.197.195:3001'
+        // Add production frontend URL when available
+        // 'https://your-frontend-domain.com'
+    ],
+    credentials: true,
+    optionsSuccessStatus: 200,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
+app.use(cors(corsOptions));
 app.use(express.json())
 
 // Add cache middleware for API responses

@@ -279,9 +279,14 @@ class UserRepository extends BaseRepository {
      * @returns {Promise<Object>} An object containing the number of pages, page number and
      * and limit 
      */
-    async getusers(criteria={}, page=1, limit=15, options={}){
+    async getUsers(criteria={}, options={}){
         try{
-            const result = this.findWithPagination(criteria, page, limit, options)
+            const result = this.find(criteria, {
+                ...options,
+                select: '-password',
+                populate: 'role',
+                sort: { createdAt: -1 } // Sort by creation date descending
+            });
             return result
         }catch(error){
             this._handleError(error, "getUsers")

@@ -194,6 +194,47 @@ class VoteRepository extends BaseRepository {
     }
 
     /**
+     * Retrieves vote counts for a specific candidate across all categories
+     * @param {mongoose.Types.ObjectId|string} candidateId - The candidate ID.
+     * @returns {Promise<Array>} Vote counts grouped by category for the candidate.
+     * @throws {Error} If the operation encounters an error.
+     */
+    async getVoteCountsForCandidate(candidateId) {
+        try {
+            const pipeline = [
+                { $match: { candidate: new mongoose.Types.ObjectId(candidateId) } },
+                {
+                    $group: {
+                        _id: '$category',
+                        voteCount: { $sum: 1 }
+                    }
+                },
+                {
+                    $lookup: {
+                        from: 'categories',
+                        localField: '_id',
+                        foreignField: '_id',
+                        as: 'categoryInfo'
+                    }
+                },
+                {
+                    $project: {
+                        categoryId: '$_id',
+                        categoryName: { $arrayElemAt: ['$categoryInfo.name', 0] },
+                        voteCount: 1,
+                        _id: 0
+                    }
+                },
+                { $sort: { categoryName: 1 } }
+            ];
+
+            return await this.aggregate(pipeline);
+        } catch (error) {
+            throw this._handleError(error, 'getVoteCountsForCandidate');
+        }
+    }
+
+    /**
      * Retrieves vote counts by category for an event.
      * @param {mongoose.Types.ObjectId|string} eventId - The event ID.
      * @returns {Promise<Array>} Vote counts grouped by category and candidate.

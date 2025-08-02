@@ -217,7 +217,8 @@ export default class EventController extends BaseController {
     async getUpcomingEvents(req, res) {
         try {
             const query = req.query;
-            const events = await this.eventService.getUpcomingEvents(query);
+            query.type = 'upcoming'; 
+            const events = await this.eventService.getEvents(query);
             return this.sendSuccess(res, events, 'Upcoming events retrieved successfully');
         } catch (error) {
             return this.handleError(res, error, 'Failed to get upcoming events');

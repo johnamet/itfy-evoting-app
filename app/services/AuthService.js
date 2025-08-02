@@ -436,22 +436,99 @@ class AuthService extends BaseService {
     }
 
     /**
-     * Reset password using token
+     * Request password reset (alias for forgotPassword)
+     * @param {String} email - User email
+     * @param {String} ipAddress - Request IP address for security
+     * @returns {Promise<Object>} Password reset result
+     */
+    async forgotPassword(email, ipAddress = 'Unknown') {
+        return this.requestPasswordReset(email, ipAddress);
+    }
+
+    /**
+     * Reset password using token (overloaded method to support both signatures)
+     * @param {String} token - Reset token
+     * @param {String} newPasswordOrEmail - New password (if 2 params) or email (if 3 params)
+     * @param {String} newPassword - New password (only if 3 params)
+     * @returns {Promise<Object>} Password reset result
+     */
+    async resetPassword(token, newPasswordOrEmail, newPassword) {
+        // Handle both signatures: (token, newPassword) and (token, email, newPassword)
+        if (arguments.length === 2) {
+            // Called with (token, newPassword) - need to find email from token
+            return this._resetPasswordByToken(token, newPasswordOrEmail);
+        } else {
+            // Called with (token, email, newPassword)
+            return this._resetPasswordByTokenAndEmail(token, newPasswordOrEmail, newPassword);
+        }
+    }
+
+    /**
+     * Reset password using only token (finds user by token)
+     * @param {String} token - Reset token
+     * @param {String} newPassword - New password
+     * @returns {Promise<Object>} Password reset result
+     * @private
+     */
+    async _resetPasswordByToken(token, newPassword) {
+        try {
+            this._log('password_reset_by_token', { token: token.substring(0, 8) + '...' });
+
+            // Validate inputs
+            this._validateRequiredFields({ token, newPassword }, ['token', 'newPassword']);
+            this._validatePassword(newPassword);
+
+            // Find user with valid reset token
+            const user = await this.userRepository.findOne({
+                passwordResetToken: token,
+                passwordResetExpires: { $gt: new Date() }
+            });
+
+            if (!user) {
+                throw new Error('Invalid or expired reset token');
+            }
+
+            // Hash new password
+            const saltRounds = 12;
+            const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+            // Update password and clear reset token
+            await this.userRepository.updateUser(user._id, {
+                password: hashedPassword,
+                passwordResetToken: null,
+                passwordResetExpires: null,
+                updatedAt: new Date()
+            });
+
+            this._log('password_reset_success', { userId: user._id, email: user.email });
+
+            return {
+                success: true,
+                message: 'Password reset successfully'
+            };
+        } catch (error) {
+            throw this._handleError(error, 'password_reset_by_token');
+        }
+    }
+
+    /**
+     * Reset password using token and email
      * @param {String} token - Reset token
      * @param {String} email - User email
      * @param {String} newPassword - New password
      * @returns {Promise<Object>} Password reset result
+     * @private
      */
-    async resetPassword(token, email, newPassword) {
+    async _resetPasswordByTokenAndEmail(token, email, newPassword) {
         try {
-            this._log('password_reset', { email, token: token.substring(0, 8) + '...' });
+            this._log('password_reset_by_token_and_email', { token: token.substring(0, 8) + '...', email });
 
             // Validate inputs
             this._validateRequiredFields({ token, email, newPassword }, ['token', 'email', 'newPassword']);
             this._validateEmail(email);
             this._validatePassword(newPassword);
 
-            // Find user with valid reset token
+            // Find user with valid reset token and matching email
             const user = await this.userRepository.findOne({
                 email,
                 passwordResetToken: token,
@@ -481,7 +558,7 @@ class AuthService extends BaseService {
                 message: 'Password reset successfully'
             };
         } catch (error) {
-            throw this._handleError(error, 'password_reset', { email });
+            throw this._handleError(error, 'password_reset_by_token_and_email', { email });
         }
     }
 

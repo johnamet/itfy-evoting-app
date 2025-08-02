@@ -19,9 +19,10 @@ export default class FileController extends BaseController {
      */
     async uploadFile(req, res) {
         try {
+            console.log('File upload request received:', req.file, req.body);
             const file = req.file;
             const { category, entityType, entityId } = req.body;
-            const uploadedBy = req.user?.id;
+            const uploadedBy = req.user?.id || "688c82bc0e3aaea6fa5e73d3";
 
             if (!file) {
                 return this.sendError(res, 'File is required', 400);
@@ -31,6 +32,10 @@ export default class FileController extends BaseController {
                 return this.sendError(res, 'User authentication required', 401);
             }
 
+            if (!entityType || !entityId) {
+                return this.sendError(res, 'entityType and entityId are required', 400);
+            }
+
             const uploadedFile = await this.fileService.uploadFile(file, {
                 category,
                 entityType,
@@ -38,7 +43,8 @@ export default class FileController extends BaseController {
                 uploadedBy
             });
 
-            return this.sendSuccess(res, uploadedFile, 'File uploaded successfully', 201);
+            const fileUrl = `/files/${uploadedFile.fileId}`;
+            return this.sendSuccess(res, { ...uploadedFile, url: fileUrl }, 'File uploaded successfully', 201);
         } catch (error) {
             return this.handleError(res, error, 'Failed to upload file');
         }
@@ -61,6 +67,10 @@ export default class FileController extends BaseController {
                 return this.sendError(res, 'User authentication required', 401);
             }
 
+            if (!entityType || !entityId) {
+                return this.sendError(res, 'entityType and entityId are required', 400);
+            }
+
             const uploadedFiles = await this.fileService.uploadMultipleFiles(files, {
                 category,
                 entityType,
@@ -68,7 +78,8 @@ export default class FileController extends BaseController {
                 uploadedBy
             });
 
-            return this.sendSuccess(res, uploadedFiles, 'Files uploaded successfully', 201);
+            const fileUrls = uploadedFiles.map(file => ({ ...file, url: `/files/${file.fileId}` }));
+            return this.sendSuccess(res, fileUrls, 'Files uploaded successfully', 201);
         } catch (error) {
             return this.handleError(res, error, 'Failed to upload files');
         }
@@ -79,9 +90,9 @@ export default class FileController extends BaseController {
      */
     async getFileById(req, res) {
         try {
-            const { id } = req.params;
+            const { fileId } = req.params;
 
-            const file = await this.fileService.getFileById(id);
+            const file = await this.fileService.getFileById(fileId);
             
             if (!file) {
                 return this.sendError(res, 'File not found', 404);
@@ -98,19 +109,20 @@ export default class FileController extends BaseController {
      */
     async downloadFile(req, res) {
         try {
-            const { id } = req.params;
+            const { fileId } = req.params;
 
-            const fileStream = await this.fileService.downloadFile(id);
-            
+            const { stream, mimetype, originalName } = await this.fileService.downloadFile(fileId);
+
+            const fileStream = stream;
             if (!fileStream) {
                 return this.sendError(res, 'File not found', 404);
             }
 
             // Set appropriate headers
-            res.setHeader('Content-Type', fileStream.mimeType);
-            res.setHeader('Content-Disposition', `attachment; filename="${fileStream.filename}"`);
+            res.setHeader('Content-Type', mimetype);
+            res.setHeader('Content-Disposition', `attachment; filename="${originalName}"`);
 
-            return fileStream.stream.pipe(res);
+            return fileStream.pipe(res);
         } catch (error) {
             return this.handleError(res, error, 'Failed to download file');
         }
@@ -149,11 +161,11 @@ export default class FileController extends BaseController {
      */
     async updateFileMetadata(req, res) {
         try {
-            const { id } = req.params;
+            const { fileId } = req.params;
             const updateData = req.body;
             const updatedBy = req.user?.id;
 
-            const file = await this.fileService.updateFileMetadata(id, {
+            const file = await this.fileService.updateFileMetadata(fileId, {
                 ...updateData,
                 updatedBy
             });
@@ -173,10 +185,10 @@ export default class FileController extends BaseController {
      */
     async deleteFile(req, res) {
         try {
-            const { id } = req.params;
+            const { fileId } = req.params;
             const deletedBy = req.user?.id;
 
-            const result = await this.fileService.deleteFile(id, deletedBy);
+            const result = await this.fileService.deleteFile(fileId, deletedBy);
 
             if (!result) {
                 return this.sendError(res, 'File not found', 404);
@@ -193,16 +205,16 @@ export default class FileController extends BaseController {
      */
     async getFileThumbnail(req, res) {
         try {
-            const { id } = req.params;
+            const { fileId } = req.params;
             const { size = 'medium' } = req.query;
 
-            const thumbnail = await this.fileService.getFileThumbnail(id, size);
+            const thumbnail = await this.fileService.getFileThumbnail(fileId, size);
             
             if (!thumbnail) {
                 return this.sendError(res, 'Thumbnail not found', 404);
             }
 
-            res.setHeader('Content-Type', thumbnail.mimeType);
+            res.setHeader('Content-Type', thumbnail.mimetype);
             res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
 
             return thumbnail.stream.pipe(res);
@@ -267,10 +279,10 @@ export default class FileController extends BaseController {
      */
     async generateDownloadLink(req, res) {
         try {
-            const { id } = req.params;
+            const { fileId } = req.params;
             const { expiresIn = 3600 } = req.query; // Default 1 hour
 
-            const downloadLink = await this.fileService.generateDownloadLink(id, parseInt(expiresIn));
+            const downloadLink = await this.fileService.generateDownloadLink(fileId, parseInt(expiresIn));
             
             if (!downloadLink) {
                 return this.sendError(res, 'File not found', 404);
@@ -279,6 +291,39 @@ export default class FileController extends BaseController {
             return this.sendSuccess(res, downloadLink, 'Download link generated successfully');
         } catch (error) {
             return this.handleError(res, error, 'Failed to generate download link');
+        }
+    }
+
+    /**
+     * Move file to different directory
+     */
+    async moveFile(req, res) {
+        try {
+            const { fileId } = req.params;
+            const { newDirectory } = req.body;
+
+            if (!newDirectory) {
+                return this.sendError(res, 'newDirectory is required', 400);
+            }
+
+            const result = await this.fileService.moveFile(fileId, newDirectory);
+            return this.sendSuccess(res, result, 'File moved successfully');
+        } catch (error) {
+            return this.handleError(res, error, 'Failed to move file');
+        }
+    }
+
+    /**
+     * Create file backup
+     */
+    async createBackup(req, res) {
+        try {
+            const { fileId } = req.params;
+
+            const result = await this.fileService.createBackup(fileId);
+            return this.sendSuccess(res, result, 'Backup created successfully');
+        } catch (error) {
+            return this.handleError(res, error, 'Failed to create backup');
         }
     }
 }

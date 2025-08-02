@@ -27,9 +27,68 @@ class Event extends BaseModel {
             },
 
             location: {
-                type: String,
+                type: {
+                    name: {
+                        type: String,
+                        required: true,
+                        trim: true
+                    },
+                    address: {
+                        type: String,
+                        required: true,
+                        trim: true
+                    },
+                    city: {
+                        type: String,
+                        required: true,
+                        trim: true
+                    },
+                    coordinates: {
+                        type: {
+                            lat: {
+                                type: Number,
+                                required: true
+                            },
+                            lng: {
+                                type: Number,
+                                required: true
+                            }
+                        },
+                        required: false
+                    },
+                    country: {
+                        type: String,
+                        required: false,
+                        trim: true
+                    },
+                    zipCode: {
+                        type: String,
+                        required: false,
+                        trim: true
+                    },
+                    website: {
+                        type: String,
+                        required: false,
+                        trim: true
+                    },
+                    phone: {
+                        type: String,
+                        required: false,
+                        trim: true
+                    },
+                    venueInfo: {
+                        type: [String],
+                        required: false,
+                        trim: true
+                    },
+                    directions: {
+                        type: [String],
+                        required: false,
+                        trim: true
+                    }
+                },
                 required: true,
-                trim: true
+                default: {}
             },
 
             endDate: {
@@ -67,26 +126,58 @@ class Event extends BaseModel {
                 type: [Object],
                 default: []
             },
+            guestOfHonor: {
+                type: [Object],
+                default: []
+            },
             name: {
                 type: String,
                 required: true,
                 trim: true
             },
+            requirements: {
+                type: [String],
+                required: false,
+                default: []
+            },
+            sponsors: {
+                type: [Object],
+                default: []
+            },
 
-            relatedEvents: {
-                type: [mongoose.Schema.Types.ObjectId],
+            relatedEvents: [{
+                type: mongoose.Schema.Types.ObjectId,
                 ref: 'Event',
                 default: []
-            },
+            }],
 
-            categories: {
-                type: [mongoose.Schema.Types.ObjectId],
+            categories: [{
+                type: mongoose.Schema.Types.ObjectId,
                 ref: 'Category',
                 default: []
-            },
+            }],
             status: {
                 type: String,
                 default: "active"
+            },
+            timeline: {
+                type: [{
+                    title: {
+                        type: String,
+                        required: true,
+                        trim: true
+                    },
+                    description: {
+                        type: String,
+                        required: false,
+                        trim: true
+                    },
+                    time: {
+                        type: Date,
+                        required: true
+                    }
+                }],
+                default: []
             }
         }
         super(schemaDefinition, { collection: 'events' });

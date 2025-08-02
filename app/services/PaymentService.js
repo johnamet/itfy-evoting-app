@@ -1,10 +1,10 @@
+#!/usr/bin/env node
 /**
  * Payment Service
  * 
  * Handles Paystack payment integration for vote bundles including:
  * - Payment initialization and verification
  * - Bundle and coupon validation
- * - Vote casting after successful payment
  * - Webhook handling for payment status updates
  */
 
@@ -12,6 +12,7 @@ import BaseService from './BaseService.js';
 import fetch from 'node-fetch';
 import crypto from 'crypto';
 import { configDotenv } from 'dotenv';
+import mongoose from 'mongoose';
 
 configDotenv();
 
@@ -19,14 +20,11 @@ configDotenv();
 import PaymentRepository from '../repositories/PaymentRepository.js';
 import VoteBundleRepository from '../repositories/VoteBundleRepository.js';
 import CouponRepository from '../repositories/CouponRepository.js';
-import VoteRepository from '../repositories/VoteRepository.js';
 import EventRepository from '../repositories/EventRepository.js';
 import CategoryRepository from '../repositories/CategoryRepository.js';
-import UserRepository from '../repositories/UserRepository.js';
 import CandidateRepository from '../repositories/CandidateRepository.js';
 
 // Services
-import VotingService from './VotingService.js';
 import CouponService from './CouponService.js';
 import EmailService from './EmailService.js';
 
@@ -38,18 +36,13 @@ class PaymentService extends BaseService {
         this.paystackBaseUrl = 'https://api.paystack.co';
         this.webhookSecret = process.env.PAYSTACK_WEBHOOK_SECRET || this.paystackSecretKey;
         
-        // Initialize repositories
         this.paymentRepository = new PaymentRepository();
         this.voteBundleRepository = new VoteBundleRepository();
         this.couponRepository = new CouponRepository();
-        this.voteRepository = new VoteRepository();
         this.eventRepository = new EventRepository();
         this.categoryRepository = new CategoryRepository();
-        this.userRepository = new UserRepository();
         this.candidateRepository = new CandidateRepository();
         
-        // Initialize services
-        this.votingService = new VotingService();
         this.couponService = new CouponService();
         this.emailService = new EmailService();
         
@@ -59,130 +52,132 @@ class PaymentService extends BaseService {
     }
 
     /**
-     * Initialize payment for a vote bundle with optional coupon
-     * @param {Object} paymentData - Payment initialization data
-     * @returns {Promise<Object>} Payment initialization response
+     * Initialize payment for vote bundles
      */
-    async initializePayment(paymentData) {
+    async initializePayment(paymentData, options = {}) {
         try {
-            this._log('initialize_payment', { 
-                email: paymentData.voter.email,
-                bundleId: paymentData.bundleId,
+            this._log('initialize_payment', {
+                email: paymentData.email,
                 eventId: paymentData.eventId,
-                categoryId: paymentData.categoryId,
-                couponCode: paymentData.couponCode
+                categoryId: paymentData.categoryId
             });
 
-            // Validate required fields
-            this._validateRequiredFields(paymentData, ['voter', 'bundleId', 'eventId', 'categoryId']);
-            this._validateRequiredFields(paymentData.voter, ['email', 'ipAddress']);
+            this._validateRequiredFields(paymentData, ['email', 'bundles', 'eventId', 'categoryId', 'candidateId']);
+            this._validateObjectId(paymentData.eventId, 'Event ID');
+            this._validateObjectId(paymentData.categoryId, 'Category ID');
+            this._validateObjectId(paymentData.candidateId, 'Candidate ID');
 
-            // Check if voter has already paid for this event/category
+            // Validate candidate
+            const candidate = await this.candidateRepository.findById(paymentData.candidateId);
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+            if (candidate.event.toString() !== paymentData.eventId) {
+                throw new Error('Candidate does not belong to this event');
+            }
+            if (!candidate.categories.some(cat => cat.toString() === paymentData.categoryId)) {
+                throw new Error('Candidate does not belong to this category');
+            }
+
+            // Check existing payment
             const existingPayment = await this.paymentRepository.hasVoterPaid(
-                paymentData.voter.email,
+                paymentData.email,
                 paymentData.eventId,
                 paymentData.categoryId
             );
 
-            if (existingPayment) {
-                if (existingPayment.status === 'success') {
-                    throw new Error('You have already purchased votes for this event and category');
-                } else if (existingPayment.status === 'pending' && !existingPayment.isExpired) {
-                    // Return existing pending payment
-                    return {
-                        success: true,
-                        message: 'Existing payment found',
-                        data: {
-                            payment: existingPayment,
-                            authorization_url: existingPayment.paystackData.authorization_url,
-                            access_code: existingPayment.paystackData.access_code,
-                            reference: existingPayment.reference
-                        }
-                    };
-                }
+            if (existingPayment && existingPayment.status === 'success') {
+                throw new Error('Voter has already purchased votes for this event and category');
             }
 
-            // Validate bundle and get pricing
-            const bundleValidation = await this._validateVoteBundle(
-                paymentData.bundleId, 
-                paymentData.eventId, 
+            if (existingPayment && existingPayment.status === 'pending' && !existingPayment.isExpired) {
+                return {
+                    success: true,
+                    message: 'Existing pending payment found',
+                    data: {
+                        payment: existingPayment,
+                        authorization_url: existingPayment.paystackData.authorization_url,
+                        access_code: existingPayment.paystackData.access_code,
+                        reference: existingPayment.reference
+                    }
+                };
+            }
+
+            // Calculate bundle costs
+            const bundleCalculation = await this._calculateBundleCosts(
+                paymentData.bundles,
+                paymentData.eventId,
                 paymentData.categoryId
             );
 
-            if (!bundleValidation.isValid) {
-                throw new Error(bundleValidation.message);
-            }
-
-            const bundle = bundleValidation.bundle;
-            let originalAmount = bundle.price;
+            let finalAmount = bundleCalculation.totalAmount;
             let discountAmount = 0;
-            let coupon = null;
+            const appliedCoupons = [];
 
-            // Apply coupon if provided
-            if (paymentData.couponCode) {
-                const couponValidation = await this._validateAndApplyCoupon(
-                    paymentData.couponCode,
+            // Apply coupons
+            if (paymentData.coupons && paymentData.coupons.length > 0) {
+                const couponResult = await this._applyCoupons(
+                    paymentData.coupons,
+                    bundleCalculation.validatedBundles,
                     paymentData.eventId,
                     paymentData.categoryId,
-                    originalAmount
+                    bundleCalculation.totalAmount
                 );
-
-                if (!couponValidation.isValid) {
-                    throw new Error(couponValidation.message);
-                }
-
-                coupon = couponValidation.coupon;
-                discountAmount = couponValidation.discountAmount;
+                finalAmount = couponResult.discountedAmount;
+                discountAmount = bundleCalculation.totalAmount - couponResult.discountedAmount;
+                appliedCoupons.push(...couponResult.appliedCoupons);
             }
-
-            const finalAmount = originalAmount - discountAmount;
 
             // Generate unique reference
             const reference = this._generatePaymentReference();
 
             // Create payment record
-            const paymentRecord = await this.paymentRepository.create({
+            const paymentRecord = await this.paymentRepository.createPayment({
                 reference,
                 voter: {
-                    email: paymentData.voter.email.toLowerCase(),
-                    contact: paymentData.voter.contact,
-                    name: paymentData.voter.name,
-                    ipAddress: paymentData.voter.ipAddress,
-                    userAgent: paymentData.voter.userAgent
+                    email: paymentData.email.toLowerCase(),
+                    ipAddress: paymentData.voterIp,
+                    userAgent: paymentData.userAgent
                 },
-                voteBundle: paymentData.bundleId,
+                voteBundles: bundleCalculation.validatedBundles.map(b => b.bundleId),
                 event: paymentData.eventId,
                 category: paymentData.categoryId,
-                coupon: coupon?._id,
-                originalAmount,
+                coupon: appliedCoupons.length > 0 ? appliedCoupons[0]._id : null,
+                originalAmount: bundleCalculation.totalAmount,
                 discountAmount,
                 finalAmount,
-                currency: paymentData.currency || 'GHS',
-                votesRemaining: bundle.votes,
+                currency: 'GHS',
+                votesRemaining: bundleCalculation.totalVotes,
                 metadata: {
-                    fraud_check: await this._performFraudCheck(paymentData.voter)
+                    candidateId: paymentData.candidateId,
+                    fraud_check: await this._performFraudCheck({
+                        email: paymentData.email,
+                        ipAddress: paymentData.voterIp
+                    })
                 }
-            });
+            }, options);
 
-            // Initialize payment with Paystack
+            // Initialize Paystack payment
             const paystackResponse = await this._initializePaystackPayment({
-                email: paymentData.voter.email,
-                amount: finalAmount,
+                email: paymentData.email,
+                amount: finalAmount * 100, // Convert to kobo
                 reference,
+                callback_url: paymentData.callback_url,
                 metadata: {
                     payment_id: paymentRecord._id,
                     event_id: paymentData.eventId,
                     category_id: paymentData.categoryId,
-                    bundle_id: paymentData.bundleId,
-                    voter_email: paymentData.voter.email
+                    candidate_id: paymentData.candidateId,
+                    voter_email: paymentData.email
                 }
             });
 
-            // Update payment record with Paystack data
-            await this.paymentRepository.updateById(paymentRecord._id, {
-                'paystackData.authorization_url': paystackResponse.authorization_url,
-                'paystackData.access_code': paystackResponse.access_code
-            });
+            await this.paymentRepository.updateByReference(paymentRecord.reference, {
+                paystackData: {
+                    authorization_url: paystackResponse.authorization_url,
+                    access_code: paystackResponse.access_code
+                }
+            }, options);
 
             return {
                 success: true,
@@ -196,64 +191,19 @@ class PaymentService extends BaseService {
             };
 
         } catch (error) {
-            this._logError('initialize_payment_error', error);
-            throw error;
+            throw this._handleError(error, 'initialize_payment', paymentData);
         }
     }
 
     /**
-     * Perform fraud check on voter data
-     * @param {Object} voter - Voter information
-     * @returns {Promise<Object>} Fraud check result
-     */
-    async _performFraudCheck(voter) {
-        try {
-            const checks = {
-                passed: true,
-                reasons: []
-            };
-
-            // Check for excessive payments from same IP in short time
-            const recentPayments = await this.paymentRepository.findByIpAddress(
-                voter.ipAddress, 
-                { timeframe: 60 * 60 * 1000 } // Last hour
-            );
-
-            if (recentPayments.length > 5) {
-                checks.passed = false;
-                checks.reasons.push('Excessive payments from IP address');
-            }
-
-            // Check for suspicious email patterns
-            if (voter.email.includes('+') && voter.email.split('+').length > 2) {
-                checks.passed = false;
-                checks.reasons.push('Suspicious email pattern');
-            }
-
-            return checks;
-        } catch (error) {
-            this._logError('fraud_check_error', error);
-            return { passed: true, reasons: [] };
-        }
-    }
-
-    /**
-     * Verify payment with Paystack and update status
-     * @param {string} reference - Payment reference
-     * @returns {Promise<Object>} Verification result
+     * Verify payment and trigger vote casting
      */
     async verifyPayment(reference) {
         try {
             this._log('verify_payment', { reference });
 
-            // Get payment record
             const payment = await this.paymentRepository.findByReference(reference, {
-                populate: [
-                    { path: 'user', select: 'name email' },
-                    { path: 'voteBundle', select: 'name votes price' },
-                    { path: 'event', select: 'name' },
-                    { path: 'category', select: 'name' }
-                ]
+                populate: ['voteBundles', 'event', 'category', 'coupon']
             });
 
             if (!payment) {
@@ -262,92 +212,100 @@ class PaymentService extends BaseService {
 
             if (payment.status === 'success') {
                 return {
-                    success: true,
-                    payment,
+                    verified: true,
+                    data: { payment },
                     message: 'Payment already verified'
                 };
             }
 
-            // Verify with Paystack
             const verification = await this._verifyPaystackTransaction(reference);
 
             if (verification.status === 'success') {
-                // Update payment status
-                const updatedPayment = await this.paymentRepository.updateByReference(reference, {
+                const updatedPayment = await this.paymentRepository.updatePaymentStatus(reference, {
                     status: 'success',
                     paidAt: new Date(verification.paid_at),
-                    'paystackData.transaction_id': verification.id,
-                    'paystackData.gateway_response': verification.gateway_response,
-                    'paystackData.channel': verification.channel,
-                    'paystackData.fees': verification.fees / 100, // Convert from kobo
-                    'paystackData.customer': verification.customer,
-                    'metadata.webhook_verified': false // Will be set to true when webhook is received
+                    paystackData: {
+                        transaction_id: verification.id,
+                        gateway_response: verification.gateway_response,
+                        channel: verification.channel,
+                        fees: verification.fees / 100,
+                        customer: verification.customer
+                    },
+                    'metadata.webhook_verified': false
                 });
 
-                // Send payment confirmation email
+                // Trigger vote casting
                 try {
-                    const user = await this.userRepository.findById(payment.user);
-                    const voteBundle = await this.voteBundleRepository.findById(payment.voteBundle);
-                    const event = await this.eventRepository.findById(voteBundle.event);
-
-                    await this.emailService.sendPaymentConfirmation(
-                        {
-                            name: user.name,
-                            fullName: user.name,
-                            email: user.email
-                        },
-                        {
-                            id: updatedPayment._id,
-                            amount: verification.amount / 100,
-                            currency: verification.currency || 'NGN',
-                            createdAt: updatedPayment.paidAt,
-                            reference: verification.reference,
-                            transactionId: verification.id
-                        },
-                        {
-                            id: event._id,
-                            name: event.name,
-                            title: event.name,
-                            votingStartDate: event.startDate,
-                            votingEndDate: event.endDate
-                        }
-                    );
+                    // Use dynamic import to avoid circular dependency
+                    const { default: VotingService } = await import('./VotingService.js');
+                    const votingService = new VotingService();
                     
-                    this._log('payment_confirmation_email_sent', { 
-                        userId: user._id, 
-                        email: user.email,
-                        reference 
-                    });
-                } catch (emailError) {
-                    this._logError('payment_confirmation_email_failed', emailError, { reference });
-                    // Don't fail the payment verification if email fails
+                    const voteResult = await votingService.completeVote(
+                        reference,
+                        updatedPayment.metadata.candidateId,
+                        updatedPayment.voter.ipAddress
+                    );
+
+                    // Send payment confirmation email
+                    try {
+                        const event = await this.eventRepository.findById(updatedPayment.event);
+                        await this.emailService.sendPaymentConfirmation(
+                            {
+                                name: updatedPayment.voter.name || 'Voter',
+                                email: updatedPayment.voter.email
+                            },
+                            {
+                                id: updatedPayment._id,
+                                amount: verification.amount / 100,
+                                currency: verification.currency || 'GHS',
+                                createdAt: updatedPayment.paidAt,
+                                reference: verification.reference,
+                                transactionId: verification.id
+                            },
+                            {
+                                id: event._id,
+                                name: event.name
+                            }
+                        );
+
+                        this._log('payment_confirmation_email_sent', {
+                            reference,
+                            email: updatedPayment.voter.email
+                        });
+                    } catch (emailError) {
+                        this._logError('payment_confirmation_email_failed', emailError, { reference });
+                    }
+
+                    return {
+                        verified: true,
+                        data: {
+                            payment: updatedPayment,
+                            vote: voteResult.vote
+                        },
+                        message: 'Payment verified and vote cast successfully'
+                    };
+
+                } catch (voteError) {
+                    this._logError('vote_casting_failed', voteError, { reference });
+                    return {
+                        verified: true,
+                        data: { payment: updatedPayment },
+                        message: 'Payment verified but vote casting failed: ' + voteError.message
+                    };
                 }
 
-                this._log('payment_verified', { 
-                    reference,
-                    transactionId: verification.id,
-                    amount: verification.amount / 100 
-                });
-
-                return {
-                    success: true,
-                    payment: updatedPayment,
-                    verification,
-                    message: 'Payment verified successfully'
-                };
-
             } else {
-                // Update payment status as failed
-                await this.paymentRepository.updateByReference(reference, {
+                await this.paymentRepository.updatePaymentStatus(reference, {
                     status: 'failed',
-                    'paystackData.gateway_response': verification.gateway_response
+                    paystackData: {
+                        gateway_response: verification.gateway_response
+                    }
                 });
 
                 return {
-                    success: false,
-                    payment,
-                    verification,
-                    message: 'Payment verification failed'
+                    verified: false,
+                    data: { payment },
+                    message: 'Payment verification failed: ' + verification.gateway_response
                 };
             }
 
@@ -357,109 +315,37 @@ class PaymentService extends BaseService {
     }
 
     /**
-     * Cast vote after successful payment
-     * @param {string} reference - Payment reference
-     * @param {string} candidateId - Candidate ID to vote for
-     * @param {string} voterIp - Voter's IP address
-     * @returns {Promise<Object>} Vote casting result
-     */
-    async castVoteAfterPayment(reference, candidateId, voterIp) {
-        return await this._withTransaction(async (session) => {
-            try {
-                this._log('cast_vote_after_payment', { reference, candidateId });
-
-                // Get verified payment
-                const payment = await this.paymentRepository.findByReference(reference, {
-                    populate: ['user', 'voteBundle', 'event', 'category']
-                });
-
-                if (!payment) {
-                    throw new Error('Payment not found');
-                }
-
-                if (payment.status !== 'success') {
-                    throw new Error('Payment not verified');
-                }
-
-                if (payment.votesRemaining <= 0) {
-                    throw new Error('No votes remaining for this payment');
-                }
-
-                // Validate candidate
-                const candidate = await this.candidateRepository.findById(candidateId);
-                if (!candidate) {
-                    throw new Error('Candidate not found');
-                }
-
-                if (candidate.event.toString() !== payment.event.toString()) {
-                    throw new Error('Candidate does not belong to payment event');
-                }
-
-                if (candidate.category.toString() !== payment.category.toString()) {
-                    throw new Error('Candidate does not belong to payment category');
-                }
-
-                // Cast the vote using VotingService
-                const vote = await this.votingService.castVote({
-                    userId: payment.user._id,
-                    candidateId,
-                    eventId: payment.event._id,
-                    categoryId: payment.category._id,
-                    ipAddress: voterIp,
-                    paymentReference: reference
-                }, { session });
-
-                // Decrement votes remaining
-                await this.paymentRepository.updateByReference(reference, {
-                    $inc: { votesRemaining: -1 }
-                }, { session });
-
-                this._log('vote_cast_after_payment', { 
-                    reference,
-                    voteId: vote._id,
-                    candidateId,
-                    votesRemaining: payment.votesRemaining - 1
-                });
-
-                return {
-                    success: true,
-                    vote,
-                    votesRemaining: payment.votesRemaining - 1,
-                    message: 'Vote cast successfully'
-                };
-
-            } catch (error) {
-                throw this._handleError(error, 'cast_vote_after_payment', { reference, candidateId });
-            }
-        });
-    }
-
-    /**
      * Handle Paystack webhook events
-     * @param {Object} event - Webhook event data
-     * @param {string} signature - Webhook signature
-     * @returns {Promise<Object>} Webhook handling result
      */
     async handleWebhook(event, signature) {
         try {
             this._log('webhook_received', { event: event.event });
 
-            // Verify webhook signature
             if (!this._verifyWebhookSignature(event, signature)) {
                 throw new Error('Invalid webhook signature');
             }
 
-            switch (event.event) {
-                case 'charge.success':
-                    return await this._handleChargeSuccess(event.data);
-                
-                case 'charge.failed':
-                    return await this._handleChargeFailed(event.data);
-                
-                default:
-                    this._log('unhandled_webhook', { event: event.event });
-                    return { success: true, message: 'Event not handled' };
+            if (event.event === 'charge.success') {
+                const result = await this._handleChargeSuccess(event.data);
+                // Trigger vote casting
+                const payment = await this.paymentRepository.findByReference(event.data.reference);
+                if (payment && payment.metadata.candidateId) {
+                    // Use dynamic import to avoid circular dependency
+                    const { default: VotingService } = await import('./VotingService.js');
+                    const votingService = new VotingService();
+                    
+                    await votingService.completeVote(
+                        event.data.reference,
+                        payment.metadata.candidateId,
+                        payment.voter.ipAddress
+                    );
+                }
+                return result;
+            } else if (event.event === 'charge.failed') {
+                return await this._handleChargeFailed(event.data);
             }
+
+            return { success: true, message: 'Event not handled' };
 
         } catch (error) {
             throw this._handleError(error, 'handle_webhook', { event: event.event });
@@ -468,15 +354,12 @@ class PaymentService extends BaseService {
 
     /**
      * Get payment details
-     * @param {string} reference - Payment reference
-     * @returns {Promise<Object>} Payment details
      */
     async getPaymentDetails(reference) {
         try {
             const payment = await this.paymentRepository.findByReference(reference, {
                 populate: [
-                    { path: 'user', select: 'name email' },
-                    { path: 'voteBundle', select: 'name votes price' },
+                    { path: 'voteBundles', select: 'name votes price' },
                     { path: 'event', select: 'name' },
                     { path: 'category', select: 'name' },
                     { path: 'coupon', select: 'code discountType discountValue' }
@@ -489,7 +372,7 @@ class PaymentService extends BaseService {
 
             return {
                 success: true,
-                payment,
+                data: payment,
                 message: 'Payment details retrieved successfully'
             };
 
@@ -498,87 +381,120 @@ class PaymentService extends BaseService {
         }
     }
 
-    // Private helper methods
-
     /**
-     * Validate vote bundle
-     * @param {string} bundleId - Bundle ID
-     * @param {string} eventId - Event ID
-     * @param {string} categoryId - Category ID
-     * @returns {Promise<Object>} Validation result
+     * Calculate bundle costs
      */
-    async _validateVoteBundle(bundleId, eventId, categoryId) {
-        try {
-            const bundle = await this.voteBundleRepository.findById(bundleId);
-            
-            if (!bundle) {
-                return { isValid: false, message: 'Vote bundle not found' };
+    async _calculateBundleCosts(bundles, eventId, categoryId) {
+        const validatedBundles = [];
+        let totalAmount = 0;
+        let totalVotes = 0;
+
+        for (const bundle of bundles) {
+            if (!bundle.bundleId || !bundle.quantity || bundle.quantity <= 0) {
+                throw new Error('Each bundle must have bundleId and positive quantity');
             }
 
-            if (!bundle.isActive) {
-                return { isValid: false, message: 'Vote bundle is not active' };
+            const bundleDoc = await this.voteBundleRepository.findById(bundle.bundleId);
+            if (!bundleDoc) {
+                throw new Error(`Bundle ${bundle.bundleId} not found`);
             }
 
-            if (bundle.event.toString() !== eventId.toString()) {
-                return { isValid: false, message: 'Bundle does not belong to this event' };
+            if (!bundleDoc.isActive) {
+                throw new Error(`Bundle ${bundle.bundleId} is not active`);
             }
 
-            if (bundle.category.toString() !== categoryId.toString()) {
-                return { isValid: false, message: 'Bundle does not belong to this category' };
+            if (bundleDoc.applicableEvents.length > 0 && !bundleDoc.applicableEvents.some(id => id.toString() === eventId)) {
+                throw new Error(`Bundle ${bundle.bundleId} not applicable to event`);
             }
 
-            return { isValid: true, bundle };
+            if (bundleDoc.applicableCategories.length > 0 && !bundleDoc.applicableCategories.some(id => id.toString() === categoryId)) {
+                throw new Error(`Bundle ${bundle.bundleId} not applicable to category`);
+            }
 
-        } catch (error) {
-            return { isValid: false, message: 'Error validating bundle: ' + error.message };
+            validatedBundles.push({
+                bundleId: bundle.bundleId,
+                quantity: bundle.quantity,
+                price: bundleDoc.price,
+                votes: bundleDoc.votes
+            });
+
+            totalAmount += bundleDoc.price * bundle.quantity;
+            totalVotes += bundleDoc.votes * bundle.quantity;
         }
+
+        return {
+            totalAmount,
+            totalVotes,
+            validatedBundles
+        };
     }
 
     /**
-     * Validate and apply coupon
-     * @param {string} couponCode - Coupon code
-     * @param {string} eventId - Event ID
-     * @param {string} categoryId - Category ID
-     * @param {number} amount - Original amount
-     * @returns {Promise<Object>} Validation result
+     * Apply coupons
      */
-    async _validateAndApplyCoupon(couponCode, eventId, categoryId, amount) {
-        try {
-            const coupon = await this.couponRepository.findByCode(couponCode);
-            
-            if (!coupon) {
-                return { isValid: false, message: 'Coupon not found' };
-            }
+    async _applyCoupons(coupons, bundles, eventId, categoryId, totalAmount) {
+        const appliedCoupons = [];
+        let discountedAmount = totalAmount;
 
-            // Use CouponService to validate and calculate discount
-            const validation = await this.couponService.validateCoupon({
+        for (const couponCode of coupons) {
+            const couponValidation = await this.couponService.validateCoupon({
                 code: couponCode,
                 eventId,
                 categoryId,
-                amount
+                amount: discountedAmount
             });
 
-            if (!validation.isValid) {
-                return validation;
+            if (!couponValidation.isValid) {
+                continue;
             }
 
-            return {
-                isValid: true,
-                coupon,
-                discountAmount: validation.discountAmount
+            discountedAmount -= couponValidation.discountAmount;
+            appliedCoupons.push(couponValidation.coupon);
+        }
+
+        return {
+            discountedAmount: Math.max(0, discountedAmount),
+            appliedCoupons
+        };
+    }
+
+    /**
+     * Perform fraud check
+     */
+    async _performFraudCheck(voter) {
+        try {
+            const checks = {
+                passed: true,
+                reasons: []
             };
 
+            const recentPayments = await this.paymentRepository.findByIpAddress(
+                voter.ipAddress,
+                { timeframe: 60 * 60 * 1000 }
+            );
+
+            if (recentPayments.length > 5) {
+                checks.passed = false;
+                checks.reasons.push('Excessive payments from IP address');
+            }
+
+            if (voter.email.includes('+') && voter.email.split('+').length > 2) {
+                checks.passed = false;
+                checks.reasons.push('Suspicious email pattern');
+            }
+
+            return checks;
+
         } catch (error) {
-            return { isValid: false, message: 'Error validating coupon: ' + error.message };
+            this._logError('fraud_check_error', error);
+            return { passed: true, reasons: [] };
         }
     }
 
     /**
      * Initialize Paystack transaction
-     * @param {Object} data - Transaction data
-     * @returns {Promise<Object>} Paystack response
      */
-    async _initializePaystackTransaction(data) {
+    async _initializePaystackPayment(data) {
         try {
             const response = await fetch(`${this.paystackBaseUrl}/transaction/initialize`, {
                 method: 'POST',
@@ -604,8 +520,6 @@ class PaymentService extends BaseService {
 
     /**
      * Verify Paystack transaction
-     * @param {string} reference - Transaction reference
-     * @returns {Promise<Object>} Verification result
      */
     async _verifyPaystackTransaction(reference) {
         try {
@@ -632,9 +546,6 @@ class PaymentService extends BaseService {
 
     /**
      * Verify webhook signature
-     * @param {Object} event - Webhook event
-     * @param {string} signature - Webhook signature
-     * @returns {boolean} Verification result
      */
     _verifyWebhookSignature(event, signature) {
         try {
@@ -645,40 +556,34 @@ class PaymentService extends BaseService {
             
             return hash === signature;
         } catch (error) {
-            this._log('webhook_signature_error', { error: error.message });
+            this._logError('webhook_signature_error', error);
             return false;
         }
     }
 
     /**
      * Handle successful charge webhook
-     * @param {Object} data - Charge data
-     * @returns {Promise<Object>} Handling result
      */
     async _handleChargeSuccess(data) {
         try {
             const reference = data.reference;
-            
-            const updatedPayment = await this.paymentRepository.updateByReference(reference, {
+
+            const updatedPayment = await this.paymentRepository.updatePaymentStatus(reference, {
                 status: 'success',
                 paidAt: new Date(data.paid_at),
-                'paystackData.transaction_id': data.id,
-                'paystackData.gateway_response': data.gateway_response,
-                'paystackData.channel': data.channel,
-                'paystackData.fees': data.fees / 100,
-                'paystackData.customer': data.customer,
+                paystackData: {
+                    transaction_id: data.id,
+                    gateway_response: data.gateway_response,
+                    channel: data.channel,
+                    fees: data.fees / 100,
+                    customer: data.customer
+                },
                 'metadata.webhook_verified': true
-            });
-
-            this._log('webhook_charge_success', { 
-                reference,
-                transactionId: data.id,
-                amount: data.amount / 100
             });
 
             return {
                 success: true,
-                payment: updatedPayment,
+                data: { payment: updatedPayment },
                 message: 'Charge success processed'
             };
 
@@ -689,27 +594,22 @@ class PaymentService extends BaseService {
 
     /**
      * Handle failed charge webhook
-     * @param {Object} data - Charge data
-     * @returns {Promise<Object>} Handling result
      */
     async _handleChargeFailed(data) {
         try {
             const reference = data.reference;
-            
-            const updatedPayment = await this.paymentRepository.updateByReference(reference, {
-                status: 'failed',
-                'paystackData.gateway_response': data.gateway_response,
-                'metadata.webhook_verified': true
-            });
 
-            this._log('webhook_charge_failed', { 
-                reference,
-                reason: data.gateway_response
+            const updatedPayment = await this.paymentRepository.updatePaymentStatus(reference, {
+                status: 'failed',
+                paystackData: {
+                    gateway_response: data.gateway_response
+                },
+                'metadata.webhook_verified': true
             });
 
             return {
                 success: true,
-                payment: updatedPayment,
+                data: { payment: updatedPayment },
                 message: 'Charge failure processed'
             };
 
@@ -720,7 +620,6 @@ class PaymentService extends BaseService {
 
     /**
      * Generate unique payment reference
-     * @returns {string} Payment reference
      */
     _generatePaymentReference() {
         const timestamp = Date.now();
@@ -729,15 +628,11 @@ class PaymentService extends BaseService {
     }
 
     /**
-     * Validate required fields
-     * @param {Object} data - Data to validate
-     * @param {Array} requiredFields - Required field names
+     * Validate ObjectId
      */
-    _validateRequiredFields(data, requiredFields) {
-        for (const field of requiredFields) {
-            if (!data[field]) {
-                throw new Error(`${field} is required`);
-            }
+    _validateObjectId(id, name) {
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            throw new Error(`Invalid ${name}`);
         }
     }
 }

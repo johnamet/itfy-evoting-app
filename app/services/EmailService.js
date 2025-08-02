@@ -52,7 +52,7 @@ class EmailService extends BaseService {
 
         // Initialize transporter
         this.transporter = null;
-        this._initializeTransporter();
+        // this._initializeTransporter();
 
         // Template cache
         this.templateCache = new Map();

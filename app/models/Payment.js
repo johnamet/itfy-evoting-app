@@ -60,12 +60,12 @@ class Payment extends BaseModel {
                     trim: true
                 }
             },
-            // Vote bundle being purchased
-            voteBundle: {
+            // Vote bundles being purchased
+            voteBundles: [{
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'VoteBundle',
                 required: true
-            },
+            }],
             // Event for which the bundle is purchased
             event: {
                 type: mongoose.Schema.Types.ObjectId,
