@@ -164,7 +164,7 @@ class VoteRepository extends BaseRepository {
     async getVotesByCandidate(candidateId, options = {}) {
         try {
             const criteria = { candidate: new mongoose.Types.ObjectId(candidateId) };
-            return await this.findWithPagination(criteria, options.page || 1, options.limit || 10, {
+            return await this.find(criteria, options.page || 1, options.limit || 10, {
                 ...options,
                 populate: [
                     { path: 'voter', select: 'name email' },

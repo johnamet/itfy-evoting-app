@@ -34,7 +34,7 @@ router.delete('/:id', requireDelete, (req, res) => candidateController.deleteCan
 router.get('/event/:eventId', optionalAuth, (req, res) => candidateController.getCandidatesByEvent(req, res));
 router.get('/category/:categoryId', optionalAuth, (req, res) => candidateController.getCandidatesByCategory(req, res));
 router.get('/:id/votes', optionalAuth, (req, res) => candidateController.getCandidateVoteCount(req, res));
-router.get('/:id/stats', requireRead, (req, res) => candidateController.getCandidateStats(req, res));
+router.get('/:id/stats', (req, res) => candidateController.getCandidateStats(req, res));
 
 // File operations
 router.post('/:id/image', requireUpdate, upload.single('image'), (req, res) => candidateController.uploadCandidateImage(req, res));

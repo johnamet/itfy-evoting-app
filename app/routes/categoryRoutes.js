@@ -27,7 +27,7 @@ router.delete('/:id', requireDelete, (req, res) => categoryController.deleteCate
 
 // Category operations
 router.get('/event/:eventId', optionalAuth, (req, res) => categoryController.getCategoriesByEvent(req, res));
-router.get('/:id/stats', requireRead, (req, res) => categoryController.getCategoryStats(req, res));
+router.get('/:id/stats', (req, res) => categoryController.getCategoryStats(req, res));
 router.patch('/:id/status', requireUpdate, (req, res) => categoryController.updateCategoryStatus(req, res));
 router.post('/reorder', requireUpdate, (req, res) => categoryController.reorderCategories(req, res));
 

@@ -28,10 +28,10 @@ router.put('/:id', requireUpdate, (req, res) => eventController.updateEvent(req,
 router.delete('/:id', requireDelete, (req, res) => eventController.deleteEvent(req, res));
 
 // Event operations
-router.get('/:id/stats', requireRead, (req, res) => eventController.getEventStats(req, res));
-router.get('/:id/participants', requireRead, (req, res) => eventController.getEventParticipants(req, res));
-router.post('/:id/register', requireRead, (req, res) => eventController.registerForEvent(req, res)); // Users can register themselves
-router.delete('/:id/register', requireRead, (req, res) => eventController.unregisterFromEvent(req, res)); // Users can unregister themselves
-router.patch('/:id/status', requireUpdate, (req, res) => eventController.updateEventStatus(req, res));
+router.get('/:id/stats', (req, res) => eventController.getEventStats(req, res));
+router.get('/:id/participants', (req, res) => eventController.getEventParticipants(req, res));
+router.post('/:id/register', (req, res) => eventController.registerForEvent(req, res)); // Users can register themselves
+router.delete('/:id/register', (req, res) => eventController.unregisterFromEvent(req, res)); // Users can unregister themselves
+router.patch('/:id/status', (req, res) => eventController.updateEventStatus(req, res));
 
 export default router;

@@ -524,6 +524,117 @@ class VotingService extends BaseService {
     }
 
     /**
+     * Get vote bundles by event
+     * @param {String} eventId - Event ID
+     * @param {Object} query - Query parameters
+     * @returns {Promise<Object>} Vote bundles
+     */
+    async getVoteBundlesByEvent(eventId, query = {}) {
+        try {
+            this._log('get_vote_bundles_by_event', { eventId, query });
+
+            this._validateObjectId(eventId, 'Event ID');
+
+            const { page, limit } = this._generatePaginationOptions(query.page, query.limit);
+            
+            const options = {
+                page,
+                limit,
+                populate: ['applicableEvents', 'applicableCategories'],
+                sort: { popular: -1, votes: -1, price: 1 }
+            };
+
+            const bundles = await this.voteBundleRepository.findByEvent(eventId, options);
+            const total = await this.voteBundleRepository.count({
+                applicableEvents: eventId,
+                isActive: true
+            });
+
+            return {
+                success: true,
+                data: this._formatPaginationResponse(bundles, total, page, limit)
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_vote_bundles_by_event', { eventId });
+        }
+    }
+
+    /**
+     * Get vote bundles by category
+     * @param {String} categoryId - Category ID
+     * @param {Object} query - Query parameters
+     * @returns {Promise<Object>} Vote bundles
+     */
+    async getVoteBundlesByCategory(categoryId, query = {}) {
+        try {
+            this._log('get_vote_bundles_by_category', { categoryId, query });
+
+            this._validateObjectId(categoryId, 'Category ID');
+
+            const { page, limit } = this._generatePaginationOptions(query.page, query.limit);
+            
+            const options = {
+                page,
+                limit,
+                populate: ['applicableEvents', 'applicableCategories'],
+                sort: { popular: -1, votes: -1, price: 1 }
+            };
+
+            const bundles = await this.voteBundleRepository.findByCategory(categoryId, options);
+            const total = await this.voteBundleRepository.count({
+                applicableCategories: categoryId,
+                isActive: true
+            });
+
+            return {
+                success: true,
+                data: this._formatPaginationResponse(bundles, total, page, limit)
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_vote_bundles_by_category', { categoryId });
+        }
+    }
+
+    /**
+     * Get vote bundles by event and category
+     * @param {String} eventId - Event ID
+     * @param {String} categoryId - Category ID
+     * @param {Object} query - Query parameters
+     * @returns {Promise<Object>} Vote bundles
+     */
+    async getVoteBundlesByEventAndCategory(eventId, categoryId, query = {}) {
+        try {
+            this._log('get_vote_bundles_by_event_and_category', { eventId, categoryId, query });
+
+            this._validateObjectId(eventId, 'Event ID');
+            this._validateObjectId(categoryId, 'Category ID');
+
+            const { page, limit } = this._generatePaginationOptions(query.page, query.limit);
+            
+            const options = {
+                page,
+                limit,
+                populate: ['applicableEvents', 'applicableCategories'],
+                sort: { popular: -1, votes: -1, price: 1 }
+            };
+
+            const bundles = await this.voteBundleRepository.findByEventAndCategory(eventId, categoryId, options);
+            const total = await this.voteBundleRepository.count({
+                applicableEvents: eventId,
+                applicableCategories: categoryId,
+                isActive: true
+            });
+
+            return {
+                success: true,
+                data: this._formatPaginationResponse(bundles, total, page, limit)
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_vote_bundles_by_event_and_category', { eventId, categoryId });
+        }
+    }
+
+    /**
      * Validate vote data
      */
     async _validateVoteData(voteData) {

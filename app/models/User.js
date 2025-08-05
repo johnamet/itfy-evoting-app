@@ -94,9 +94,18 @@ class User extends BaseModel {
 
         // Static method to find user by email and verify password
         this.schema.statics.findByEmailAndPassword = async function(email, password) {
+            console.log('🔍 Finding user by email:', email);
             const user = await this.findOne({ email: email.toLowerCase() });
             if (!user) return null;
-            
+            console.log('🔑 Verifying password for user:', user._id);
+            if (!user.password) {
+                console.log('⚠️ User has no password set');
+                return null;
+            }
+
+            console.log('🔐 Password found, verifying...');
+
+            console.log('🔐 Comparing passwords...', password);
             const isMatch = await user.verifyPassword(password);
             return isMatch ? user : null;
         };

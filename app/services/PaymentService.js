@@ -382,6 +382,124 @@ class PaymentService extends BaseService {
     }
 
     /**
+     * Get payment statistics
+     * @param {Object} filters - Filter criteria
+     * @returns {Promise<Object>} Payment statistics
+     */
+    async getPaymentStatistics(filters = {}) {
+        try {
+            this._log('get_payment_statistics', { filters });
+
+            const stats = await this.paymentRepository.getPaymentStatistics(filters);
+
+            return {
+                success: true,
+                data: stats
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_payment_statistics', { filters });
+        }
+    }
+
+    /**
+     * Get payments with filters and pagination
+     * @param {Object} filters - Filter criteria
+     * @param {Object} options - Pagination options
+     * @returns {Promise<Object>} Paginated payments
+     */
+    async getPayments(filters = {}, options = {}) {
+        try {
+            this._log('get_payments', { filters, options });
+
+            const { page = 1, limit = 20 } = options;
+            const { page: paginationPage, limit: paginationLimit } = this._generatePaginationOptions(page, limit);
+
+            const payments = await this.paymentRepository.getPayments(filters, {
+                page: paginationPage,
+                limit: paginationLimit
+            });
+
+            const total = await this.paymentRepository.countPayments(filters);
+
+            return {
+                success: true,
+                data: this._formatPaginationResponse(payments, total, paginationPage, paginationLimit)
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_payments', { filters, options });
+        }
+    }
+
+    /**
+     * Get payments by event
+     * @param {String} eventId - Event ID
+     * @param {Object} options - Query options
+     * @returns {Promise<Object>} Event payments
+     */
+    async getPaymentsByEvent(eventId, options = {}) {
+        try {
+            this._log('get_payments_by_event', { eventId, options });
+
+            this._validateObjectId(eventId, 'Event ID');
+
+            const { page = 1, limit = 20 } = options;
+            const payments = await this.paymentRepository.getPaymentsByEvent(eventId, { page, limit });
+            const total = await this.paymentRepository.countPayments({ eventId });
+
+            return {
+                success: true,
+                data: this._formatPaginationResponse(payments, total, page, limit)
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_payments_by_event', { eventId });
+        }
+    }
+
+    /**
+     * Get payments by category
+     * @param {String} categoryId - Category ID
+     * @param {Object} options - Query options
+     * @returns {Promise<Object>} Category payments
+     */
+    async getPaymentsByCategory(categoryId, options = {}) {
+        try {
+            this._log('get_payments_by_category', { categoryId, options });
+
+            this._validateObjectId(categoryId, 'Category ID');
+
+            const { page = 1, limit = 20 } = options;
+            const payments = await this.paymentRepository.getPaymentsByCategory(categoryId, { page, limit });
+            const total = await this.paymentRepository.countPayments({ categoryId });
+
+            return {
+                success: true,
+                data: this._formatPaginationResponse(payments, total, page, limit)
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_payments_by_category', { categoryId });
+        }
+    }
+
+    /**
+     * Get payment summary
+     * @param {Object} filters - Filter criteria
+     * @returns {Promise<Object>} Payment summary
+     */
+    async getPaymentSummary(filters = {}) {
+        try {
+            this._log('get_payment_summary', { filters });
+
+            const summary = await this.paymentRepository.getPaymentSummary(filters);
+            return {
+                success: true,
+                data: summary
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_payment_summary', { filters });
+        }
+    }
+
+    /**
      * Calculate bundle costs
      */
     async _calculateBundleCosts(bundles, eventId, categoryId) {

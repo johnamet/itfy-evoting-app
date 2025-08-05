@@ -257,4 +257,49 @@ export default class VotingController extends BaseController {
             return this.handleError(res, error, 'Failed to estimate voting cost');
         }
     }
+
+    /**
+     * Get vote bundles by event
+     */
+    async getVoteBundlesByEvent(req, res) {
+        try {
+            const { eventId } = req.params;
+            const query = req.query;
+
+            const bundles = await this.votingService.getVoteBundlesByEvent(eventId, query);
+            return this.sendSuccess(res, bundles, 'Event vote bundles retrieved successfully');
+        } catch (error) {
+            return this.handleError(res, error, 'Failed to get event vote bundles');
+        }
+    }
+
+    /**
+     * Get vote bundles by category
+     */
+    async getVoteBundlesByCategory(req, res) {
+        try {
+            const { categoryId } = req.params;
+            const query = req.query;
+
+            const bundles = await this.votingService.getVoteBundlesByCategory(categoryId, query);
+            return this.sendSuccess(res, bundles, 'Category vote bundles retrieved successfully');
+        } catch (error) {
+            return this.handleError(res, error, 'Failed to get category vote bundles');
+        }
+    }
+
+    /**
+     * Get vote bundles by event and category
+     */
+    async getVoteBundlesByEventAndCategory(req, res) {
+        try {
+            const { eventId, categoryId } = req.params;
+            const query = req.query;
+
+            const bundles = await this.votingService.getVoteBundlesByEventAndCategory(eventId, categoryId, query);
+            return this.sendSuccess(res, bundles, 'Event and category vote bundles retrieved successfully');
+        } catch (error) {
+            return this.handleError(res, error, 'Failed to get event and category vote bundles');
+        }
+    }
 }

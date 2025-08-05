@@ -225,7 +225,7 @@ class EventService extends BaseService {
 
             // Send event notification to users (in the background)
             this._sendEventNotificationEmails(event, 'started').catch(emailError => {
-                this._logError('event_notification_email_failed', emailError, { eventId });
+                this._log('event_notification_email_failed', { eventId, error: emailError.message }, 'error');
             });
 
             this._log('start_event_success', { eventId });
@@ -652,11 +652,12 @@ class EventService extends BaseService {
                         emailsSent++;
                     }).catch(error => {
                         emailsFailed++;
-                        this._logError('individual_event_notification_failed', error, { 
+                        this._log('individual_event_notification_failed', { 
                             userId: user._id, 
                             email: user.email,
-                            eventId: event._id 
-                        });
+                            eventId: event._id,
+                            error: error.message
+                        }, 'error');
                     })
                 );
 
@@ -677,7 +678,7 @@ class EventService extends BaseService {
             });
 
         } catch (error) {
-            this._logError('send_event_notifications_error', error, { eventId: event._id });
+            this._log('send_event_notifications_error', { eventId: event._id, error: error.message }, 'error');
         }
     }
 
@@ -725,7 +726,7 @@ class EventService extends BaseService {
 
             // Send event notification emails (async)
             this._sendEventNotificationEmails(event, 'published').catch(emailError => {
-                this._logError('event_publish_notification_failed', emailError, { eventId });
+                this._log('event_publish_notification_failed', { eventId, error: emailError.message }, 'error');
             });
 
             this._log('publish_event_success', { eventId });
@@ -742,6 +743,210 @@ class EventService extends BaseService {
             };
         } catch (error) {
             throw this._handleError(error, 'publish_event', { eventId });
+        }
+    }
+
+    /**
+     * Get event statistics
+     * @param {String} eventId - Event ID
+     * @returns {Promise<Object>} Event statistics
+     */
+    async getEventStats(eventId) {
+        try {
+            this._log('get_event_stats', { eventId });
+
+            this._validateObjectId(eventId, 'Event ID');
+
+            // Get basic event stats from repository
+            const basicStats = await this.eventRepository.getEventStats(eventId);
+            if (!basicStats) {
+                throw new Error('Event not found');
+            }
+
+            // Get additional statistics
+            const [participants, votes, revenue] = await Promise.all([
+                this._getEventParticipants(eventId),
+                this._getDetailedVoteStats(eventId),
+                this._getEventRevenue(eventId)
+            ]);
+
+            // Calculate voting completion percentage
+            const votingCompletion = participants.total > 0 
+                ? Math.round((participants.voted / participants.total) * 100) 
+                : 0;
+
+            const stats = {
+                totalParticipants: participants.total,
+                totalVotes: basicStats.totalVotes || 0,
+                categoriesCount: basicStats.categoryCount || 0,
+                candidatesCount: basicStats.candidateCount || 0,
+                revenue: revenue.total,
+                votingCompletion,
+                // Additional detailed stats
+                details: {
+                    eventName: basicStats.name,
+                    status: basicStats.status,
+                    isActive: basicStats.isActive,
+                    startDate: basicStats.startDate,
+                    endDate: basicStats.endDate,
+                    votingDuration: Math.round(basicStats.votingDuration || 0),
+                    participantsBreakdown: participants,
+                    voteBreakdown: votes,
+                    revenueBreakdown: revenue
+                }
+            };
+
+            this._log('get_event_stats_success', { eventId, stats: { ...stats, details: undefined } });
+
+            return {
+                success: true,
+                data: stats
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_event_stats', { eventId });
+        }
+    }
+
+    /**
+     * Get event participants statistics
+     * @param {String} eventId - Event ID
+     * @returns {Promise<Object>} Participants statistics
+     * @private
+     */
+    async _getEventParticipants(eventId) {
+        try {
+            // Get total registered participants
+            const totalVotes = await this.voteRepository.getVotesByEvent(eventId);
+            const uniqueVoters = new Set(totalVotes.map(vote => vote.user?.toString()));
+            
+            // Get all candidates for this event (they are also participants)
+            const candidates = await this.candidateRepository.findByEvent(eventId);
+            const candidateUsers = new Set(candidates.map(candidate => candidate.user?.toString()));
+
+            // Combine voters and candidates for total participants
+            const allParticipants = new Set([...uniqueVoters, ...candidateUsers]);
+
+            return {
+                total: allParticipants.size,
+                voted: uniqueVoters.size,
+                candidates: candidateUsers.size,
+                votingRate: allParticipants.size > 0 
+                    ? Math.round((uniqueVoters.size / allParticipants.size) * 100) 
+                    : 0
+            };
+        } catch (error) {
+            this._log('get_event_participants_error', { eventId, error: error.message }, 'error');
+            return { total: 0, voted: 0, candidates: 0, votingRate: 0 };
+        }
+    }
+
+    /**
+     * Get detailed vote statistics
+     * @param {String} eventId - Event ID
+     * @returns {Promise<Object>} Detailed vote statistics
+     * @private
+     */
+    async _getDetailedVoteStats(eventId) {
+        try {
+            const votes = await this.voteRepository.getVotesByEvent(eventId);
+            
+            let totalAmount = 0;
+            let totalVotesCount = 0;
+            const votesByCategory = {};
+            const votesByCandidate = {};
+
+            votes.forEach(vote => {
+                if (vote.voteBundles && Array.isArray(vote.voteBundles)) {
+                    vote.voteBundles.forEach(bundle => {
+                        const votes = bundle.votes || 0;
+                        const amount = bundle.amount || 0;
+                        
+                        totalVotesCount += votes;
+                        totalAmount += amount;
+
+                        // Group by category
+                        const categoryId = bundle.category?.toString();
+                        if (categoryId) {
+                            if (!votesByCategory[categoryId]) {
+                                votesByCategory[categoryId] = { votes: 0, amount: 0 };
+                            }
+                            votesByCategory[categoryId].votes += votes;
+                            votesByCategory[categoryId].amount += amount;
+                        }
+
+                        // Group by candidate
+                        const candidateId = bundle.candidate?.toString();
+                        if (candidateId) {
+                            if (!votesByCandidate[candidateId]) {
+                                votesByCandidate[candidateId] = { votes: 0, amount: 0 };
+                            }
+                            votesByCandidate[candidateId].votes += votes;
+                            votesByCandidate[candidateId].amount += amount;
+                        }
+                    });
+                }
+            });
+
+            return {
+                totalVotes: totalVotesCount,
+                totalAmount,
+                averageVoteValue: totalVotesCount > 0 ? totalAmount / totalVotesCount : 0,
+                votesByCategory,
+                votesByCandidate,
+                uniqueVoters: votes.length
+            };
+        } catch (error) {
+            this._log('get_detailed_vote_stats_error', { eventId, error: error.message }, 'error');
+            return { 
+                totalVotes: 0, 
+                totalAmount: 0, 
+                averageVoteValue: 0, 
+                votesByCategory: {}, 
+                votesByCandidate: {},
+                uniqueVoters: 0 
+            };
+        }
+    }
+
+    /**
+     * Get event revenue statistics
+     * @param {String} eventId - Event ID
+     * @returns {Promise<Object>} Revenue statistics
+     * @private
+     */
+    async _getEventRevenue(eventId) {
+        try {
+            const votes = await this.voteRepository.getVotesByEvent(eventId);
+            
+            let totalRevenue = 0;
+            let registrationRevenue = 0;
+            let votingRevenue = 0;
+
+            votes.forEach(vote => {
+                if (vote.voteBundles && Array.isArray(vote.voteBundles)) {
+                    vote.voteBundles.forEach(bundle => {
+                        const amount = bundle.amount || 0;
+                        totalRevenue += amount;
+                        votingRevenue += amount;
+                    });
+                }
+
+                // Add registration fee if applicable
+                if (vote.registrationFee) {
+                    registrationRevenue += vote.registrationFee;
+                    totalRevenue += vote.registrationFee;
+                }
+            });
+
+            return {
+                total: totalRevenue,
+                voting: votingRevenue,
+                registration: registrationRevenue,
+                averagePerParticipant: votes.length > 0 ? totalRevenue / votes.length : 0
+            };
+        } catch (error) {
+            this._log('get_event_revenue_error', { eventId, error: error.message }, 'error');
+            return { total: 0, voting: 0, registration: 0, averagePerParticipant: 0 };
         }
     }
 }

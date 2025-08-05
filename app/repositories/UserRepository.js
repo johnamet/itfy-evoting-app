@@ -82,19 +82,25 @@ class UserRepository extends BaseRepository {
             const user = await this.findByEmailWithPassword(email, {
                 populate: 'role'
             });
-            
+
+            console.log("Found user:", user);
+
             if (!user) {
                 return null;
             }
             
-            const isValidPassword = await bcrypt.compare(password, user.password);
+            const isValidPassword = await user.verifyPassword(password);
+
+            console.log("Password validation result:", isValidPassword);
             
             if (!isValidPassword) {
                 return null;
             }
             
             // Remove password from returned object
-            const userObj = user.toJSON();            
+            const userObj = user.toJSON();  
+            
+            console.log(userObj)
             return userObj;
         } catch (error) {
             throw this._handleError(error, 'authenticate');

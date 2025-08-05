@@ -41,7 +41,10 @@ router.get('/verify-vote/:voteId', requireRead, (req, res) => votingController.v
 
 // Vote bundles (admin operations)
 router.post('/bundles', requireLevel(3), (req, res) => votingController.createVoteBundle(req, res));
-router.get('/bundles/:bundleId', requireLevel(2), (req, res) => votingController.getVoteBundle(req, res));
+router.get('/bundles/:bundleId',  (req, res) => votingController.getVoteBundle(req, res));
+router.get('/bundles/event/:eventId',  (req, res) => votingController.getVoteBundlesByEvent(req, res));
+router.get('/bundles/category/:categoryId', (req, res) => votingController.getVoteBundlesByCategory(req, res));
+router.get('/bundles/event/:eventId/category/:categoryId', (req, res) => votingController.getVoteBundlesByEventAndCategory(req, res));
 
 // Statistics and analytics
 router.get('/stats/:eventId', requireRead, (req, res) => votingController.getVotingStats(req, res));

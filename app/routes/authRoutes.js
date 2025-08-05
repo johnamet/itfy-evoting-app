@@ -3,6 +3,11 @@
  * Auth Routes
  * 
  * Defines API endpoints for authentication operations.
+ * 
+ * @swagger
+ * tags:
+ *   name: Authentication
+ *   description: User authentication and authorization operations
  */
 
 import express from 'express';

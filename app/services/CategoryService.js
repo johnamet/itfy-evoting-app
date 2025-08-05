@@ -11,6 +11,7 @@ import CategoryRepository from '../repositories/CategoryRepository.js';
 import EventRepository from '../repositories/EventRepository.js';
 import CandidateRepository from '../repositories/CandidateRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
+import VoteRepository from '../repositories/VoteRepository.js';
 import CacheService from './CacheService.js';
 
 class CategoryService extends BaseService {
@@ -20,6 +21,7 @@ class CategoryService extends BaseService {
         this.eventRepository = new EventRepository();
         this.candidateRepository = new CandidateRepository();
         this.activityRepository = new ActivityRepository();
+        this.voteRepository = new VoteRepository();
     }
 
     /**
@@ -50,7 +52,7 @@ class CategoryService extends BaseService {
 
             // Check for duplicate category name in the same event
             const existingCategory = await this.categoryRepository.findByNameAndEvent(
-                categoryData.name, 
+                categoryData.name,
                 categoryData.eventId
             );
             if (existingCategory) {
@@ -66,7 +68,7 @@ class CategoryService extends BaseService {
 
             const category = await this.categoryRepository.create(categoryToCreate);
 
-            if (category){
+            if (category) {
                 this.eventRepository.updateById(event._id, {
                     $push: { categories: category._id }
                 });
@@ -78,7 +80,7 @@ class CategoryService extends BaseService {
                 action: 'category_create',
                 targetType: 'category',
                 targetId: category._id,
-                metadata: { 
+                metadata: {
                     categoryName: category.name,
                     eventId: category.eventId,
                     eventName: event.name
@@ -136,7 +138,7 @@ class CategoryService extends BaseService {
             // Check for duplicate name if name is being updated
             if (updateData.name && updateData.name !== currentCategory.name) {
                 const existingCategory = await this.categoryRepository.findByNameAndEvent(
-                    updateData.name, 
+                    updateData.name,
                     currentCategory.eventId
                 );
                 if (existingCategory) {
@@ -161,7 +163,7 @@ class CategoryService extends BaseService {
                 action: 'category_update',
                 targetType: 'category',
                 targetId: categoryId,
-                metadata: { 
+                metadata: {
                     categoryName: updatedCategory.name,
                     updatedFields: Object.keys(sanitizedData),
                     eventId: updatedCategory.eventId
@@ -229,7 +231,7 @@ class CategoryService extends BaseService {
                 action: 'category_delete',
                 targetType: 'category',
                 targetId: categoryId,
-                metadata: { 
+                metadata: {
                     categoryName: category.name,
                     eventId: category.eventId
                 }
@@ -254,18 +256,25 @@ class CategoryService extends BaseService {
      * @param {String} categoryId - Category ID
      * @returns {Promise<Object>} Category details
      */
-    async getCategoryById(categoryId) {
+    async getCategoryById(categoryId, includeDetails = false) {
         try {
             this._log('get_category_by_id', { categoryId });
 
             this._validateObjectId(categoryId, 'Category ID');
 
             // Check cache first
-            const cacheKey = `category:${categoryId}`;
+            const cacheKey = `category:${categoryId}:${includeDetails ? 'details' : 'summary'}`;
             let category = CacheService.get(cacheKey);
+            if (includeDetails && !category) {
+                category = await this.categoryRepository.findById(categoryId, { populate: ['event', 'candidates', 'updatedBy', 'createdBy'] });
+                if (!category) {
+                    throw new Error('Category not found');
+                }
 
-            if (!category) {
-                category = await this.categoryRepository.findById(categoryId);
+                // Cache the category
+                CacheService.set(cacheKey, category, 1800000); // 30 minutes
+            } else if (!includeDetails) {
+                category = await this.categoryRepository.findById(categoryId)
                 if (!category) {
                     throw new Error('Category not found');
                 }
@@ -273,6 +282,7 @@ class CategoryService extends BaseService {
                 // Cache the category
                 CacheService.set(cacheKey, category, 1800000); // 30 minutes
             }
+
 
             // Get candidates count
             const candidates = await this.candidateRepository.findByCategory(categoryId);
@@ -282,7 +292,20 @@ class CategoryService extends BaseService {
                 success: true,
                 category: {
                     id: category._id,
-                   ...category.toJSON(),
+                    id: category._id,
+                    name: category.name,
+                    description: category.description,
+                    event: category.event,
+                    candidates: category.candidates,
+                    isActive: category.isActive,
+                    icon: category.icon,
+                    isVotingOpen: category.isVotingOpen,
+                    votingDeadline: category.votingDeadline,
+                    status: category.status,
+                    createdAt: category.createdAt,
+                    updatedAt: category.updatedAt,
+                    createdBy: category.createdBy,
+                    updatedBy: category.updatedBy,
                     candidatesCount,
                 }
             };
@@ -308,12 +331,12 @@ class CategoryService extends BaseService {
             let categories = CacheService.get(cacheKey);
 
             if (!categories) {
-                categories = await this.categoryRepository.find({ event:eventId }, {
+                categories = await this.categoryRepository.find({ event: eventId }, {
                     skip: query.skip || 0,
                     limit: query.limit || 50,
                     sort: { createdAt: -1 }
                 });
-                
+
                 // Cache the categories
                 CacheService.set(cacheKey, categories, 1800000); // 30 minutes
             }
@@ -321,10 +344,24 @@ class CategoryService extends BaseService {
             // Get candidates count for each category
             const categoriesWithStats = await Promise.all(
                 categories.map(async (category) => {
+                    console.log(`Fetching candidates for category ${category._id}`);
                     const candidates = await this.candidateRepository.findByCategory(category._id);
                     return {
                         id: category._id,
-                        ...category.toJSON(),
+                        name: category.name,
+                        description: category.description,
+                        event: category.event,
+                        candidates: category.candidates,
+                        isActive: category.isActive,
+                        icon: category.icon,
+                        isVotingOpen: category.isVotingOpen,
+                        votingDeadline: category.votingDeadline,
+                        status: category.status,
+                        createdAt: category.createdAt,
+                        updatedAt: category.updatedAt,
+                        createdBy: category.createdBy,
+                        updatedBy: category.updatedBy,
+                        // ...category.toJSON(),
                         candidatesCount: candidates.length,
                     };
                 })
@@ -349,8 +386,8 @@ class CategoryService extends BaseService {
             this._log('get_categories', { query });
 
             const { page, limit } = this._generatePaginationOptions(
-                query.page, 
-                query.limit, 
+                query.page,
+                query.limit,
                 50
             );
 
@@ -454,17 +491,26 @@ class CategoryService extends BaseService {
 
             // Get vote counts if event is active or completed
             let totalVotes = 0;
+            let totalVotesCast = 0;
             const candidateStats = [];
 
             for (const candidate of candidates) {
                 const votes = await this.voteRepository.getVotesByCandidate(candidate._id);
                 const voteCount = votes.length;
+
+                console.log(votes)
+
                 totalVotes += voteCount;
+
+                const votesCast = votes.reduce((sum, vote) => sum + vote.voteBundles.reduce((bundleSum, bundle) => bundleSum + bundle.votes, 0), 0);
+
+                totalVotesCast += votesCast;
 
                 candidateStats.push({
                     candidateId: candidate._id,
                     candidateName: candidate.name,
-                    votes: voteCount
+                    votes: voteCount,
+                    votesCast
                 });
             }
 
@@ -475,6 +521,7 @@ class CategoryService extends BaseService {
                     categoryName: category.name,
                     candidatesCount,
                     totalVotes,
+                    totalVotesCast,
                     maxCandidates: category.maxCandidates,
                     allowMultipleVotes: category.allowMultipleVotes,
                     candidates: candidateStats

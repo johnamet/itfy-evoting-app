@@ -7,6 +7,8 @@
 
 import express from 'express';
 import cors from 'cors';
+import swaggerUi from 'swagger-ui-express';
+import swaggerSpecs from './config/swagger.js';
 import Config from './config/config.js';
 import dbConnection from './utils/engine/db.js';
 import dbInitializer from './utils/engine/dbInitializer.js';
@@ -43,6 +45,19 @@ app.use('/api', cacheMiddleware({
 
 // Mount API routes
 app.use('/api/v1', apiRoutes)
+
+// Swagger API Documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs, {
+    explorer: true,
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: "ITFY E-Voting API Documentation"
+}));
+
+// Swagger JSON endpoint
+app.get('/api-docs.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(swaggerSpecs);
+});
 
 // Cache statistics endpoint
 app.get('/cache/stats', cacheStatsMiddleware())
@@ -122,6 +137,7 @@ async function startServer() {
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`)
             console.log(`API URL: http://localhost:${PORT}`)
+            console.log(`API Documentation: http://localhost:${PORT}/api-docs`)
             console.log(`Environment: ${Config.serverConfig.environment}`)
             console.log(`Health Check: http://localhost:${PORT}/health`)
         })

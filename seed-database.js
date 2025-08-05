@@ -24,7 +24,6 @@ import Vote from './app/models/Vote.js';
 import VoteBundle from './app/models/VoteBundle.js';
 import Payment from './app/models/Payment.js';
 import Coupon from './app/models/Coupon.js';
-import e from 'cors';
 
 // Database connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/itfy-evoting';
@@ -105,7 +104,7 @@ class DatabaseSeeder {
         console.log('👤 Seeding users...');
         
         const saltRounds = 12;
-        const defaultPassword = await bcrypt.hash('password123', saltRounds);
+        const defaultPassword = 'password123';
         
         const users = [
             {
@@ -597,7 +596,8 @@ class DatabaseSeeder {
                 isActive: true,
                 maxVotesPerUser: 5,
                 votingStartDate: '2025-09-01T00:00:00Z',
-                votingEndDate: '2025-09-15T23:59:59Z',
+                votingDeadline: '2025-09-15T23:59:59Z',
+                isVotingOpen: true,
                 order: 1,
                 color: '#1E90FF',
                 criteria: ['Code quality', 'Innovation', 'Impact'],
@@ -617,7 +617,8 @@ class DatabaseSeeder {
                 isActive: true,
                 maxVotesPerUser: 3,
                 votingStartDate: '2025-10-01T00:00:00Z',
-                votingEndDate: '2025-10-20T23:59:59Z',
+                votingDeadline: '2025-10-20T23:59:59Z',
+                isVotingOpen: true,
                 order: 2,
                 color: '#FF4500',
                 criteria: ['App performance', 'User experience', 'Innovation'],
@@ -637,7 +638,8 @@ class DatabaseSeeder {
                 isActive: true,
                 maxVotesPerUser: 10,
                 votingStartDate: '2025-11-01T00:00:00Z',
-                votingEndDate: '2025-11-10T23:59:59Z',
+                votingDeadline: '2025-11-10T23:59:59Z',
+                isVotingOpen: true,
                 order: 3,
                 color: '#32CD32',
                 criteria: ['Model accuracy', 'Innovation', 'Community impact'],
@@ -657,7 +659,8 @@ class DatabaseSeeder {
                 isActive: true,
                 maxVotesPerUser: 5,
                 votingStartDate: '2025-09-01T00:00:00Z',
-                votingEndDate: '2025-09-15T23:59:59Z',
+                votingDeadline: '2025-09-15T23:59:59Z',
+                isVotingOpen: true,
                 order: 4,
                 color: '#FFD700',
                 criteria: ['Automation', 'Reliability', 'Efficiency'],
@@ -677,7 +680,8 @@ class DatabaseSeeder {
                 isActive: true,
                 maxVotesPerUser: 5,
                 votingStartDate: '2025-09-01T00:00:00Z',
-                votingEndDate: '2025-09-15T23:59:59Z',
+                votingDeadline: '2025-09-15T23:59:59Z',
+                isVotingOpen: true,
                 order: 5,
                 color: '#FF69B4',
                 criteria: ['Design aesthetics', 'Usability', 'Innovation'],
@@ -697,8 +701,9 @@ class DatabaseSeeder {
                 isActive: true,
                 maxVotesPerUser: 3,
                 votingStartDate: '2025-10-01T00:00:00Z',
-                votingEndDate: '2025-10-20T23:59:59Z',
+                votingDeadline: '2025-10-20T23:59:59Z',
                 order: 6,
+                isVotingOpen: true,
                 color: '#4682B4',
                 criteria: ['Data insights', 'Methodology', 'Impact'],
                 isPublic: true,

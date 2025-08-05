@@ -21,6 +21,7 @@ import FormService from './FormService.js';
 import SlideService from './SlideService.js';
 import PaymentService from './PaymentService.js';
 import EmailService from './EmailService.js';
+import VoteBundleService from './VoteBundleService.js';
 
 export {
     BaseService,
@@ -37,7 +38,8 @@ export {
     FormService,
     SlideService,
     PaymentService,
-    EmailService
+    EmailService,
+    VoteBundleService
 };
 
 export default {
@@ -55,5 +57,6 @@ export default {
     FormService,
     SlideService,
     PaymentService,
-    EmailService
+    EmailService,
+    VoteBundleService
 };

@@ -27,13 +27,13 @@ class BaseService {
     _handleError(error, operation, context = {}, useCleanMessage = false) {
         const errorMessage = useCleanMessage ? error.message : `${operation} failed: ${error.message}`;
         const serviceError = new Error(errorMessage);
-        
+
         // Preserve original error properties
         serviceError.originalError = error;
         serviceError.operation = operation;
         serviceError.context = context;
         serviceError.stack = error.stack;
-        
+
         // Add service-specific error codes
         if (error.name === 'ValidationError') {
             serviceError.code = 'VALIDATION_ERROR';
@@ -79,7 +79,7 @@ class BaseService {
      */
     _validateRequiredFields(data, requiredFields) {
         const missingFields = [];
-        
+
         for (const field of requiredFields) {
             if (data[field] === undefined || data[field] === null || data[field] === '') {
                 missingFields.push(field);
@@ -135,7 +135,7 @@ class BaseService {
      */
     async _withTransaction(operation, options = {}) {
         const session = await mongoose.startSession();
-        
+
         try {
             session.startTransaction(options);
             const result = await operation(session);
@@ -156,7 +156,7 @@ class BaseService {
      */
     _sanitizeData(data) {
         const sanitized = {};
-        
+
         for (const [key, value] of Object.entries(data)) {
             if (value !== undefined && value !== null) {
                 if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
@@ -166,7 +166,7 @@ class BaseService {
                 }
             }
         }
-        
+
         return sanitized;
     }
 
@@ -199,7 +199,7 @@ class BaseService {
      */
     _formatPaginationResponse(items, total, page, limit) {
         const totalPages = Math.ceil(total / limit);
-        
+
         return {
             items,
             pagination: {
@@ -220,7 +220,27 @@ class BaseService {
      * @param {String} level - Log level (info, warn, error)
      */
     _log(operation, context = {}, level = 'info') {
-        this.logger[level](`Service Operation - ${operation}:`, context);
+        const message = `Service Operation - ${operation}:`;
+
+        // Handle console logging properly
+        if (this.logger === console) {
+            switch (level) {
+                case 'error':
+                    console.error(message, context);
+                    break;
+                case 'warn':
+                    console.warn(message, context);
+                    break;
+                case 'info':
+                default:
+                    console.log(message, context);
+                    break;
+            }
+        } else if (typeof this.logger[level] === 'function') {
+            this.logger[level](message, context);
+        } else {
+            console.log(message, context);
+        }
     }
 
     /**
@@ -229,9 +249,11 @@ class BaseService {
      * @param {Array} searchableFields - Fields that can be searched
      * @returns {Object} MongoDB filter object
      */
-    _createSearchFilter(query, searchableFields = []) {
+    _createSearchFilter(query, searchableFields = [], arrayFields = []) {
         const filter = {};
-        
+
+        console.log('Creating search filter from query:', query);
+
         // Handle search term across multiple fields
         if (query.search && searchableFields.length > 0) {
             const searchRegex = new RegExp(query.search, 'i');
@@ -261,8 +283,33 @@ class BaseService {
             filter.isActive = query.isActive === 'true';
         }
 
+        // Handle array filters (e.g., categories, tags, roles)
+        for (const field of arrayFields) {
+            const value = query[field];
+
+            if (value) {
+                let valuesArray = [];
+
+                if (Array.isArray(value)) {
+                    valuesArray = value;
+                } else if (typeof value === 'string') {
+                    valuesArray = value.split(',').map(item => item.trim());
+                }
+
+                // Convert to ObjectId if the field expects it
+                const convertedValues = valuesArray.map(v =>
+                    mongoose.Types.ObjectId.isValid(v) ? new mongoose.Types.ObjectId(v) : v
+                );
+
+                filter[field] = { $in: convertedValues };
+            }
+        }
+
+        console.log('Generated filter:', filter);
+
         return filter;
     }
+
 }
 
 export default BaseService;

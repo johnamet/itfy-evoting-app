@@ -39,7 +39,7 @@ class AuthService extends BaseService {
             this._validateEmail(email);
 
             // Find user and verify password
-            const user = await this.userRepository.authenticateUser(email, password);
+            const user = await this.userRepository.authenticate(email, password);
             if (!user) {
                 throw new Error('Invalid email or password');
             }

@@ -56,10 +56,12 @@ export default class CategoryController extends BaseController {
     async getCategoryById(req, res) {
         try {
             const { id } = req.params;
-            const includeCandidates = req.query.include === 'candidates';
+            const includeDetails = req.query.includeDetails;
 
-            const category = await this.categoryService.getCategoryById(id, includeCandidates);
-            
+            console.log(req.query)
+
+            const category = await this.categoryService.getCategoryById(id, includeDetails);
+
             if (!category) {
                 return this.sendError(res, 'Category not found', 404);
             }
@@ -121,6 +123,7 @@ export default class CategoryController extends BaseController {
         try {
             const { eventId } = req.params;
             const query = req.query;
+            console.log(query)
 
             const categories = await this.categoryService.getCategoriesByEvent(eventId, query);
             return this.sendSuccess(res, categories, 'Event categories retrieved successfully');

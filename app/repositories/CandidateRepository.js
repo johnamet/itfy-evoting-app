@@ -11,7 +11,7 @@ import Candidate from '../models/Candidate.js';
 import mongoose from 'mongoose';
 
 class CandidateRepository extends BaseRepository {
-    
+
     constructor() {
         // Get the Candidate model
         super(Candidate);
@@ -26,7 +26,7 @@ class CandidateRepository extends BaseRepository {
         try {
             // Validate candidate doesn't already exist in the same category for the event
             await this._validateUniqueCandidate(candidateData);
-            
+
             return await this.create(candidateData);
         } catch (error) {
             throw this._handleError(error, 'createCandidate');
@@ -86,9 +86,9 @@ class CandidateRepository extends BaseRepository {
      */
     async findByEventAndCategory(eventId, categoryId, options = {}) {
         try {
-            const criteria = { 
+            const criteria = {
                 event: eventId,
-                categories: categoryId 
+                categories: categoryId
             };
             return await this.find(criteria, {
                 ...options,
@@ -149,6 +149,7 @@ class CandidateRepository extends BaseRepository {
             ];
 
             const [candidate] = await this.aggregate(pipeline);
+            console.log(candidate)
             return candidate || null;
         } catch (error) {
             throw this._handleError(error, 'getCandidateWithStats');
@@ -264,7 +265,7 @@ class CandidateRepository extends BaseRepository {
         try {
             // Remove fields that shouldn't be updated directly
             const { event, ...safeUpdateData } = updateData;
-            
+
             return await this.updateById(candidateId, safeUpdateData, {
                 populate: [
                     { path: 'categories', select: 'name' },
@@ -276,7 +277,7 @@ class CandidateRepository extends BaseRepository {
         }
     }
 
-  
+
 
     /**
      * Get top candidates by votes
@@ -286,7 +287,7 @@ class CandidateRepository extends BaseRepository {
      */
     async getTopCandidates(eventId = null, limit = 10) {
         try {
-            const matchStage = eventId 
+            const matchStage = eventId
                 ? { $match: { event: new mongoose.Types.ObjectId(eventId) } }
                 : { $match: {} };
 
@@ -515,7 +516,6 @@ class CandidateRepository extends BaseRepository {
             throw this._handleError(error, 'searchByName');
         }
     }
-
     /**
      * Get detailed candidate statistics
      * @param {String|ObjectId} candidateId - Candidate ID
@@ -531,6 +531,28 @@ class CandidateRepository extends BaseRepository {
                         localField: '_id',
                         foreignField: 'candidate',
                         as: 'votes'
+                    }
+                },
+                { $unwind: { path: '$votes', preserveNullAndEmptyArrays: true } }, // Unwind votes array
+                {
+                    $lookup: {
+                        from: 'voteBundles',
+                        localField: 'votes.voteBundles',
+                        foreignField: '_id',
+                        as: 'voteBundles'
+                    }
+                },
+                { $unwind: { path: '$voteBundles', preserveNullAndEmptyArrays: true } }, // Unwind voteBundles array
+                {
+                    $group: {
+                        _id: '$_id',
+                        name: { $first: '$name' },
+                        description: { $first: '$description' },
+                        image: { $first: '$image' },
+                        createdAt: { $first: '$createdAt' },
+                        categories: { $first: '$categories' }, // Preserve the categories array
+                        event: { $first: '$event' },
+                        totalVotes: { $sum: '$voteBundles.votes' } // Sum votes from all voteBundles
                     }
                 },
                 {
@@ -550,19 +572,24 @@ class CandidateRepository extends BaseRepository {
                     }
                 },
                 {
-                    $addFields: {
-                        totalVotes: { $size: '$votes' },
-                        event: { $arrayElemAt: ['$event', 0] }
-                    }
-                },
-                {
                     $project: {
                         name: 1,
-                        description: 1,
-                        image: 1,
+                        description: { $ifNull: ['$description', 'No description available'] },
+                        image: { $ifNull: ['$image', 'No image available'] },
                         totalVotes: 1,
-                        categories: { $map: { input: '$categories', as: 'cat', in: { name: '$$cat.name', _id: '$$cat._id' } } },
-                        event: { name: '$event.name', _id: '$event._id' },
+                        categories: {
+                            $map: {
+                                input: '$categories',
+                                as: 'cat',
+                                in: { name: '$$cat.name', _id: '$$cat._id' }
+                            }
+                        },
+                        event: {
+                            $let: {
+                                vars: { event: { $arrayElemAt: ['$event', 0] } },
+                                in: { name: '$$event.name', _id: '$$event._id' }
+                            }
+                        },
                         createdAt: 1
                     }
                 }
@@ -574,12 +601,11 @@ class CandidateRepository extends BaseRepository {
             throw this._handleError(error, 'getCandidateStatistics');
         }
     }
-
     /**
-     * Bulk create candidates
-     * @param {Array} candidatesData - Array of candidate data
-     * @returns {Promise<Array>} Created candidates
-     */
+         * Bulk create candidates
+         * @param {Array} candidatesData - Array of candidate data
+         * @returns {Promise<Array>} Created candidates
+         */
     async bulkCreateCandidates(candidatesData) {
         try {
             // Validate each candidate
@@ -611,7 +637,7 @@ class CandidateRepository extends BaseRepository {
                 this._validateObjectId(categoryId, 'categoryId');
             }
 
-            return await this.updateById(candidateId, { 
+            return await this.updateById(candidateId, {
                 categories: categoryIds,
                 updatedAt: new Date()
             });
@@ -629,7 +655,7 @@ class CandidateRepository extends BaseRepository {
         try {
             // Check if candidate has votes
             const voteCount = await mongoose.model('Vote').countDocuments({ candidate: candidateId });
-            
+
             if (voteCount > 0) {
                 throw new Error('Cannot delete candidate with existing votes');
             }
@@ -647,7 +673,7 @@ class CandidateRepository extends BaseRepository {
      */
     async _validateUniqueCandidate(candidateData) {
         const { name, event, categories } = candidateData;
-        
+
         if (!name || !event || !categories) {
             throw new Error('Name, event, and categories are required');
         }

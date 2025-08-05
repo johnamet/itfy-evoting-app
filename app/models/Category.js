@@ -73,7 +73,15 @@ class Category extends BaseModel {
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'Event',
                 required: true
-            }
+            },
+            votingDeadline: {
+                type: Date,
+                required: true
+            },
+            isVotingOpen: {
+                type: Boolean,
+                default: false
+            },
         };
 
         super(schemaDefinition, {collection: "categories"});

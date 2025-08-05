@@ -367,6 +367,215 @@ class PaymentRepository extends BaseRepository {
         
         throw error;
     }
+
+    /**
+     * Get payment statistics with aggregation
+     * @param {Object} filters - Filter criteria
+     * @returns {Promise<Object>} Payment statistics
+     */
+    async getPaymentStatistics(filters = {}) {
+        try {
+            const matchStage = this._buildFilterStage(filters);
+
+            const stats = await Payment.aggregate([
+                { $match: matchStage },
+                {
+                    $group: {
+                        _id: "$status",
+                        count: { $sum: 1 },
+                        totalAmount: { $sum: "$finalAmount" },
+                        avgAmount: { $avg: "$finalAmount" }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        statusBreakdown: {
+                            $push: {
+                                status: "$_id",
+                                count: "$count",
+                                totalAmount: "$totalAmount",
+                                avgAmount: "$avgAmount"
+                            }
+                        },
+                        totalPayments: { $sum: "$count" },
+                        totalRevenue: { $sum: "$totalAmount" }
+                    }
+                }
+            ]);
+
+            return stats[0] || {
+                statusBreakdown: [],
+                totalPayments: 0,
+                totalRevenue: 0
+            };
+        } catch (error) {
+            throw new Error(`Failed to get payment statistics: ${error.message}`);
+        }
+    }
+
+    /**
+     * Get payments with filters and pagination
+     * @param {Object} filters - Filter criteria
+     * @param {Object} options - Query options
+     * @returns {Promise<Array>} Payments
+     */
+    async getPayments(filters = {}, options = {}) {
+        try {
+            const { page = 1, limit = 20 } = options;
+            const filter = this._buildFilterStage(filters);
+            const skip = (page - 1) * limit;
+
+            return await Payment.find(filter)
+                .skip(skip)
+                .limit(limit)
+                .sort({ createdAt: -1 })
+                .populate('voteBundles')
+                .populate('event')
+                .populate('category')
+                .populate('coupon')
+                .lean();
+        } catch (error) {
+            throw new Error(`Failed to get payments: ${error.message}`);
+        }
+    }
+
+    /**
+     * Count payments with filters
+     * @param {Object} filters - Filter criteria
+     * @returns {Promise<Number>} Payment count
+     */
+    async countPayments(filters = {}) {
+        try {
+            const filter = this._buildFilterStage(filters);
+            return await Payment.countDocuments(filter);
+        } catch (error) {
+            throw new Error(`Failed to count payments: ${error.message}`);
+        }
+    }
+
+    /**
+     * Get payments by event
+     * @param {String} eventId - Event ID
+     * @param {Object} options - Query options
+     * @returns {Promise<Array>} Event payments
+     */
+    async getPaymentsByEvent(eventId, options = {}) {
+        try {
+            const { page = 1, limit = 20 } = options;
+            const skip = (page - 1) * limit;
+
+            return await Payment.find({ event: eventId })
+                .skip(skip)
+                .limit(limit)
+                .sort({ createdAt: -1 })
+                .populate('voteBundles')
+                .populate('category')
+                .lean();
+        } catch (error) {
+            throw new Error(`Failed to get payments by event: ${error.message}`);
+        }
+    }
+
+    /**
+     * Get payments by category
+     * @param {String} categoryId - Category ID
+     * @param {Object} options - Query options
+     * @returns {Promise<Array>} Category payments
+     */
+    async getPaymentsByCategory(categoryId, options = {}) {
+        try {
+            const { page = 1, limit = 20 } = options;
+            const skip = (page - 1) * limit;
+
+            return await Payment.find({ category: categoryId })
+                .skip(skip)
+                .limit(limit)
+                .sort({ createdAt: -1 })
+                .populate('voteBundles')
+                .populate('event')
+                .lean();
+        } catch (error) {
+            throw new Error(`Failed to get payments by category: ${error.message}`);
+        }
+    }
+
+    /**
+     * Get payment summary
+     * @param {Object} filters - Filter criteria
+     * @returns {Promise<Object>} Payment summary
+     */
+    async getPaymentSummary(filters = {}) {
+        try {
+            const matchStage = this._buildFilterStage(filters);
+
+            const summary = await Payment.aggregate([
+                { $match: matchStage },
+                {
+                    $group: {
+                        _id: null,
+                        totalPayments: { $sum: 1 },
+                        totalRevenue: { $sum: "$finalAmount" },
+                        avgPayment: { $avg: "$finalAmount" },
+                        successfulPayments: {
+                            $sum: { $cond: [{ $eq: ["$status", "success"] }, 1, 0] }
+                        },
+                        failedPayments: {
+                            $sum: { $cond: [{ $eq: ["$status", "failed"] }, 1, 0] }
+                        },
+                        pendingPayments: {
+                            $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] }
+                        }
+                    }
+                }
+            ]);
+
+            return summary[0] || {
+                totalPayments: 0,
+                totalRevenue: 0,
+                avgPayment: 0,
+                successfulPayments: 0,
+                failedPayments: 0,
+                pendingPayments: 0
+            };
+        } catch (error) {
+            throw new Error(`Failed to get payment summary: ${error.message}`);
+        }
+    }
+
+    /**
+     * Build filter stage for aggregation
+     * @param {Object} filters - Filter criteria
+     * @returns {Object} MongoDB filter object
+     * @private
+     */
+    _buildFilterStage(filters) {
+        const matchStage = {};
+
+        if (filters.eventId) {
+            matchStage['event'] = mongoose.Types.ObjectId(filters.eventId);
+        }
+
+        if (filters.categoryId) {
+            matchStage['category'] = mongoose.Types.ObjectId(filters.categoryId);
+        }
+
+        if (filters.status) {
+            matchStage.status = filters.status;
+        }
+
+        if (filters.email) {
+            matchStage['voter.email'] = { $regex: filters.email, $options: 'i' };
+        }
+
+        if (filters.startDate || filters.endDate) {
+            matchStage.createdAt = {};
+            if (filters.startDate) matchStage.createdAt.$gte = new Date(filters.startDate);
+            if (filters.endDate) matchStage.createdAt.$lte = new Date(filters.endDate);
+        }
+
+        return matchStage;
+    }
 }
 
 export default PaymentRepository;

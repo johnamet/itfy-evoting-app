@@ -44,11 +44,11 @@ class Vote extends BaseModel {
                 ref: 'Category',
                 required: true
             },
-            voteBundles: {
-                type: [mongoose.Schema.Types.ObjectId],
+            voteBundles: [{
+                type: mongoose.Schema.Types.ObjectId,
                 ref: 'VoteBundle',
                 required: true
-            },
+            }],
             votedAt: {
                 type: Date,
                 default: () => Date.now(),

@@ -7,6 +7,7 @@
 
 import BaseController from './BaseController.js';
 import CandidateService from '../services/CandidateService.js';
+import mongoose from 'mongoose';
 
 export default class CandidateController extends BaseController {
     constructor() {
@@ -43,6 +44,12 @@ export default class CandidateController extends BaseController {
     async getCandidates(req, res) {
         try {
             const query = req.query;
+
+            if (query.category) {
+                query.categories = query.category;
+                delete query.category;
+            }
+
             const candidates = await this.candidateService.getCandidates(query);
             return this.sendSuccess(res, candidates, 'Candidates retrieved successfully');
         } catch (error) {
@@ -59,7 +66,7 @@ export default class CandidateController extends BaseController {
             const includeVotes = req.query.include === 'votes';
 
             const candidate = await this.candidateService.getCandidateById(id, includeVotes);
-            
+
             if (!candidate) {
                 return this.sendError(res, 'Candidate not found', 404);
             }

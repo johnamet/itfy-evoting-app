@@ -16,6 +16,81 @@ export default class EventController extends BaseController {
 
     /**
      * Create a new event
+     * 
+     * @swagger
+     * /events:
+     *   post:
+     *     summary: Create a new event
+     *     description: Creates a new voting event in the system
+     *     tags: [Events]
+     *     security:
+     *       - bearerAuth: []
+     *     requestBody:
+     *       required: true
+     *       content:
+     *         application/json:
+     *           schema:
+     *             type: object
+     *             required:
+     *               - title
+     *               - description
+     *               - startDate
+     *               - endDate
+     *             properties:
+     *               title:
+     *                 type: string
+     *                 example: "Student Union Elections 2025"
+     *               description:
+     *                 type: string
+     *                 example: "Annual student union elections for academic year 2025"
+     *               startDate:
+     *                 type: string
+     *                 format: date-time
+     *                 example: "2025-09-01T09:00:00.000Z"
+     *               endDate:
+     *                 type: string
+     *                 format: date-time
+     *                 example: "2025-09-03T18:00:00.000Z"
+     *               votingFee:
+     *                 type: number
+     *                 example: 500
+     *               status:
+     *                 type: string
+     *                 enum: [draft, active, completed, cancelled]
+     *                 default: draft
+     *               isPublic:
+     *                 type: boolean
+     *                 default: true
+     *     responses:
+     *       201:
+     *         description: Event created successfully
+     *         content:
+     *           application/json:
+     *             schema:
+     *               allOf:
+     *                 - $ref: '#/components/schemas/SuccessResponse'
+     *                 - type: object
+     *                   properties:
+     *                     data:
+     *                       $ref: '#/components/schemas/Event'
+     *       400:
+     *         description: Bad request - Missing required fields
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/ErrorResponse'
+     *       401:
+     *         description: Unauthorized - Authentication required
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/ErrorResponse'
+     *       500:
+     *         description: Internal server error
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/ErrorResponse'
      */
     async createEvent(req, res) {
         try {
@@ -39,6 +114,84 @@ export default class EventController extends BaseController {
 
     /**
      * Get all events with filtering and pagination
+     * 
+     * @swagger
+     * /events:
+     *   get:
+     *     summary: Get all events
+     *     description: Retrieves a list of events with optional filtering and pagination
+     *     tags: [Events]
+     *     security: []
+     *     parameters:
+     *       - in: query
+     *         name: page
+     *         schema:
+     *           type: integer
+     *           minimum: 1
+     *           default: 1
+     *         description: Page number for pagination
+     *       - in: query
+     *         name: limit
+     *         schema:
+     *           type: integer
+     *           minimum: 1
+     *           maximum: 100
+     *           default: 20
+     *         description: Number of items per page
+     *       - in: query
+     *         name: status
+     *         schema:
+     *           type: string
+     *           enum: [draft, active, completed, cancelled]
+     *         description: Filter by event status
+     *       - in: query
+     *         name: search
+     *         schema:
+     *           type: string
+     *         description: Search events by title or description
+     *       - in: query
+     *         name: startDate
+     *         schema:
+     *           type: string
+     *           format: date
+     *         description: Filter events starting from this date
+     *       - in: query
+     *         name: endDate
+     *         schema:
+     *           type: string
+     *           format: date
+     *         description: Filter events ending before this date
+     *       - in: query
+     *         name: include
+     *         schema:
+     *           type: string
+     *           enum: [details, categories, candidates]
+     *         description: Include additional details in response
+     *     responses:
+     *       200:
+     *         description: Events retrieved successfully
+     *         content:
+     *           application/json:
+     *             schema:
+     *               allOf:
+     *                 - $ref: '#/components/schemas/SuccessResponse'
+     *                 - type: object
+     *                   properties:
+     *                     data:
+     *                       type: object
+     *                       properties:
+     *                         events:
+     *                           type: array
+     *                           items:
+     *                             $ref: '#/components/schemas/Event'
+     *                         pagination:
+     *                           $ref: '#/components/schemas/PaginationInfo'
+     *       500:
+     *         description: Internal server error
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/ErrorResponse'
      */
     async getEvents(req, res) {
         try {
