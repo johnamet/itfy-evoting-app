@@ -229,23 +229,25 @@ class CouponService extends BaseService {
     /**
      * Validate a coupon without using it
      * @param {String} couponCode - Coupon code
-     * @param {String} userId - User ID (optional)
      * @returns {Promise<Object>} Validation result
      */
-    async validateCoupon(couponCode, userId = null) {
+    async validateCoupon(data) {
         try {
-            this._log('validate_coupon', { code: couponCode, userId });
+            this._log('validate_coupon', { code: data.code, eventId: data.eventId, categoryId: data.categoryId });
 
-            if (!couponCode || couponCode.trim().length === 0) {
+            if (!data.code || data.code.trim().length === 0) {
                 throw new Error('Coupon code is required');
             }
 
             // Check cache first
-            const cacheKey = `coupon:${couponCode.toUpperCase()}`;
+            const cacheKey = `coupon:${data.code.toUpperCase()}`;
             let coupon = CacheService.get(cacheKey);
 
             if (!coupon) {
-                coupon = await this.couponRepository.findByCode(couponCode.toUpperCase().trim());
+                coupon = await this.couponRepository.findByCode(data.code.toUpperCase().trim(), {
+                    eventId: data.eventId,
+                    categoryId: data.categoryId
+                    });
                 if (coupon) {
                     CacheService.set(cacheKey, coupon, 300000); // 5 minutes
                 }
@@ -277,47 +279,33 @@ class CouponService extends BaseService {
                 };
             }
 
-            // Check if coupon is valid yet
-            if (coupon.validFrom && new Date() < new Date(coupon.validFrom)) {
-                return {
-                    success: false,
-                    valid: false,
-                    reason: 'Coupon is not valid yet'
-                };
-            }
 
-            // Check usage limits
-            if (coupon.maxUsage && coupon.usageCount >= coupon.maxUsage) {
+            if (coupon.maxUses && coupon.usedCount >= coupon.maxUses) {
                 return {
                     success: false,
                     valid: false,
                     reason: 'Coupon usage limit exceeded'
                 };
             }
-
-            // Check user-specific validations if userId provided
-            let userAlreadyUsed = false;
-            if (userId) {
-                this._validateObjectId(userId, 'User ID');
-                const existingUsage = await this.couponUsageRepository.findByCouponAndUser(coupon._id, userId);
-                userAlreadyUsed = !!existingUsage;
-            }
+            this._log('validate_coupon_success', { code: coupon.code });
 
             return {
                 success: true,
-                valid: !userAlreadyUsed,
-                reason: userAlreadyUsed ? 'You have already used this coupon' : null,
+                valid: true,
                 coupon: {
                     id: coupon._id,
                     code: coupon.code,
-                    type: coupon.type,
-                    description: coupon.description,
-                    eventId: coupon.eventId,
-                    maxUsage: coupon.maxUsage,
-                    usageCount: coupon.usageCount,
-                    remainingUsage: coupon.maxUsage ? coupon.maxUsage - coupon.usageCount : null,
-                    validFrom: coupon.validFrom,
-                    expiresAt: coupon.expiresAt
+                    discountType: coupon.discountType,
+                    discount: coupon.discount,
+                    eventApplicable: coupon.eventApplicable,
+                    maxUsage: coupon.maxUses,
+                    categoriesApplicable: coupon.categoriesApplicable,
+                    bundlesApplicable: coupon.bundlesApplicable,
+                    usageCount: coupon.usedCount,
+                    minOrderAmount: coupon.minOrderAmount,
+                    remainingUsage: coupon.maxUses ? coupon.maxUses - coupon.usedCount : null,
+                    validFrom: coupon.isActive && new Date(coupon.expiryDate) > new Date() ? new Date() : coupon.expiryDate,
+                    expiresAt: coupon.expiryDate
                 }
             };
         } catch (error) {

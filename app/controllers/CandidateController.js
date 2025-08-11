@@ -3,11 +3,15 @@
  * Candidate Controller
  * 
  * Handles candidate management operations for voting.
+ *
+ * @swagger
+ * tags:
+ *   name: Candidates
+ *   description: Manages candidates within events
  */
 
 import BaseController from './BaseController.js';
 import CandidateService from '../services/CandidateService.js';
-import mongoose from 'mongoose';
 
 export default class CandidateController extends BaseController {
     constructor() {

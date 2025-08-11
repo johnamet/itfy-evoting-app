@@ -3,6 +3,11 @@
  * Coupon Controller
  * 
  * Handles coupon management operations for events and promotions.
+ *
+ * @swagger
+ * tags:
+ *   name: Coupons
+ *   description: Manages coupons for event promotions
  */
 
 import BaseController from './BaseController.js';
@@ -159,9 +164,11 @@ export default class CouponController extends BaseController {
     async validateCoupon(req, res) {
         try {
             const { code } = req.params;
-            const { eventId, userId } = req.body;
+            const { eventId, categoryId } = req.body;
 
-            const validation = await this.couponService.validateCoupon(code, eventId, userId);
+            console.log('Validating coupon:', code, 'for event:', eventId, 'and category:', categoryId);
+
+            const validation = await this.couponService.validateCoupon({code, eventId, categoryId});
             return this.sendSuccess(res, validation, 'Coupon validation completed');
         } catch (error) {
             return this.handleError(res, error, 'Failed to validate coupon');

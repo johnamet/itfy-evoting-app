@@ -136,7 +136,7 @@ export default class VoteBundleService extends BaseService {
                 filter: additionalFilter
             });
 
-            const total = await this.voteBundleRepository.count({
+            const total = await this.voteBundleRepository.countDocuments({
                 applicableEvents: eventId,
                 isActive: true,
                 ...additionalFilter
@@ -190,7 +190,7 @@ export default class VoteBundleService extends BaseService {
                 filter: additionalFilter
             });
 
-            const total = await this.voteBundleRepository.count({
+            const total = await this.voteBundleRepository.countDocuments({
                 applicableCategories: categoryId,
                 isActive: true,
                 ...additionalFilter
@@ -250,7 +250,7 @@ export default class VoteBundleService extends BaseService {
                 }
             );
 
-            const total = await this.voteBundleRepository.count({
+            const total = await this.voteBundleRepository.countDocuments({
                 applicableEvents: eventId,
                 applicableCategories: categoryId,
                 isActive: true,
@@ -363,8 +363,8 @@ export default class VoteBundleService extends BaseService {
             this._log('get_vote_bundle_stats', { query });
 
             const stats = {
-                totalBundles: await this.voteBundleRepository.count({ isActive: true }),
-                popularBundles: await this.voteBundleRepository.count({ isActive: true, popular: true }),
+                totalBundles: await this.voteBundleRepository.countDocuments({ isActive: true }),
+                popularBundles: await this.voteBundleRepository.countDocuments({ isActive: true, popular: true }),
                 totalRevenue: 0, // Would need aggregation
                 averagePrice: 0, // Would need aggregation
                 byEvent: {},
@@ -374,7 +374,7 @@ export default class VoteBundleService extends BaseService {
             // Add event-specific stats if eventId provided
             if (query.eventId) {
                 this._validateObjectId(query.eventId, 'Event ID');
-                stats.byEvent[query.eventId] = await this.voteBundleRepository.count({
+                stats.byEvent[query.eventId] = await this.voteBundleRepository.countDocuments({
                     applicableEvents: query.eventId,
                     isActive: true
                 });
@@ -383,7 +383,7 @@ export default class VoteBundleService extends BaseService {
             // Add category-specific stats if categoryId provided
             if (query.categoryId) {
                 this._validateObjectId(query.categoryId, 'Category ID');
-                stats.byCategory[query.categoryId] = await this.voteBundleRepository.count({
+                stats.byCategory[query.categoryId] = await this.voteBundleRepository.countDocuments({
                     applicableCategories: query.categoryId,
                     isActive: true
                 });

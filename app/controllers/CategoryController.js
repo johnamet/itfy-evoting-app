@@ -3,6 +3,11 @@
  * Category Controller
  * 
  * Handles category management operations for voting categories.
+ *
+ * @swagger
+ * tags:
+ *   name: Categories
+ *   description: Manages categories within events
  */
 
 import BaseController from './BaseController.js';

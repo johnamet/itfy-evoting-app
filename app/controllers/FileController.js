@@ -3,6 +3,11 @@
  * File Controller
  * 
  * Handles file upload, download, and management operations.
+ *
+ * @swagger
+ * tags:
+ *   name: Files
+ *   description: File upload and management
  */
 
 import BaseController from './BaseController.js';

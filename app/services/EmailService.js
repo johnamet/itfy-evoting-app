@@ -74,7 +74,7 @@ class EmailService extends BaseService {
                 return;
             }
 
-            this.transporter = nodemailer.createTransporter(this.emailConfig);
+            this.transporter = nodemailer.createTransport(this.emailConfig);
 
             // Verify connection
             await this.transporter.verify();

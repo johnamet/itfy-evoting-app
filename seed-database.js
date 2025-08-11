@@ -204,8 +204,8 @@ class DatabaseSeeder {
                         title: 'Internet Pioneer',
                         company: 'Ghana Dot Com',
                         location: 'Accra, Ghana',
-                        image: 'https://via.placeholder.com/64?text=Nii+Quaynor',
-                        bio: 'Dr. Nii Quaynor is a pioneer of internet development in Africa, known for establishing Ghana’s first internet service provider and advancing digital infrastructure.',
+                        image: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=400&h=400&fit=crop&crop=face',
+                        bio: 'Dr. Nii Quaynor is a pioneer of internet development in Africa, known for establishing Ghana\'s first internet service provider and advancing digital infrastructure.',
                         expertise: ['Internet Infrastructure', 'Network Engineering', 'ICT Policy'],
                         socialLinks: {
                             linkedin: 'https://linkedin.com/in/nii-quaynor',
@@ -225,7 +225,7 @@ class DatabaseSeeder {
                         title: 'CEO',
                         company: 'Axis Human Capital',
                         location: 'Accra, Ghana',
-                        image: 'https://via.placeholder.com/64?text=Esi+Ansah',
+                        image: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400&h=400&fit=crop&crop=face',
                         bio: 'Esi Ansah is a leading HR and tech entrepreneur, driving workforce innovation and supporting tech talent development in Ghana.',
                         expertise: ['Human Resources', 'Tech Entrepreneurship', 'Talent Development'],
                         socialLinks: {
@@ -246,8 +246,8 @@ class DatabaseSeeder {
                         title: 'Minister of Digitalization',
                         company: 'Government of Ghana',
                         location: 'Accra, Ghana',
-                        image: 'https://via.placeholder.com/64?text=Kwesi+Appiah',
-                        bio: 'Kwesi Appiah oversees Ghana’s digital transformation initiatives, promoting policies to advance technology adoption nationwide.',
+                        image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop&crop=face',
+                        bio: 'Kwesi Appiah oversees Ghana\'s digital transformation initiatives, promoting policies to advance technology adoption nationwide.',
                         expertise: ['Digital Policy', 'Public Administration', 'Tech Advocacy'],
                         socialLinks: {
                             twitter: 'https://twitter.com/kwesi_appiah',
@@ -340,7 +340,7 @@ class DatabaseSeeder {
                         title: 'Tech Entrepreneur',
                         company: 'Kumasi Tech Hub',
                         location: 'Kumasi, Ghana',
-                        image: 'https://via.placeholder.com/64?text=Kwasi+Agyeman',
+                        image: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=400&fit=crop&crop=face',
                         bio: 'Kwasi Agyeman is the founder of Kumasi Tech Hub, driving innovation and supporting startups in the Ashanti Region with a focus on agritech and fintech.',
                         expertise: ['Agritech', 'Fintech', 'Startup Incubation'],
                         socialLinks: {
@@ -361,7 +361,7 @@ class DatabaseSeeder {
                         title: 'Product Manager',
                         company: 'Zipline Ghana',
                         location: 'Kumasi, Ghana',
-                        image: 'https://via.placeholder.com/64?text=Akosua+Yeboah',
+                        image: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400&h=400&fit=crop&crop=face',
                         bio: 'Akosua Yeboah leads product development for drone delivery systems at Zipline, enhancing healthcare logistics in Ghana.',
                         expertise: ['Product Management', 'Drone Technology', 'Healthcare Logistics'],
                         socialLinks: {
@@ -381,7 +381,7 @@ class DatabaseSeeder {
                         title: 'Regional Governor',
                         company: 'Ashanti Regional Administration',
                         location: 'Kumasi, Ghana',
-                        image: 'https://via.placeholder.com/64?text=Nana+Adomako',
+                        image: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=400&h=400&fit=crop&crop=face',
                         bio: 'Nana Adomako oversees regional development, including tech initiatives to empower youth in the Ashanti Region.',
                         expertise: ['Public Policy', 'Regional Development', 'Tech Advocacy'],
                         socialLinks: {
@@ -462,7 +462,7 @@ class DatabaseSeeder {
                         title: 'Community Leader',
                         company: 'Northern Tech Initiative',
                         location: 'Tamale, Ghana',
-                        image: 'https://via.placeholder.com/64?text=Fatima+Yakubu',
+                        image: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop&crop=face',
                         bio: 'Fatima Yakubu is an advocate for tech education and community development, leading initiatives to empower youth in Northern Ghana.',
                         expertise: ['Tech Education', 'Community Development', 'Social Impact'],
                         socialLinks: {
@@ -483,7 +483,7 @@ class DatabaseSeeder {
                         title: 'AI Researcher',
                         company: 'Vodafone Ghana',
                         location: 'Tamale, Ghana',
-                        image: 'https://via.placeholder.com/64?text=Idris+Mohammed',
+                        image: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f82?w=400&h=400&fit=crop&crop=face',
                         bio: 'Idris Mohammed develops AI-driven solutions for telecom analytics, focusing on predictive modeling for customer engagement.',
                         expertise: ['Artificial Intelligence', 'Data Science', 'Predictive Analytics'],
                         socialLinks: {
@@ -503,7 +503,7 @@ class DatabaseSeeder {
                         title: 'Regional Director',
                         company: 'Northern Regional Administration',
                         location: 'Tamale, Ghana',
-                        image: 'https://via.placeholder.com/64?text=Aminu+Alhassan',
+                        image: 'https://images.unsplash.com/photo-1507591064344-4c6ce005b128?w=400&h=400&fit=crop&crop=face',
                         bio: 'Aminu Alhassan promotes tech-driven development in Northern Ghana, supporting community-led innovation projects.',
                         expertise: ['Public Policy', 'Regional Development', 'Community Engagement'],
                         socialLinks: {
@@ -1047,6 +1047,7 @@ class DatabaseSeeder {
                 coupon: coupons.find(c => c.code === 'GHANA2025')._id,
                 originalAmount: 20,
                 discountAmount: 4,
+                candidate: candidates.find(c => c.name === 'Abena Serwaa')._id,
                 finalAmount: 16,
                 currency: 'GHS',
                 votesRemaining: 10,
@@ -1082,6 +1083,7 @@ class DatabaseSeeder {
                 event: events[1]._id,
                 category: categories.find(c => c.name === 'Best Mobile App Developer')._id,
                 coupon: null,
+                candidate: candidates.find(c => c.name === 'Efia Owusu')._id,
                 originalAmount: 80,
                 discountAmount: 0,
                 finalAmount: 80,
@@ -1117,6 +1119,7 @@ class DatabaseSeeder {
                 coupon: coupons.find(c => c.code === 'NORTHERN10')._id,
                 originalAmount: 10,
                 discountAmount: 2,
+                candidate: candidates.find(c => c.name === 'Dr. Aminu Ibrahim')._id,
                 finalAmount: 8,
                 currency: 'GHS',
                 votesRemaining: 5,

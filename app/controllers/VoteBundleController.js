@@ -3,6 +3,11 @@
  * VoteBundle Controller
  * 
  * Handles vote bundle operations including CRUD and filtering by event/category.
+ *
+ * @swagger
+ * tags:
+ *   name: VoteBundles
+ *   description: Manages vote bundles for efficient voting
  */
 
 import BaseController from './BaseController.js';

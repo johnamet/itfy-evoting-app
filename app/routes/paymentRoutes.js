@@ -18,6 +18,13 @@ const router = express.Router();
 const paymentController = new PaymentController();
 
 /**
+ * POST /payments/initialise
+ * @desc Initiate a payment
+ * @access Public
+ */
+router.post('/initialise', (req, res) => paymentController.initPayment(req, res));
+
+/**
  * @route GET /payments/verify/:reference
  * @desc Verify payment status
  * @access Public

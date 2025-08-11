@@ -25,6 +25,12 @@ class CouponRepository extends BaseRepository {
     async findByCode(code, options = {}) {
         try {
             const criteria = { code: code.toUpperCase().trim() };
+            if (options.eventId) {
+                criteria.eventApplicable = options.eventId;
+            }
+            if (options.categoryId) {
+                criteria.categoriesApplicable = { $in: options.categoryId };
+            }
             return await this.findOne(criteria, options);
         } catch (error) {
             throw this._handleError(error, 'findByCode');

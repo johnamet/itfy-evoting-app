@@ -3,6 +3,11 @@
  * Activity Controller
  * 
  * Handles activity logging and audit trail operations.
+ *
+ * @swagger
+ * tags:
+ *   name: Activities
+ *   description: Logs and retrieves user activity and system actions
  */
 
 import BaseController from './BaseController.js';

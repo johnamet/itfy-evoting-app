@@ -78,6 +78,11 @@ class Payment extends BaseModel {
                 ref: 'Category',
                 required: true
             },
+            candidate: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Candidate',
+                required: true
+            },
             // Coupon applied (optional)
             coupon: {
                 type: mongoose.Schema.Types.ObjectId,

@@ -47,6 +47,7 @@ class PaymentRepository extends BaseRepository {
      */
     async findByReference(reference, options = {}) {
         try {
+            console.log(options)
             return await this.findOne({ reference }, options);
         } catch (error) {
             throw this._handleError(error, 'findByReference');
@@ -76,11 +77,14 @@ class PaymentRepository extends BaseRepository {
      */
     async updatePaymentStatus(reference, updateData, options = {}) {
         try {
-            return await this.findOneAndUpdate(
-                { reference },
-                { $set: updateData },
-                { new: true, ...options }
-            );
+            const payment = await this.findOne({ reference }, options);
+            if (!payment) {
+            return null;
+            }
+            
+            // Update the payment document
+            Object.assign(payment, updateData);
+            return await payment.save();
         } catch (error) {
             throw this._handleError(error, 'updatePaymentStatus');
         }
@@ -95,11 +99,14 @@ class PaymentRepository extends BaseRepository {
      */
     async updateByReference(reference, updateData, options = {}) {
         try {
-            return await this.findOneAndUpdate(
-                { reference },
-                updateData,
-                { new: true, ...options }
-            );
+            const payment = await this.findOne({ reference }, options);
+            if (!payment) {
+                return null;
+            }
+            
+            // Update the payment document
+            Object.assign(payment, updateData);
+            return await payment.save();
         } catch (error) {
             throw this._handleError(error, 'updateByReference');
         }
@@ -315,8 +322,8 @@ class PaymentRepository extends BaseRepository {
      * @throws {Error} If validation fails.
      */
     _validatePaymentData(paymentData) {
-        const required = ['reference', 'user', 'voteBundle', 'event', 'category', 'originalAmount', 'finalAmount'];
-        
+        const required = ['reference', 'candidate', 'voteBundles', 'event', 'category', 'originalAmount', 'finalAmount'];
+
         for (const field of required) {
             if (!paymentData[field]) {
                 throw new Error(`${field} is required`);
@@ -324,10 +331,19 @@ class PaymentRepository extends BaseRepository {
         }
 
         // Validate ObjectIds
-        const objectIdFields = ['user', 'voteBundle', 'event', 'category'];
+        const objectIdFields = ['candidate', 'event', 'category'];
         for (const field of objectIdFields) {
             if (paymentData[field] && !mongoose.Types.ObjectId.isValid(paymentData[field])) {
-                throw new Error(`Invalid ${field} ObjectId`);
+            throw new Error(`Invalid ${field} ObjectId`);
+            }
+        }
+
+        // Validate voteBundles array
+        if (paymentData.voteBundles && Array.isArray(paymentData.voteBundles)) {
+            for (const bundleId of paymentData.voteBundles) {
+            if (!mongoose.Types.ObjectId.isValid(bundleId)) {
+                throw new Error(`Invalid voteBundles ObjectId: ${bundleId}`);
+            }
             }
         }
 

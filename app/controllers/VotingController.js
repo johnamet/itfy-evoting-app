@@ -3,6 +3,11 @@
  * Voting Controller
  * 
  * Handles voting operations and vote management.
+ *
+ * @swagger
+ * tags:
+ *   name: Voting
+ *   description: Manages voting operations and results
  */
 
 import BaseController from './BaseController.js';

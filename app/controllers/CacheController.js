@@ -4,6 +4,11 @@
  * 
  * Handles cache management operations for administrators.
  * Provides endpoints to monitor and control application caching.
+ *
+ * @swagger
+ * tags:
+ *   name: Cache
+ *   description: Manages cache operations such as clearing and statistics
  */
 
 import BaseController from './BaseController.js';

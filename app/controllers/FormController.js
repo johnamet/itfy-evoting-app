@@ -4,6 +4,11 @@
  * 
  * Handles HTTP requests for form management including creation,
  * retrieval, updates, submissions, and model-specific forms.
+ *
+ * @swagger
+ * tags:
+ *   name: Forms
+ *   description: Manages dynamic form creation and submission
  */
 
 import BaseController from './BaseController.js';

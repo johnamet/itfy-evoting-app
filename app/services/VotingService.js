@@ -545,7 +545,7 @@ class VotingService extends BaseService {
             };
 
             const bundles = await this.voteBundleRepository.findByEvent(eventId, options);
-            const total = await this.voteBundleRepository.count({
+            const total = await this.voteBundleRepository.countDocuments({
                 applicableEvents: eventId,
                 isActive: true
             });
@@ -581,7 +581,7 @@ class VotingService extends BaseService {
             };
 
             const bundles = await this.voteBundleRepository.findByCategory(categoryId, options);
-            const total = await this.voteBundleRepository.count({
+            const total = await this.voteBundleRepository.countDocuments({
                 applicableCategories: categoryId,
                 isActive: true
             });
@@ -619,7 +619,7 @@ class VotingService extends BaseService {
             };
 
             const bundles = await this.voteBundleRepository.findByEventAndCategory(eventId, categoryId, options);
-            const total = await this.voteBundleRepository.count({
+            const total = await this.voteBundleRepository.countDocuments({
                 applicableEvents: eventId,
                 applicableCategories: categoryId,
                 isActive: true

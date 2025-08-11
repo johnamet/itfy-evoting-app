@@ -44,11 +44,16 @@ class Coupon extends BaseModel {
                 required: true
             },
 
-            categoriesApplicable: {
-                type: [mongoose.Schema.Types.ObjectId],
+            categoriesApplicable: [{
+                type: mongoose.Schema.Types.ObjectId,
                 ref: 'Category',
                 required: true
-            },
+            }],
+            bundlesApplicable: [{
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'VoteBundle',
+                required: true
+            }],
             maxUses: {
                 type: Number,
                 default: 1,

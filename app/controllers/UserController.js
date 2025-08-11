@@ -3,6 +3,11 @@
  * User Controller
  * 
  * Handles user management operations.
+ *
+ * @swagger
+ * tags:
+ *   name: Users
+ *   description: Manages user operations such as registration and roles
  */
 
 import BaseController from './BaseController.js';

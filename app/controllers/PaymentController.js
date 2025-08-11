@@ -4,80 +4,11 @@
  * 
  * Handles payment operations including verification, webhook processing,
  * and payment statistics for the e-voting system.
- * 
+ *
  * @swagger
- * components:
- *   schemas:
- *     PaymentStats:
- *       type: object
- *       properties:
- *         totalAmount:
- *           type: number
- *           example: 50000
- *         totalPayments:
- *           type: integer
- *           example: 100
- *         successfulPayments:
- *           type: integer
- *           example: 95
- *         failedPayments:
- *           type: integer
- *           example: 5
- *         averageAmount:
- *           type: number
- *           example: 526.32
- *         byStatus:
- *           type: object
- *           properties:
- *             pending:
- *               type: integer
- *               example: 2
- *             success:
- *               type: integer
- *               example: 95
- *             failed:
- *               type: integer
- *               example: 3
- *         byDate:
- *           type: array
- *           items:
- *             type: object
- *             properties:
- *               date:
- *                 type: string
- *                 format: date
- *               amount:
- *                 type: number
- *               count:
- *                 type: integer
- *     PaymentSummary:
- *       type: object
- *       properties:
- *         totalRevenue:
- *           type: number
- *           example: 47500
- *         totalTransactions:
- *           type: integer
- *           example: 95
- *         successRate:
- *           type: number
- *           example: 95.0
- *         averageTransactionValue:
- *           type: number
- *           example: 500
- *         topEvents:
- *           type: array
- *           items:
- *             type: object
- *             properties:
- *               eventId:
- *                 type: string
- *               title:
- *                 type: string
- *               revenue:
- *                 type: number
- *               transactions:
- *                 type: integer
+ * tags:
+ *   name: Payments
+ *   description: Payment processing and verification operations
  */
 
 import BaseController from './BaseController.js';
@@ -87,6 +18,28 @@ export default class PaymentController extends BaseController {
     constructor() {
         super();
         this.paymentService = new PaymentService();
+    }
+
+    /**
+     * Initialise payment
+     */
+    async initPayment(req, res) {
+        try {
+            const paymentData = req.body;
+
+            paymentData.voterIp = req.ip;
+
+            if (!paymentData.bundles || !paymentData.email) {
+                return this.sendError(res, 'Bundles and email are required', 400);
+            }
+
+            const paymentLink = await this.paymentService.initializePayment(paymentData);
+            console.log(paymentLink);
+            return this.sendSuccess(res, { paymentLink }, 'Payment initialised successfully');
+
+        } catch (error) {
+            return this.handleError(res, error, 'Failed to initialise payment');
+        }
     }
 
     /**
@@ -242,13 +195,20 @@ export default class PaymentController extends BaseController {
     async handleWebhook(req, res) {
         try {
             const signature = req.headers['x-paystack-signature'];
+
             const event = req.body;
+
+            const io = req.app.get('io');
 
             if (!signature) {
                 return this.sendError(res, 'Missing webhook signature', 400);
             }
 
             const result = await this.paymentService.handleWebhook(event, signature);
+            io.emit('payment_event', {
+                event: event.type,
+                data: result
+            });
             return this.sendSuccess(res, result, 'Webhook processed successfully');
 
         } catch (error) {

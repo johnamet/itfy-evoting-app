@@ -394,7 +394,7 @@ class CandidateService extends BaseService {
                         },
                         {
                             path: 'categories',
-                            select: 'id name'
+                            select: 'id name votingDeadline'
                         }
                     ]
                 }

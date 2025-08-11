@@ -3,6 +3,11 @@
  * Slide Controller
  * 
  * Handles slide management operations for presentations and events.
+ *
+ * @swagger
+ * tags:
+ *   name: Slides
+ *   description: Manages slides for event presentations
  */
 
 import BaseController from './BaseController.js';

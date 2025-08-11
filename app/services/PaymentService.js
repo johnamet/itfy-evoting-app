@@ -35,17 +35,19 @@ class PaymentService extends BaseService {
         this.paystackPublicKey = process.env.PAYSTACK_PUBLIC_KEY;
         this.paystackBaseUrl = 'https://api.paystack.co';
         this.webhookSecret = process.env.PAYSTACK_WEBHOOK_SECRET || this.paystackSecretKey;
-        
+
         this.paymentRepository = new PaymentRepository();
         this.voteBundleRepository = new VoteBundleRepository();
         this.couponRepository = new CouponRepository();
         this.eventRepository = new EventRepository();
         this.categoryRepository = new CategoryRepository();
         this.candidateRepository = new CandidateRepository();
-        
+
         this.couponService = new CouponService();
         this.emailService = new EmailService();
-        
+
+        this.emailService._initializeTransporter()
+
         if (!this.paystackSecretKey) {
             throw new Error('PAYSTACK_SECRET_KEY environment variable is required');
         }
@@ -83,12 +85,8 @@ class PaymentService extends BaseService {
             const existingPayment = await this.paymentRepository.hasVoterPaid(
                 paymentData.email,
                 paymentData.eventId,
-                paymentData.categoryId
+                paymentData.categoryId,
             );
-
-            if (existingPayment && existingPayment.status === 'success') {
-                throw new Error('Voter has already purchased votes for this event and category');
-            }
 
             if (existingPayment && existingPayment.status === 'pending' && !existingPayment.isExpired) {
                 return {
@@ -141,6 +139,7 @@ class PaymentService extends BaseService {
                 },
                 voteBundles: bundleCalculation.validatedBundles.map(b => b.bundleId),
                 event: paymentData.eventId,
+                candidate: paymentData.candidateId,
                 category: paymentData.categoryId,
                 coupon: appliedCoupons.length > 0 ? appliedCoupons[0]._id : null,
                 originalAmount: bundleCalculation.totalAmount,
@@ -179,6 +178,8 @@ class PaymentService extends BaseService {
                 }
             }, options);
 
+            console.log('Payment record updated with Paystack data:', paymentRecord);
+
             return {
                 success: true,
                 message: 'Payment initialized successfully',
@@ -196,14 +197,14 @@ class PaymentService extends BaseService {
     }
 
     /**
-     * Verify payment and trigger vote casting
+     * Verify payment without casting vote
      */
     async verifyPayment(reference) {
         try {
             this._log('verify_payment', { reference });
 
             const payment = await this.paymentRepository.findByReference(reference, {
-                populate: ['voteBundles', 'event', 'category', 'coupon']
+                populate: ['voteBundles', 'event', 'category', 'coupon', 'candidate']
             });
 
             if (!payment) {
@@ -234,65 +235,41 @@ class PaymentService extends BaseService {
                     'metadata.webhook_verified': false
                 });
 
-                // Trigger vote casting
+                // Send payment confirmation email
                 try {
-                    // Use dynamic import to avoid circular dependency
-                    const { default: VotingService } = await import('./VotingService.js');
-                    const votingService = new VotingService();
-                    
-                    const voteResult = await votingService.completeVote(
-                        reference,
-                        updatedPayment.metadata.candidateId,
-                        updatedPayment.voter.ipAddress
+                    const event = await this.eventRepository.findById(updatedPayment.event);
+                    await this.emailService.sendPaymentConfirmation(
+                        {
+                            name: updatedPayment.voter.name || 'Voter',
+                            email: updatedPayment.voter.email
+                        },
+                        {
+                            id: updatedPayment._id,
+                            amount: verification.amount / 100,
+                            currency: verification.currency || 'GHS',
+                            createdAt: updatedPayment.paidAt,
+                            reference: verification.reference,
+                            transactionId: verification.id
+                        },
+                        {
+                            id: event._id,
+                            name: event.name
+                        }
                     );
 
-                    // Send payment confirmation email
-                    try {
-                        const event = await this.eventRepository.findById(updatedPayment.event);
-                        await this.emailService.sendPaymentConfirmation(
-                            {
-                                name: updatedPayment.voter.name || 'Voter',
-                                email: updatedPayment.voter.email
-                            },
-                            {
-                                id: updatedPayment._id,
-                                amount: verification.amount / 100,
-                                currency: verification.currency || 'GHS',
-                                createdAt: updatedPayment.paidAt,
-                                reference: verification.reference,
-                                transactionId: verification.id
-                            },
-                            {
-                                id: event._id,
-                                name: event.name
-                            }
-                        );
-
-                        this._log('payment_confirmation_email_sent', {
-                            reference,
-                            email: updatedPayment.voter.email
-                        });
-                    } catch (emailError) {
-                        this._logError('payment_confirmation_email_failed', emailError, { reference });
-                    }
-
-                    return {
-                        verified: true,
-                        data: {
-                            payment: updatedPayment,
-                            vote: voteResult.vote
-                        },
-                        message: 'Payment verified and vote cast successfully'
-                    };
-
-                } catch (voteError) {
-                    this._logError('vote_casting_failed', voteError, { reference });
-                    return {
-                        verified: true,
-                        data: { payment: updatedPayment },
-                        message: 'Payment verified but vote casting failed: ' + voteError.message
-                    };
+                    this._log('payment_confirmation_email_sent', {
+                        reference,
+                        email: updatedPayment.voter.email
+                    });
+                } catch (emailError) {
+                    this._handleError('payment_confirmation_email_failed', emailError, { reference });
                 }
+
+                return {
+                    verified: true,
+                    data: { payment: updatedPayment },
+                    message: 'Payment verified successfully'
+                };
 
             } else {
                 await this.paymentRepository.updatePaymentStatus(reference, {
@@ -321,7 +298,7 @@ class PaymentService extends BaseService {
         try {
             this._log('webhook_received', { event: event.event });
 
-            if (!this._verifyWebhookSignature(event, signature)) {
+            if (!this._verifyWebhookSignature(event, signature, this.webhookSecret)) {
                 throw new Error('Invalid webhook signature');
             }
 
@@ -333,10 +310,10 @@ class PaymentService extends BaseService {
                     // Use dynamic import to avoid circular dependency
                     const { default: VotingService } = await import('./VotingService.js');
                     const votingService = new VotingService();
-                    
+
                     await votingService.completeVote(
                         event.data.reference,
-                        payment.metadata.candidateId,
+                        payment.candidate,
                         payment.voter.ipAddress
                     );
                 }
@@ -604,7 +581,7 @@ class PaymentService extends BaseService {
             return checks;
 
         } catch (error) {
-            this._logError('fraud_check_error', error);
+            this._handleError('fraud_check_error', error);
             return { passed: true, reasons: [] };
         }
     }
@@ -628,6 +605,8 @@ class PaymentService extends BaseService {
             if (!response.ok || !result.status) {
                 throw new Error(result.message || 'Failed to initialize Paystack transaction');
             }
+
+            console.log(result)
 
             return result.data;
 
@@ -663,18 +642,28 @@ class PaymentService extends BaseService {
     }
 
     /**
-     * Verify webhook signature
+     * Verify Paystack webhook signature
+     * @param {Buffer|string} rawBody - The raw request body as received
+     * @param {string} signature - The x-paystack-signature header
+     * @param {string} webhookSecret - Paystack secret key
+     * @returns {boolean} - True if signature is valid, false otherwise
      */
-    _verifyWebhookSignature(event, signature) {
+    _verifyWebhookSignature(rawBody, signature, webhookSecret) {
         try {
+            // Ensure rawBody is a Buffer or string as received (no parsing beforehand)
             const hash = crypto
-                .createHmac('sha512', this.webhookSecret)
-                .update(JSON.stringify(event))
-                .digest('hex');
-            
+                .createHmac('sha512', webhookSecret)
+                .update(rawBody)
+                .digest('hex')
+                .toLowerCase(); // Ensure lowercase hex
+
+            // Log for debugging (remove in production for performance)
+            console.log('Received signature:', signature);
+            console.log('Computed hash:', hash);
+
             return hash === signature;
         } catch (error) {
-            this._logError('webhook_signature_error', error);
+            console.error('Webhook signature verification error:', error);
             return false;
         }
     }
