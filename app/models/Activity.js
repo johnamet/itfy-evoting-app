@@ -14,7 +14,7 @@ class Activity extends BaseModel{
             user: {
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'User',
-                required: false // Made optional to support anonymous site visits
+                required: false, // Made optional to support anonymous site visits
             },
             action: {
                 type: String,

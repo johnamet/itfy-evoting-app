@@ -42,19 +42,22 @@ class VoteRepository extends BaseRepository {
         try {
             await this._validateVoteData(voteData);
 
+
             const voteBundles = Array.isArray(voteData.voteBundles)
-                ? voteData.voteBundles.map(id => new mongoose.Types.ObjectId(id))
+                ? voteData.voteBundles.map(bundle => new mongoose.Types.ObjectId(bundle.id))
                 : [new mongoose.Types.ObjectId(voteData.voteBundles)];
 
-            return await this.create(
-                {
-                    ...voteData,
-                    voteBundles,
-                    votedAt: new Date(),
-                    ipAddress: voteData.ipAddress || null
-                },
-                options
-            );
+
+            const vote = await this.create({
+                ...voteData,
+                voteBundles,
+                votedAt: new Date(),
+                ipAddress: voteData.ipAddress || null
+            }, options);
+
+            console.log("Vote created:", vote.toJSON());
+
+            return vote;
         } catch (error) {
             throw this._handleError(error, 'castVote');
         }
@@ -231,6 +234,91 @@ class VoteRepository extends BaseRepository {
             return await this.aggregate(pipeline);
         } catch (error) {
             throw this._handleError(error, 'getVoteCountsForCandidate');
+        }
+    }
+
+    /**
+     * Decrements votes for a specific candidate by removing a specified number of votes.
+     * This function is useful for vote corrections, administrative adjustments, or vote revocations.
+     * @param {mongoose.Types.ObjectId|string} candidateId - The candidate ID.
+     * @param {number} [voteCount=1] - Number of votes to decrement (default: 1).
+     * @param {Object} [filters={}] - Additional filters for targeting specific votes.
+     * @param {mongoose.Types.ObjectId|string} [filters.eventId] - Specific event ID.
+     * @param {mongoose.Types.ObjectId|string} [filters.categoryId] - Specific category ID.
+     * @param {string} [filters.voterEmail] - Specific voter email.
+     * @param {Object} [options={}] - Additional options including session for transactions.
+     * @returns {Promise<Object>} Result object containing removed count and remaining count.
+     * @throws {Error} If the operation encounters an error or insufficient votes to decrement.
+     */
+    async decrementVotes(candidateId, voteCount = 1, filters = {}, options = {}) {
+        try {
+            // Validate inputs
+            if (!candidateId) {
+                throw new Error('Candidate ID is required');
+            }
+            
+            if (!Number.isInteger(voteCount) || voteCount < 1) {
+                throw new Error('Vote count must be a positive integer');
+            }
+
+            // Build query for finding votes to remove
+            const query = {
+                candidate: new mongoose.Types.ObjectId(candidateId),
+                isValid: true // Only remove valid votes
+            };
+
+            // Add optional filters
+            if (filters.eventId) {
+                query.event = new mongoose.Types.ObjectId(filters.eventId);
+            }
+            if (filters.categoryId) {
+                query.category = new mongoose.Types.ObjectId(filters.categoryId);
+            }
+            if (filters.voterEmail) {
+                query['voter.email'] = filters.voterEmail;
+            }
+
+            // Count existing votes before removal
+            const existingVoteCount = await this.countDocuments(query);
+            
+            if (existingVoteCount < voteCount) {
+                throw new Error(`Insufficient votes to decrement. Available: ${existingVoteCount}, Requested: ${voteCount}`);
+            }
+
+            // Find votes to remove (ordered by most recent first for LIFO approach)
+            const votesToRemove = await this.find(query)
+                .sort({ votedAt: -1 })
+                .limit(voteCount)
+                .select('_id');
+
+            if (votesToRemove.length !== voteCount) {
+                throw new Error(`Could not find enough votes to remove. Found: ${votesToRemove.length}, Required: ${voteCount}`);
+            }
+
+            // Remove the votes
+            const voteIds = votesToRemove.map(vote => vote._id);
+            const deleteResult = await this.deleteMany(
+                { _id: { $in: voteIds } },
+                options
+            );
+
+            // Count remaining votes
+            const remainingVoteCount = await this.countDocuments(query);
+
+            // Log the operation
+            console.log(`Decremented ${deleteResult.deletedCount} votes for candidate ${candidateId}`);
+
+            return {
+                candidateId: candidateId.toString(),
+                votesRemoved: deleteResult.deletedCount,
+                remainingVotes: remainingVoteCount,
+                removedVoteIds: voteIds.map(id => id.toString()),
+                filters: filters,
+                timestamp: new Date()
+            };
+
+        } catch (error) {
+            throw this._handleError(error, 'decrementVotes');
         }
     }
 
@@ -557,6 +645,8 @@ class VoteRepository extends BaseRepository {
      * @throws {Error} If validation fails.
      */
     async _validateVoteData(voteData) {
+        console.log("Validating vote data:", voteData);
+        console.log('Vote Bundles: ', voteData.voteBundles);
         try {
             const { candidate, voter, event, category, voteBundles, ipAddress } = voteData;
 
@@ -572,10 +662,10 @@ class VoteRepository extends BaseRepository {
                 { id: category, model: 'Category', name: 'category' }
             ];
 
-            const voteBundleIds = Array.isArray(voteBundles) ? voteBundles : [voteBundles];
-            voteBundleIds.forEach(id => {
-                idsToValidate.push({ id, model: 'VoteBundle', name: 'voteBundle' });
-            });
+             const voteBundlesIds = Array.isArray(voteData.voteBundles)
+                ? voteData.voteBundles.map(bundle => new mongoose.Types.ObjectId(bundle._id))
+                : [new mongoose.Types.ObjectId(voteData.voteBundles)];
+            idsToValidate.push(...voteBundlesIds.map(bundleId => ({ id: bundleId, model: 'VoteBundle', name: 'voteBundles' })));
 
             await Promise.all(
                 idsToValidate.map(async ({ id, model, name }) => {
@@ -589,16 +679,21 @@ class VoteRepository extends BaseRepository {
 
             // Validate candidate belongs to event and category
             const candidateDoc = await mongoose.model('Candidate').findById(candidate);
-            if (!candidateDoc.event.equals(event) || !candidateDoc.category.equals(category)) {
+            if (!candidateDoc) {
+                throw new Error('Candidate not found');
+            }
+
+            console.log("Validate votes", candidateDoc.event, event._id, candidateDoc.categories, category._id);
+            if (!candidateDoc.event.equals(event._id) || !candidateDoc.categories.includes(category._id)) {
                 throw new Error('Candidate does not belong to the specified event or category');
             }
 
             // Validate vote bundles are active
             const bundles = await mongoose.model('VoteBundle').find({
-                _id: { $in: voteBundleIds },
+                _id: { $in: voteBundlesIds.map(id => new mongoose.Types.ObjectId(id)) },
                 isActive: true
             });
-            if (bundles.length !== voteBundleIds.length) {
+            if (bundles.length !== voteBundlesIds.length) {
                 throw new Error('One or more vote bundles are invalid or inactive');
             }
 

@@ -62,20 +62,42 @@ class Payment extends BaseModel {
             },
             // Vote bundles being purchased
             voteBundles: [{
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'VoteBundle',
-                required: true
+                quantity: {
+                    type: Number,
+                    required: true,
+                    min: 1
+                },
+                id: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: 'VoteBundle',
+                    required: true
+                },
+                price: {
+                    type: Number,
+                    required: true,
+                    min: 0
+                },
+                votes: {
+                    type:Number,
+                    required: true,
+                    min: 1
+                },
+
+                category: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: 'Category',
+                    required: true
+                }
             }],
+            votesCast: {
+                type: Number,
+                default: 0,
+                min: 0
+            },
             // Event for which the bundle is purchased
             event: {
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'Event',
-                required: true
-            },
-            // Category for which the bundle is purchased
-            category: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'Category',
                 required: true
             },
             candidate: {
@@ -136,25 +158,16 @@ class Payment extends BaseModel {
                     customer_code: String
                 }
             },
-            // Vote casting details
-            votesCast: {
-                type: Number,
-                default: 0,
-                min: 0
-            },
-            votesRemaining: {
-                type: Number,
-                required: true,
-                min: 0
-            },
+        
+            
             // Votes that have been cast using this payment
-            votesData: [{
+            votesData: {
                 candidate: {
                     type: mongoose.Schema.Types.ObjectId,
                     ref: 'Candidate',
                     required: true
                 },
-                votesUsed: {
+                votes: {
                     type: Number,
                     required: true,
                     min: 1
@@ -163,7 +176,7 @@ class Payment extends BaseModel {
                     type: Date,
                     default: Date.now
                 }
-            }],
+            },
             // Payment metadata
             metadata: {
                 webhook_verified: {
@@ -191,6 +204,10 @@ class Payment extends BaseModel {
                 type: Date,
                 required: true,
                 default: () => new Date(Date.now() + 15 * 60 * 1000) // 15 minutes from now
+            },
+            verified: {
+                type: Boolean,
+                default: false
             }
         };
 
@@ -205,7 +222,6 @@ class Payment extends BaseModel {
         const schema = super.getSchema();
 
         // Indexes for efficient queries
-        schema.index({ reference: 1 });
         schema.index({ 'voter.email': 1 });
         schema.index({ 'voter.ipAddress': 1 });
         schema.index({ status: 1 });
@@ -216,28 +232,13 @@ class Payment extends BaseModel {
 
         // Compound indexes for common queries
         schema.index({ 'voter.email': 1, status: 1 });
-        schema.index({ event: 1, category: 1, status: 1 });
         schema.index({ 'voter.email': 1, event: 1, category: 1 });
-        schema.index({ 'voter.ipAddress': 1, event: 1, category: 1 });
 
-        // Unique constraint to prevent duplicate payments for same email/event/category
-        schema.index(
-            { 'voter.email': 1, event: 1, category: 1, status: 1 },
-            { 
-                unique: true,
-                partialFilterExpression: { 
-                    status: { $in: ['pending', 'success'] } 
-                }
-            }
-        );
 
-        // Pre-save middleware to calculate votes remaining
+        // Pre-save hook to set paidAt date if status is success
         schema.pre('save', function(next) {
-            if (this.isNew || this.isModified('votesCast')) {
-                // votesRemaining should be calculated from bundle votes minus votes cast
-                if (this.populated('voteBundle') && this.voteBundle.votes) {
-                    this.votesRemaining = this.voteBundle.votes - this.votesCast;
-                }
+            if (this.isModified('status') && this.status === 'success') {
+                this.paidAt = new Date();
             }
             next();
         });

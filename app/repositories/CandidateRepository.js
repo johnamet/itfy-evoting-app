@@ -647,6 +647,23 @@ class CandidateRepository extends BaseRepository {
     }
 
     /**
+     * Update candidate votes after cast
+     * @param {String|ObjectId} candidateId - Candidate ID
+     * @param {Object} voteData - Vote data
+     * @returns {Promise<Object|null>} Updated candidate
+     */
+    async updateVotes(candidateId, voteData) {
+        try {
+            return await this.updateById(candidateId, {
+                $push: { votes: voteData },
+                updatedAt: new Date()
+            });
+        } catch (error) {
+            throw this._handleError(error, 'updateCandidateVotes');
+        }
+    }
+
+    /**
      * Delete candidate (only if no votes exist)
      * @param {String|ObjectId} candidateId - Candidate ID
      * @returns {Promise<Object|null>} Deleted candidate

@@ -114,86 +114,85 @@ class VotingService extends BaseService {
      * Complete vote after payment verification
      */
     async completeVote(reference, candidateId, voterIp) {
-        return await this._withTransaction(async (session) => {
-            try {
-                this._log('complete_vote', { reference, candidateId });
+        try {
+            this._log('complete_vote', { reference, candidateId });
 
-                // Verify payment
-                const paymentResult = await this.paymentService.verifyPayment(reference);
-                if (!paymentResult.verified) {
-                    throw new Error('Payment not verified');
-                }
+            // Verify payment
+            const paymentResult = await this.paymentService.verifyPayment(reference);
+            if (!paymentResult.verified) {
+                throw new Error('Payment not verified');
+            }
 
-                const payment = paymentResult.data.payment;
+            const payment = paymentResult.data.payment;
 
-                // Cast vote
+            console.log('Payment verified:', payment);
+
+            // Cast vote
+            // Push the bundleId as many times as its quantity
+
+            for (const bundle of payment.voteBundles) {
+                const bundleVotes = Array(bundle.quantity).fill(bundle.id);
                 const vote = await this.voteRepository.castVote({
                     voter: { email: payment.voter.email },
                     candidate: candidateId,
-                    event: payment.event,
-                    category: payment.category,
-                    voteBundles: payment.voteBundles,
+                    event: payment.event._id,
+                    category: bundle.category._id,
+                    voteBundles: bundleVotes,
                     ipAddress: voterIp
-                }, { session });
-
-                // Update payment
-                await this.paymentRepository.decrementVotes(payment._id, 1, { session });
-
-                // Log activity
-                await this.activityRepository.logActivity({
-                    user: null,
-                    action: 'vote_cast',
-                    targetType: 'candidate',
-                    targetId: candidateId,
-                    metadata: {
-                        event: payment.event,
-                        category: payment.category,
-                        paymentReference: reference
-                    }
-                }, { session });
-
-                // Send vote confirmation email
-                try {
-                    const event = await this.eventRepository.findById(payment.event);
-                    const candidate = await this.candidateRepository.findById(candidateId);
-
-                    await this.emailService.sendVoteConfirmation(
-                        {
-                            email: payment.voter.email,
-                            name: payment.voter.name || 'Voter'
-                        },
-                        {
-                            id: vote._id,
-                            createdAt: vote.votedAt,
-                            categories: [payment.category],
-                            votes: [{ candidate: candidate.name, category: payment.category }],
-                            hash: vote._id.toString(),
-                            verificationHash: vote._id.toString()
-                        },
-                        {
-                            id: event._id,
-                            name: event.name
-                        }
-                    );
-
-                    this._log('vote_confirmation_email_sent', {
-                        voteId: vote._id,
-                        email: payment.voter.email
-                    });
-                } catch (emailError) {
-                    this._logError('vote_confirmation_email_failed', emailError, { voteId: vote._id });
-                }
-
-                return {
-                    success: true,
-                    vote,
-                    message: 'Vote cast successfully'
-                };
-
-            } catch (error) {
-                throw this._handleError(error, 'complete_vote', { reference, candidateId });
+                });
+                await this.candidateRepository.updateVotes(candidateId, vote);
             }
-        });
+
+
+
+            // Update payment
+            await this.paymentRepository.updatePaymentStatus(payment._id, 'completed');
+            // await this.paymentRepository.updateByReference(payment.reference, {
+            //     votesCast: 
+            // });
+
+            //Update Candidates with votes
+            // Send vote confirmation email
+            try {
+                const event = await this.eventRepository.findById(payment.event);
+                const candidate = await this.candidateRepository.findById(candidateId);
+
+                await this.emailService.sendVoteConfirmation(
+                    {
+                        email: payment.voter.email,
+                        name: payment.voter.name || 'Voter'
+                    },
+                    {
+                        id: vote._id,
+                        createdAt: vote.votedAt,
+                        categories: [payment.category],
+                        votes: [{ candidate: candidate.name, category: payment.category }],
+                        hash: vote._id.toString(),
+                        verificationHash: vote._id.toString()
+                    },
+                    {
+                        id: event._id,
+                        name: event.name
+                    }
+                );
+
+                this._log('vote_confirmation_email_sent', {
+                    voteId: vote._id,
+                    email: payment.voter.email
+                });
+            } catch (emailError) {
+                this._handleError('vote_confirmation_email_failed', emailError, { voteId: vote._id });
+            }
+
+            return {
+                success: true,
+                vote,
+                message: 'Vote cast successfully'
+            };
+
+        } catch (error) {
+            throw this._handleError(error, 'complete_vote', { reference, candidateId });
+        }
     }
 
     /**
@@ -455,6 +454,96 @@ class VotingService extends BaseService {
     }
 
     /**
+     * Decrement votes for a candidate
+     * Used for administrative corrections, vote revocations, or adjustments
+     * @param {string} candidateId - The candidate ID
+     * @param {number} voteCount - Number of votes to decrement
+     * @param {Object} filters - Additional filters for targeting specific votes
+     * @param {string} adminUserId - ID of the admin performing the action
+     * @returns {Promise<Object>} Result of the decrement operation
+     */
+    async decrementVotes(candidateId, voteCount = 1, filters = {}, adminUserId = null) {
+        return await this._withTransaction(async (session) => {
+            try {
+                this._log('decrement_votes', {
+                    candidateId,
+                    voteCount,
+                    filters,
+                    adminUserId
+                });
+
+                // Validate inputs
+                this._validateObjectId(candidateId, 'Candidate ID');
+
+                if (!Number.isInteger(voteCount) || voteCount < 1) {
+                    throw new Error('Vote count must be a positive integer');
+                }
+
+                // Verify candidate exists
+                const candidate = await this.candidateRepository.findById(candidateId);
+                if (!candidate) {
+                    throw new Error('Candidate not found');
+                }
+
+                // If event/category filters provided, validate them
+                if (filters.eventId) {
+                    this._validateObjectId(filters.eventId, 'Event ID');
+                    const event = await this.eventRepository.findById(filters.eventId);
+                    if (!event) {
+                        throw new Error('Event not found');
+                    }
+                }
+
+                if (filters.categoryId) {
+                    this._validateObjectId(filters.categoryId, 'Category ID');
+                }
+
+                // Perform the vote decrement
+                const result = await this.voteRepository.decrementVotes(
+                    candidateId,
+                    voteCount,
+                    filters,
+                    { session }
+                );
+
+                // Log activity for audit trail
+                if (adminUserId) {
+                    await this.activityRepository.create({
+                        user: adminUserId,
+                        action: 'vote_decrement',
+                        targetType: 'candidate',
+                        targetId: candidateId,
+                        metadata: {
+                            votesRemoved: result.votesRemoved,
+                            filters: filters,
+                            reason: filters.reason || 'Administrative action'
+                        }
+                    }, { session });
+                }
+
+                this._log('decrement_votes_success', {
+                    candidateId,
+                    votesRemoved: result.votesRemoved,
+                    remainingVotes: result.remainingVotes
+                });
+
+                return {
+                    success: true,
+                    data: result,
+                    message: `Successfully decremented ${result.votesRemoved} votes for candidate`
+                };
+
+            } catch (error) {
+                throw this._handleError(error, 'decrement_votes', {
+                    candidateId,
+                    voteCount,
+                    filters
+                });
+            }
+        });
+    }
+
+    /**
      * Get real-time voting updates
      */
     async getVotingUpdates(eventId, lastUpdate) {
@@ -536,7 +625,7 @@ class VotingService extends BaseService {
             this._validateObjectId(eventId, 'Event ID');
 
             const { page, limit } = this._generatePaginationOptions(query.page, query.limit);
-            
+
             const options = {
                 page,
                 limit,
@@ -572,7 +661,7 @@ class VotingService extends BaseService {
             this._validateObjectId(categoryId, 'Category ID');
 
             const { page, limit } = this._generatePaginationOptions(query.page, query.limit);
-            
+
             const options = {
                 page,
                 limit,
@@ -610,7 +699,7 @@ class VotingService extends BaseService {
             this._validateObjectId(categoryId, 'Category ID');
 
             const { page, limit } = this._generatePaginationOptions(query.page, query.limit);
-            
+
             const options = {
                 page,
                 limit,

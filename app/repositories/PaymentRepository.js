@@ -79,10 +79,9 @@ class PaymentRepository extends BaseRepository {
         try {
             const payment = await this.findOne({ reference }, options);
             if (!payment) {
-            return null;
+                return null;
             }
-            
-            // Update the payment document
+
             Object.assign(payment, updateData);
             return await payment.save();
         } catch (error) {
@@ -103,7 +102,7 @@ class PaymentRepository extends BaseRepository {
             if (!payment) {
                 return null;
             }
-            
+
             // Update the payment document
             Object.assign(payment, updateData);
             return await payment.save();
@@ -281,9 +280,9 @@ class PaymentRepository extends BaseRepository {
                 query.createdAt = { $gte: new Date(Date.now() - options.timeframe) };
             }
             if (options.event) query.event = options.event;
-            
+
             return await Payment.find(query)
-                .populate('voteBundle')
+                .populate('voteBundles')
                 .populate('event')
                 .populate('category')
                 .sort({ createdAt: -1 });
@@ -322,7 +321,7 @@ class PaymentRepository extends BaseRepository {
      * @throws {Error} If validation fails.
      */
     _validatePaymentData(paymentData) {
-        const required = ['reference', 'candidate', 'voteBundles', 'event', 'category', 'originalAmount', 'finalAmount'];
+        const required = ['reference', 'candidate', 'voteBundles', 'event', 'originalAmount', 'finalAmount'];
 
         for (const field of required) {
             if (!paymentData[field]) {
@@ -331,19 +330,23 @@ class PaymentRepository extends BaseRepository {
         }
 
         // Validate ObjectIds
-        const objectIdFields = ['candidate', 'event', 'category'];
+        const objectIdFields = ['candidate', 'event'];
         for (const field of objectIdFields) {
             if (paymentData[field] && !mongoose.Types.ObjectId.isValid(paymentData[field])) {
-            throw new Error(`Invalid ${field} ObjectId`);
+                throw new Error(`Invalid ${field} ObjectId`);
             }
         }
 
         // Validate voteBundles array
         if (paymentData.voteBundles && Array.isArray(paymentData.voteBundles)) {
-            for (const bundleId of paymentData.voteBundles) {
-            if (!mongoose.Types.ObjectId.isValid(bundleId)) {
-                throw new Error(`Invalid voteBundles ObjectId: ${bundleId}`);
-            }
+            for (const bundle of paymentData.voteBundles) {
+                if (!mongoose.Types.ObjectId.isValid(bundle.id)) {
+                    throw new Error(`Invalid voteBundles ObjectId: ${bundle.id}`);
+                }
+
+                if (bundle.category && !mongoose.Types.ObjectId.isValid(bundle.category)) {
+                    throw new Error(`Invalid voteBundles category ObjectId: ${bundle.category}`);
+                }
             }
         }
 
@@ -371,16 +374,16 @@ class PaymentRepository extends BaseRepository {
      */
     _handleError(error, operation) {
         console.error(`PaymentRepository.${operation} error:`, error);
-        
+
         if (error.code === 11000) {
             throw new Error('Payment reference already exists');
         }
-        
+
         if (error.name === 'ValidationError') {
             const messages = Object.values(error.errors).map(err => err.message);
             throw new Error(`Validation failed: ${messages.join(', ')}`);
         }
-        
+
         throw error;
     }
 

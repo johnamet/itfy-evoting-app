@@ -196,6 +196,8 @@ export default class PaymentController extends BaseController {
         try {
             const signature = req.headers['x-paystack-signature'];
 
+            // Get raw body for signature verification
+            const rawBody = req.rawBody;
             const event = req.body;
 
             const io = req.app.get('io');
@@ -204,7 +206,11 @@ export default class PaymentController extends BaseController {
                 return this.sendError(res, 'Missing webhook signature', 400);
             }
 
-            const result = await this.paymentService.handleWebhook(event, signature);
+            if (!rawBody) {
+                return this.sendError(res, 'Missing raw body for signature verification', 400);
+            }
+
+            const result = await this.paymentService.handleWebhook(event, signature, rawBody);
             io.emit('payment_event', {
                 event: event.type,
                 data: result

@@ -51,6 +51,25 @@ const io = new Server(server, {
 });
 
 app.use(cors(corsOptions));
+
+// Middleware to capture raw body for webhook endpoints
+app.use('/api/v1/payments/webhook', express.raw({ type: 'application/json' }));
+
+// Middleware to parse JSON for other endpoints
+app.use((req, res, next) => {
+    if (req.path === '/api/v1/payments/webhook') {
+        // For webhook, keep the raw body and parse JSON manually
+        req.rawBody = req.body;
+        try {
+            req.body = JSON.parse(req.body.toString('utf8'));
+        } catch (e) {
+            console.error('Error parsing webhook JSON:', e);
+            req.body = {};
+        }
+    }
+    next();
+});
+
 app.use(express.json());
 
 // Make io available throughout the app

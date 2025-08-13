@@ -233,7 +233,7 @@ class CouponService extends BaseService {
      */
     async validateCoupon(data) {
         try {
-            this._log('validate_coupon', { code: data.code, eventId: data.eventId, categoryId: data.categoryId });
+            this._log('validate_coupon', { code: data.code, eventId: data.eventId, bundles: data.bundles });
 
             if (!data.code || data.code.trim().length === 0) {
                 throw new Error('Coupon code is required');
@@ -243,11 +243,14 @@ class CouponService extends BaseService {
             const cacheKey = `coupon:${data.code.toUpperCase()}`;
             let coupon = CacheService.get(cacheKey);
 
+            const categories = data.bundles.map(bundle => bundle.category._id);
+
             if (!coupon) {
                 coupon = await this.couponRepository.findByCode(data.code.toUpperCase().trim(), {
-                    eventId: data.eventId,
-                    categoryId: data.categoryId
-                    });
+                    eventApplicable: data.eventId,
+                    categoriesApplicable: {"$in": categories},
+                    bundlesApplicable: {"$in": data.bundles.map(bundle => bundle.bundle._id)}
+                });
                 if (coupon) {
                     CacheService.set(cacheKey, coupon, 300000); // 5 minutes
                 }

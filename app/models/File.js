@@ -72,7 +72,6 @@ class File extends BaseModel {
 
     getSchema() {
         const schema = super.getSchema();
-        schema.index({ fileId: 1 }, { unique: true });
         schema.index({ entityType: 1, entityId: 1 });
         return schema;
     }
