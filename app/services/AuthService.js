@@ -30,9 +30,9 @@ class AuthService extends BaseService {
      * @param {String} password - User password
      * @returns {Promise<Object>} Authentication result with tokens and user info
      */
-    async login(email, password) {
+    async login(email, password, options={}) {
         try {
-            this._log('login', { email });
+            this._log('login', { email , options: options});
 
             // Validate required fields
             this._validateRequiredFields({ email, password }, ['email', 'password']);
@@ -61,7 +61,8 @@ class AuthService extends BaseService {
             // Update last login
             await this.userRepository.updateById(user._id, {
                 lastLogin: new Date(),
-                lastLoginIP: tokens.loginIP
+                lastLoginIP: options.ipAddress || 'Unknown',
+                lastLoginLocation:options.locaton?`${options.location.country}, ${options.location.city}` : 'Unknown' 
             });
 
             this._log('login_success', { userId: user._id, email });

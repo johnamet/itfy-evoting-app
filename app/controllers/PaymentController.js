@@ -21,6 +21,14 @@ export default class PaymentController extends BaseController {
     }
 
     /**
+     * Create payment (alias for initPayment)
+     * POST /api/payments
+     */
+    async createPayment(req, res) {
+        return this.initPayment(req, res);
+    }
+
+    /**
      * Initialise payment
      */
     async initPayment(req, res) {

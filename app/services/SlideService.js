@@ -607,6 +607,96 @@ class SlideService extends BaseService {
     }
 
     /**
+     * Create a slide for events with gallery
+     * @param {String} eventId - Event ID
+     * @param {String} createdBy - ID of user creating the slide
+     * @returns {Promise<Object>} Created slide
+     */
+    async createGallerySlideFromEvent(eventId, createdBy) {
+        try {
+            this._log('create_gallery_slide_from_event', { eventId, createdBy });
+
+            this._validateObjectId(eventId, 'Event ID');
+            this._validateObjectId(createdBy, 'Created By User ID');
+
+            // Get event details
+            const event = await this.eventRepository.findById(eventId);
+            if (!event) {
+                throw new Error('Event not found');
+            }
+
+            // Check if event has gallery
+            if (!event.gallery || !Array.isArray(event.gallery) || event.gallery.length === 0) {
+                throw new Error('Event does not have a gallery');
+            }
+
+            // Prepare slide data
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+            const eventUrl = `${frontendUrl}/events/${event._id}`;
+            const subtitle = event.description ? event.description.slice(0, 100) : '';
+
+            const slideData = {
+                title: event.name,
+                content: {
+                    subtitle,
+                    gallery: event.gallery,
+                    button: {
+                        label: 'View',
+                        url: eventUrl
+                    }
+                },
+                type: 'gallery',
+                eventId: event._id,
+                isActive: true,
+                settings: {}
+            };
+
+            // Create slide
+            return await this.createSlide(slideData, createdBy);
+        } catch (error) {
+            throw this._handleError(error, 'create_gallery_slide_from_event', { eventId });
+        }
+    }
+
+    /**
+     * Get all published slides
+     * @returns {Promise<Object>} Published slides
+     */
+    async getPublishedSlides() {
+        try {
+            this._log('get_published_slides', {});
+
+            // Find slides where isActive is true and published is true
+            const slides = await this.slideRepository.find(
+                { isActive: true, published: true },
+                { sort: { createdAt: -1 } }
+            );
+
+            // Format slides
+            const formattedSlides = slides.map(slide => ({
+                id: slide._id,
+                title: slide.title,
+                subtitle: slide.subtitle,
+                image: slide.image,
+                order: slide.order,
+                button: slide.button,
+                isActive: slide.isActive,
+                published: slide.published,
+                settings: slide.settings,
+                createdAt: slide.createdAt,
+                updatedAt: slide.updatedAt
+            }));
+
+            return {
+                success: true,
+                data: formattedSlides
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_published_slides', {});
+        }
+    }
+
+    /**
      * Reorder slides after deletion (helper method)
      * @param {String} eventId - Event ID
      * @param {Number} deletedOrder - Order of deleted slide

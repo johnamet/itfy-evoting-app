@@ -43,6 +43,22 @@ export default class CandidateController extends BaseController {
     }
 
     /**
+     * List candidates (alias for getCandidates)
+     * GET /api/candidates
+     */
+    async list(req, res) {
+        return this.getCandidates(req, res);
+    }
+
+    /**
+     * Create candidate (alias for createCandidate)
+     * POST /api/candidates
+     */
+    async create(req, res) {
+        return this.createCandidate(req, res);
+    }
+
+    /**
      * Get all candidates with filtering and pagination
      */
     async getCandidates(req, res) {

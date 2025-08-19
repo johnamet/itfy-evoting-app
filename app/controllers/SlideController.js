@@ -48,7 +48,7 @@ export default class SlideController extends BaseController {
     async getSlides(req, res) {
         try {
             const query = req.query;
-            const slides = await this.slideService.getSlides(query);
+            const slides = await this.slideService.getPublishedSlides(query);
             return this.sendSuccess(res, slides, 'Slides retrieved successfully');
         } catch (error) {
             return this.handleError(res, error, 'Failed to get slides');

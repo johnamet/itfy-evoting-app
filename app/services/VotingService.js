@@ -15,6 +15,7 @@ import UserRepository from '../repositories/UserRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import EmailService from './EmailService.js';
 import PaymentService from './PaymentService.js';
+import PaymentRepository from '../repositories/PaymentRepository.js';
 
 class VotingService extends BaseService {
     constructor() {
@@ -26,7 +27,113 @@ class VotingService extends BaseService {
         this.userRepository = new UserRepository();
         this.activityRepository = new ActivityRepository();
         this.emailService = new EmailService();
+        this.paymentRepository = new PaymentRepository();
         this.paymentService = new PaymentService();
+    }
+
+    /**
+     * Cast a simple vote (without payment)
+     * @param {Object} voteData - Vote data containing userId, eventId, categoryId, candidateId
+     * @returns {Promise<Object>} Vote result
+     */
+    async castVote(voteData) {
+        return await this._withTransaction(async (session) => {
+            try {
+                this._log('cast_vote', {
+                    userId: voteData.userId,
+                    eventId: voteData.eventId,
+                    candidateId: voteData.candidateId
+                });
+
+                // Validate vote data
+                await this._validateSimpleVoteData(voteData);
+
+                // Check event status
+                const event = await this.eventRepository.findById(voteData.eventId);
+                if (!event) {
+                    throw new Error('Event not found');
+                }
+
+                if (event.status !== 'active') {
+                    throw new Error('Event is not active for voting');
+                }
+
+                // Check if event is within voting period
+                const now = new Date();
+                if (now < event.startDate || now > event.endDate) {
+                    throw new Error('Voting is not open for this event');
+                }
+
+                // Check if user has already voted in this category
+                if (voteData.userId) {
+                    const existingVote = await this.voteRepository.findExistingVote(
+                        voteData.userId,
+                        voteData.eventId,
+                        voteData.categoryId
+                    );
+
+                    if (existingVote) {
+                        throw new Error('You have already voted in this category');
+                    }
+                }
+
+                // Validate candidate exists and is active
+                const candidate = await this.candidateRepository.findById(voteData.candidateId);
+                if (!candidate) {
+                    throw new Error('Candidate not found');
+                }
+
+                if (!candidate.isActive) {
+                    throw new Error('Candidate is not active');
+                }
+
+                // Cast the vote
+                const vote = await this.voteRepository.create({
+                    userId: voteData.userId,
+                    eventId: voteData.eventId,
+                    categoryId: voteData.categoryId,
+                    candidateId: voteData.candidateId,
+                    voteCount: voteData.voteCount || 1,
+                    voterIp: voteData.voterIp,
+                    votedAt: new Date()
+                }, { session });
+
+                // Update candidate vote count
+                await this.candidateRepository.incrementVoteCount(
+                    voteData.candidateId,
+                    voteData.voteCount || 1,
+                    { session }
+                );
+
+                // Log activity
+                await this.activityRepository.logActivity({
+                    user: voteData.userId,
+                    action: 'cast_vote',
+                    targetType: 'candidate',
+                    targetId: voteData.candidateId,
+                    metadata: {
+                        event: voteData.eventId,
+                        category: voteData.categoryId,
+                        voteCount: voteData.voteCount || 1
+                    }
+                }, { session });
+
+                return {
+                    success: true,
+                    data: {
+                        voteId: vote._id,
+                        candidateId: voteData.candidateId,
+                        eventId: voteData.eventId,
+                        categoryId: voteData.categoryId,
+                        voteCount: voteData.voteCount || 1,
+                        votedAt: vote.votedAt
+                    }
+                };
+
+            } catch (error) {
+                throw this._handleError(error, 'cast_vote', voteData);
+            }
+        });
     }
 
     /**
@@ -130,6 +237,8 @@ class VotingService extends BaseService {
             // Cast vote
             // Push the bundleId as many times as its quantity
 
+            const voteIds = []
+            const categories = []
             for (const bundle of payment.voteBundles) {
                 const bundleVotes = Array(bundle.quantity).fill(bundle.id);
                 const vote = await this.voteRepository.castVote({
@@ -140,13 +249,16 @@ class VotingService extends BaseService {
                     voteBundles: bundleVotes,
                     ipAddress: voterIp
                 });
+
+                voteIds.push(vote._id);
+                categories.push(bundle.category._id);
                 await this.candidateRepository.updateVotes(candidateId, vote);
             }
 
 
-
             // Update payment
-            await this.paymentRepository.updatePaymentStatus(payment._id, 'completed');
+            await this.paymentRepository.updatePaymentStatus(payment.reference, 
+                {status: 'success',});
             // await this.paymentRepository.updateByReference(payment.reference, {
             //     votesCast: 
             // });
@@ -163,12 +275,12 @@ class VotingService extends BaseService {
                         name: payment.voter.name || 'Voter'
                     },
                     {
-                        id: vote._id,
+                        id: voteIds.join(', '),
                         createdAt: vote.votedAt,
                         categories: [payment.category],
-                        votes: [{ candidate: candidate.name, category: payment.category }],
-                        hash: vote._id.toString(),
-                        verificationHash: vote._id.toString()
+                        votes: [{ candidate: candidate.name, category: categories.join(', '), bundles: payment.voteBundles }],
+                        hash: payment.reference,
+                        verificationHash: payment.reference,
                     },
                     {
                         id: event._id,
@@ -177,16 +289,16 @@ class VotingService extends BaseService {
                 );
 
                 this._log('vote_confirmation_email_sent', {
-                    voteId: vote._id,
+                    voteId: voteIds.join(', '),
                     email: payment.voter.email
                 });
             } catch (emailError) {
-                this._handleError('vote_confirmation_email_failed', emailError, { voteId: vote._id });
+                this._handleError('vote_confirmation_email_failed', emailError, { voteId: voteIds.join(', ') });
             }
 
             return {
                 success: true,
-                vote,
+                vote: voteIds.join(', '),
                 message: 'Vote cast successfully'
             };
 
@@ -720,6 +832,43 @@ class VotingService extends BaseService {
             };
         } catch (error) {
             throw this._handleError(error, 'get_vote_bundles_by_event_and_category', { eventId, categoryId });
+        }
+    }
+
+    /**
+     * Validate vote data for simple voting
+     */
+    async _validateSimpleVoteData(voteData) {
+        this._validateRequiredFields(voteData, ['eventId', 'categoryId', 'candidateId']);
+        this._validateObjectId(voteData.eventId, 'Event ID');
+        this._validateObjectId(voteData.categoryId, 'Category ID');
+        this._validateObjectId(voteData.candidateId, 'Candidate ID');
+
+        if (voteData.userId) {
+            this._validateObjectId(voteData.userId, 'User ID');
+        }
+
+        if (voteData.voteCount && (!Number.isInteger(voteData.voteCount) || voteData.voteCount < 1)) {
+            throw new Error('Vote count must be a positive integer');
+        }
+
+        // Validate candidate exists and belongs to the event/category
+        const candidate = await this.candidateRepository.findById(voteData.candidateId);
+        if (!candidate) {
+            throw new Error('Candidate not found');
+        }
+
+        if (candidate.event.toString() !== voteData.eventId) {
+            throw new Error('Candidate does not belong to this event');
+        }
+
+        // Check if candidate is in the specified category
+        const candidateCategories = Array.isArray(candidate.categories) 
+            ? candidate.categories 
+            : [candidate.categories];
+        
+        if (!candidateCategories.map(cat => cat.toString()).includes(voteData.categoryId)) {
+            throw new Error('Candidate does not belong to this category');
         }
     }
 

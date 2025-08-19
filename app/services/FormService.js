@@ -11,6 +11,7 @@ import FormsRepository from '../repositories/FormsRepository.js';
 import UserRepository from '../repositories/UserRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import CacheService from './CacheService.js';
+import mongoose from 'mongoose';
 
 class FormService extends BaseService {
     constructor() {
@@ -273,12 +274,15 @@ class FormService extends BaseService {
      * @param {Object} context - Additional context (IP, user agent, etc.)
      * @returns {Promise<Object>} Submission result
      */
-    async submitForm(formId, submissionData, submittedBy, context = {}) {
+    async submitForm(formId, submissionData, context = {}) {
         try {
-            this._log('submit_form', { formId, submittedBy });
+            this._log('submit_form', { formId, context });
+
+            this._log('submit_form_data', { formId, data: submissionData });
+
+            submissionData.submittedBy = submissionData.data["Your Name"]
 
             this._validateObjectId(formId, 'Form ID');
-            this._validateObjectId(submittedBy, 'Submitted By User ID');
 
             // Get form
             const form = await this.formsRepository.findById(formId);
@@ -287,12 +291,12 @@ class FormService extends BaseService {
             }
 
             // Check if form accepts submissions
-            if (form.status !== 'active') {
+            if (form.isActive === false) {
                 throw new Error('Form is not accepting submissions');
             }
 
             // Validate submission data against form fields
-            this._validateFormSubmission(submissionData, form.fields);
+            this._validateFormSubmission(submissionData.data, form.fields);
 
             // Check if user already submitted (if single submission allowed)
             if (form.settings && form.settings.allowMultipleSubmissions === false) {
@@ -304,33 +308,20 @@ class FormService extends BaseService {
 
             // Create submission
             const submission = {
-                formId,
-                data: submissionData,
-                submittedBy,
+                data: submissionData.data,
+                submittedBy: submissionData.submittedBy,
                 submittedAt: new Date(),
                 ipAddress: context.ipAddress || null,
                 userAgent: context.userAgent || null
             };
 
-            const savedSubmission = await this.formsRepository.createSubmission(submission);
+            const savedSubmission = await this.formsRepository.createSubmission(formId, submission);
 
             // Update form submission count
-            await this.formsRepository.incrementSubmissionCount(formId);
-
-            // Log activity
-            await this.activityRepository.logActivity({
-                user: submittedBy,
-                action: 'form_submit',
-                targetType: 'form',
-                targetId: formId,
-                metadata: { 
-                    formTitle: form.title,
-                    submissionId: savedSubmission._id
-                }
-            });
+            await this.formsRepository.increaseSubmissionCount(formId);
 
             // Invalidate form cache
-            CacheService.delete(`form:${formId}`);
+            CacheService.clearAll();
 
             this._log('submit_form_success', { formId, submissionId: savedSubmission._id });
 
@@ -394,7 +385,10 @@ class FormService extends BaseService {
                 submissionCount: form.submissionCount,
                 fieldsCount: form.fields ? form.fields.length : 0,
                 createdAt: form.createdAt,
-                updatedAt: form.updatedAt
+                fields: form.fields,
+                updatedAt: form.updatedAt,
+                status: form.status,
+                isActive: form.isActive
             }));
 
             return {
@@ -565,7 +559,7 @@ class FormService extends BaseService {
      */
     _validateFormSubmission(submissionData, formFields) {
         for (const field of formFields) {
-            const value = submissionData[field.name];
+            const value = submissionData[field.label];
 
             // Check required fields
             if (field.required && (value === undefined || value === null || value === '')) {
@@ -621,6 +615,9 @@ class FormService extends BaseService {
             }
             this._validateObjectId(modelId, 'Model ID');
 
+            if (typeof modelId === 'string') {
+                modelId = new mongoose.Types.ObjectId(modelId);
+            }
             // Check cache first
             const cacheKey = `form:${model}:${modelId}`;
             let form = CacheService.get(cacheKey);
@@ -628,7 +625,7 @@ class FormService extends BaseService {
             if (!form) {
                 // Find form by model and modelId
                 form = await this.formsRepository.findOne({ 
-                    model: model.toLowerCase(), 
+                    model: model, 
                     modelId: modelId,
                     isActive: true,
                     isDeleted: false 

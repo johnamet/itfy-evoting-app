@@ -17,15 +17,15 @@ const router = express.Router();
 const activityController = new ActivityController();
 
 // Activity operations
-router.get('/', requireRead, (req, res) => activityController.getActivities(req, res));
-router.get('/recent', requireRead, (req, res) => activityController.getRecentActivities(req, res));
-router.get('/stats', requireRead, (req, res) => activityController.getActivityStats(req, res));
-router.get('/types', requireRead, (req, res) => activityController.getActivityTypes(req, res));
-router.get('/:id', requireRead, (req, res) => activityController.getActivityById(req, res));
+router.get('/', (req, res) => activityController.getActivities(req, res));
+router.get('/recent', (req, res) => activityController.getRecentActivities(req, res));
+router.get('/stats', (req, res) => activityController.getActivityStats(req, res));
+router.get('/types', (req, res) => activityController.getActivityTypes(req, res));
+router.get('/:id', (req, res) => activityController.getActivityById(req, res));
 
 // Activity by entity
-router.get('/user/:userId', requireRead, (req, res) => activityController.getActivitiesByUser(req, res));
-router.get('/entity/:entityType/:entityId', requireRead, (req, res) => activityController.getActivitiesByEntity(req, res));
+router.get('/user/:userId', (req, res) => activityController.getActivitiesByUser(req, res));
+router.get('/entity/:entityType/:entityId', (req, res) => activityController.getActivitiesByEntity(req, res));
 
 // Activity management
 router.post('/', requireCreate, (req, res) => activityController.logActivity(req, res));

@@ -478,7 +478,7 @@ class CandidateService extends BaseService {
 
             this._validateObjectId(candidateId, 'Candidate ID');
 
-            const statistics = await this.candidateRepository.getCandidateStatistics(candidateId);
+            const statistics = await this.candidateRepository.getCandidateStats(candidateId);
 
             return {
                 success: true,

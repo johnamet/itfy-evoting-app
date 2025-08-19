@@ -44,7 +44,7 @@ class VoteRepository extends BaseRepository {
 
 
             const voteBundles = Array.isArray(voteData.voteBundles)
-                ? voteData.voteBundles.map(bundle => new mongoose.Types.ObjectId(bundle.id))
+                ? voteData.voteBundles.map(bundle => new mongoose.Types.ObjectId(bundle._id))
                 : [new mongoose.Types.ObjectId(voteData.voteBundles)];
 
 
@@ -167,10 +167,10 @@ class VoteRepository extends BaseRepository {
     async getVotesByCandidate(candidateId, options = {}) {
         try {
             const criteria = { candidate: new mongoose.Types.ObjectId(candidateId) };
-            return await this.find(criteria, options.page || 1, options.limit || 10, {
+            return await this.find(criteria, {
                 ...options,
                 populate: [
-                    { path: 'voter', select: 'name email' },
+                    { path: 'voter', select: 'email' },
                     { path: 'event', select: 'name' },
                     { path: 'category', select: 'name' },
                     { path: 'voteBundles', select: 'name votes price' }
@@ -645,8 +645,9 @@ class VoteRepository extends BaseRepository {
      * @throws {Error} If validation fails.
      */
     async _validateVoteData(voteData) {
-        console.log("Validating vote data:", voteData);
-        console.log('Vote Bundles: ', voteData.voteBundles);
+        // console.log("Validating vote data:", voteData);
+        // console.log('Vote Bundles: ', voteData.voteBundles);
+
         try {
             const { candidate, voter, event, category, voteBundles, ipAddress } = voteData;
 
@@ -662,9 +663,11 @@ class VoteRepository extends BaseRepository {
                 { id: category, model: 'Category', name: 'category' }
             ];
 
-             const voteBundlesIds = Array.isArray(voteData.voteBundles)
-                ? voteData.voteBundles.map(bundle => new mongoose.Types.ObjectId(bundle._id))
-                : [new mongoose.Types.ObjectId(voteData.voteBundles)];
+            const bundleSet = new Set(voteData.voteBundles.map(v => v._id));
+
+            console.log("Vote Bundles Set:", bundleSet);
+            const voteBundlesIds = Array.from(bundleSet).map(id => new mongoose.Types.ObjectId(id));
+
             idsToValidate.push(...voteBundlesIds.map(bundleId => ({ id: bundleId, model: 'VoteBundle', name: 'voteBundles' })));
 
             await Promise.all(

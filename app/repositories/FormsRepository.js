@@ -414,6 +414,54 @@ class FormsRepository extends BaseRepository {
             throw this._handleError(error, 'getFormsWithFieldCount');
         }
     }
+
+    /**
+     * Increase the submission count for a form
+     * @param {String} formId - Form ID
+     * @returns {Promise<Object>} Update result
+     */
+    async increaseSubmissionCount(formId) {
+        try {
+            const result = await this.updateOne(
+                { _id: formId },
+                { $inc: { submissionCount: 1 } }
+            );
+
+            return result;
+        } catch (error) {
+            throw this._handleError(error, 'increaseSubmissionCount');
+        }
+    }
+
+    /**
+     * Create a submission for a form
+     * @param {String} formId - Form ID
+     * @param {Object} submissionData - Submission data
+     * @returns {Promise<Object>} Created submission
+     */
+    async createSubmission(formId, submissionData) {
+        try {
+            const form = await this.findById(formId);
+            if (!form) {
+                throw new Error('Form not found');
+            }
+
+            const newSubmission = {
+                data: submissionData.data,
+                submittedBy: submissionData.submittedBy,
+                ipAddress: submissionData.ipAddress,
+                userAgent: submissionData.userAgent,
+                createdAt: new Date()
+            };
+
+            form.submissions.push(newSubmission);
+            await form.save();
+
+            return newSubmission;
+        } catch (error) {
+            throw this._handleError(error, 'createSubmission');
+        }
+    }
 }
 
 export default FormsRepository;

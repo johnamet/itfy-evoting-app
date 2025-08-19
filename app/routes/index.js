@@ -20,6 +20,9 @@ import userRoutes from './userRoutes.js';
 import votingRoutes from './votingRoutes.js';
 import paymentRoutes from './paymentRoutes.js';
 import voteBundleRoutes from './voteBundleRoutes.js';
+import notificationRoutes from './notifications.js';
+import settingsRoutes from './settings.js';
+import analyticsRoutes from './analyticsRoutes.js';
 
 const router = express.Router();
 
@@ -38,6 +41,9 @@ router.use('/users', userRoutes);
 router.use('/voting', votingRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/vote-bundles', voteBundleRoutes);
+router.use('/notifications', notificationRoutes);
+router.use('/settings', settingsRoutes);
+router.use('/analytics', analyticsRoutes);
 
 // Health check for API routes
 router.get('/health', (req, res) => {
@@ -208,7 +214,56 @@ router.get('/health', (req, res) => {
             'DELETE /api/cache/user/:userId',
             'DELETE /api/cache/event/:eventId',
             'PUT /api/cache/config',
-            'POST /api/cache/warm-up'
+            'POST /api/cache/warm-up',
+            // Notification routes
+            'GET /api/notifications',
+            'GET /api/notifications/user/:userId',
+            'GET /api/notifications/category/:category',
+            'GET /api/notifications/statistics',
+            'POST /api/notifications',
+            'POST /api/notifications/system',
+            'POST /api/notifications/test',
+            'PUT /api/notifications/:id',
+            'PATCH /api/notifications/:id/read',
+            'PATCH /api/notifications/mark-all-read',
+            'DELETE /api/notifications/:id',
+            'DELETE /api/notifications/cleanup',
+            // Settings routes
+            'GET /api/settings/public',
+            'GET /api/settings/site-config',
+            'GET /api/settings/theme',
+            'GET /api/settings',
+            'GET /api/settings/model/:model',
+            'GET /api/settings/category/:category',
+            'POST /api/settings',
+            'POST /api/settings/bulk',
+            'POST /api/settings/initialize',
+            'PUT /api/settings/:id',
+            'PUT /api/settings/bulk-update',
+            'PUT /api/settings/site-config',
+            'PUT /api/settings/theme',
+            'DELETE /api/settings/:id',
+            'DELETE /api/settings/reset',
+            'POST /api/settings/backup',
+            'POST /api/settings/restore',
+            'GET /api/settings/backup/list',
+            // Analytics routes
+            'GET /api/analytics/dashboard/overview',
+            'GET /api/analytics/voting',
+            'GET /api/analytics/payments',
+            'GET /api/analytics/users',
+            'GET /api/analytics/events',
+            'GET /api/analytics/events/:eventId',
+            'GET /api/analytics/comprehensive',
+            'GET /api/analytics/realtime',
+            'GET /api/analytics/trends',
+            'GET /api/analytics/export',
+            'POST /api/analytics/summary',
+            'POST /api/analytics/schedule',
+            'GET /api/analytics/health',
+            'DELETE /api/analytics/cache',
+            'DELETE /api/analytics/cache/:type',
+            'DELETE /api/analytics/cleanup'
         ]
     });
 });

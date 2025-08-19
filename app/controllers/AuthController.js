@@ -190,7 +190,7 @@ export default class AuthController extends BaseController {
                 return this.sendError(res, 'Email and password are required', 400);
             }
 
-            const result = await this.authService.login(email, password);
+            const result = await this.authService.login(email, password, {ipAddress: req.ip, location: req.geo});
             return this.sendSuccess(res, result, 'Login successful');
         } catch (error) {
             return this.handleError(res, error, 'Login failed');

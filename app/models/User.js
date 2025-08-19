@@ -66,9 +66,17 @@ class User extends BaseModel {
                 type: String,
                 default: null
             },
+            lastLoginLocation: {
+                type: String,
+                default: null
+            },
             isActive: {
                 type: Boolean,
                 default: true
+            },
+            status: {
+                type: String,
+                default: "active"
             }
         };
 

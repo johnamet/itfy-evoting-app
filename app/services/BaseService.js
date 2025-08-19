@@ -280,7 +280,7 @@ class BaseService {
 
         // Handle active/inactive filter
         if (query.isActive !== undefined) {
-            filter.isActive = query.isActive === 'true';
+            filter.isActive = query.status === 'active';
         }
 
         // Handle array filters (e.g., categories, tags, roles)

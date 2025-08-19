@@ -308,15 +308,19 @@ export default class CouponController extends BaseController {
 
             const exportData = await this.couponService.exportCoupons(query, format);
 
-            if (format === 'csv') {
-                res.setHeader('Content-Type', 'text/csv');
-                res.setHeader('Content-Disposition', 'attachment; filename=coupons.csv');
-            } else {
-                res.setHeader('Content-Type', 'application/json');
-                res.setHeader('Content-Disposition', 'attachment; filename=coupons.json');
-            }
+            const filename = 'coupons';
 
-            return res.send(exportData);
+            if (format === 'csv') {
+                return this.sendCSVDownload(res, exportData, `${filename}.csv`);
+            } else {
+                // Parse JSON if it's a string
+                const jsonData = typeof exportData === 'string' ? JSON.parse(exportData) : exportData;
+                return this.sendExportResponse(res, jsonData, 'json', filename, true, {
+                    format,
+                    query,
+                    recordCount: Array.isArray(jsonData) ? jsonData.length : 1
+                });
+            }
         } catch (error) {
             return this.handleError(res, error, 'Failed to export coupons');
         }

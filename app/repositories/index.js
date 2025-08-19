@@ -17,6 +17,7 @@ import RoleRepository from './RoleRepository.js';
 import SlideRepository from './SlideRepository.js';
 import CategoryRepository from './CategoryRepository.js';
 import ActivityRepository from './ActivityRepository.js';
+import AnalyticsRepository from './AnalyticsRepository.js';
 
 export {
     BaseRepository,
@@ -29,7 +30,8 @@ export {
     RoleRepository,
     SlideRepository,
     CategoryRepository,
-    ActivityRepository
+    ActivityRepository,
+    AnalyticsRepository
 };
 
 export default {
@@ -43,5 +45,6 @@ export default {
     RoleRepository,
     SlideRepository,
     CategoryRepository,
-    ActivityRepository
+    ActivityRepository,
+    AnalyticsRepository
 };

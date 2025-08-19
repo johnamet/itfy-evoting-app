@@ -18,6 +18,8 @@ import FormController from './FormController.js';
 import SlideController from './SlideController.js';
 import UserController from './UserController.js';
 import VotingController from './VotingController.js';
+import NotificationController from './NotificationController.js';
+import SettingsController from './SettingsController.js';
 
 export {
     ActivityController,
@@ -32,10 +34,14 @@ export {
     FormController,
     SlideController,
     UserController,
-    VotingController
+    VotingController,
+    NotificationController,
+    SettingsController
 };
 
 export default {
     BaseController,
-    FormController
+    FormController,
+    NotificationController,
+    SettingsController
 };

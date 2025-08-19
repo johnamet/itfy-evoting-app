@@ -24,16 +24,16 @@ const userController = new UserController();
 const upload = multer({ dest: 'uploads/avatars/' });
 
 // User CRUD operations
-router.get('/', requireRead, (req, res) => userController.getUsers(req, res));
-router.get('/search', requireRead, (req, res) => userController.searchUsers(req, res));
-router.get('/role/:role', requireRead, (req, res) => userController.getUsersByRole(req, res));
-router.get('/:id', requireRead, (req, res) => userController.getUserById(req, res));
-router.put('/:id', requireUpdate, (req, res) => userController.updateUser(req, res));
-router.delete('/:id', requireDelete, (req, res) => userController.deleteUser(req, res));
+router.get('/', (req, res) => userController.getUsers(req, res));
+router.get('/search', (req, res) => userController.searchUsers(req, res));
+router.get('/role/:role', (req, res) => userController.getUsersByRole(req, res));
+router.get('/:id', (req, res) => userController.getUserById(req, res));
+router.put('/:id', (req, res) => userController.updateUser(req, res));
+router.delete('/:id', (req, res) => userController.deleteUser(req, res));
 
 // User operations
-router.get('/:id/activity', requireRead, (req, res) => userController.getUserActivity(req, res));
-router.get('/:id/stats', requireRead, (req, res) => userController.getUserStats(req, res));
+router.get('/:id/activity', (req, res) => userController.getUserActivity(req, res));
+router.get('/:id/stats', (req, res) => userController.getUserStats(req, res));
 
 // File operations
 router.post('/:id/avatar', requireUpdate, upload.single('avatar'), (req, res) => userController.uploadAvatar(req, res));

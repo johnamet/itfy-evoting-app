@@ -284,7 +284,6 @@ class PaymentRepository extends BaseRepository {
             return await Payment.find(query)
                 .populate('voteBundles')
                 .populate('event')
-                .populate('category')
                 .sort({ createdAt: -1 });
         } catch (error) {
             console.error('Error finding payments by IP:', error);

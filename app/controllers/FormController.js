@@ -145,9 +145,7 @@ class FormController extends BaseController {
                 ipAddress: req.ip || req.connection.remoteAddress
             };
 
-            const userId = this.getUserId(req);
-            const result = await this.formService.submitForm(id, submissionData, userId);
-            
+            const result = await this.formService.submitForm(id, submissionData, {ipAddress: submissionData.ipAddress, userAgent: req.headers['user-agent']});
             return this.sendSuccess(res, result.submission, 'Form submitted successfully', 201);
 
         } catch (error) {
@@ -187,13 +185,17 @@ class FormController extends BaseController {
             const format = req.query.format || 'csv';
 
             const result = await this.formService.exportFormSubmissions(id, format);
+            const filename = `form_${id}_submissions`;
             
-            res.set({
-                'Content-Type': 'text/csv',
-                'Content-Disposition': `attachment; filename="form_${id}_submissions.csv"`
-            });
-            
-            return res.send(result.data);
+            if (format === 'csv') {
+                return this.sendCSVDownload(res, result.data, `${filename}.csv`);
+            } else {
+                return this.sendExportResponse(res, result.data, 'json', filename, true, {
+                    formId: id,
+                    format,
+                    submissionCount: Array.isArray(result.data) ? result.data.length : 1
+                });
+            }
 
         } catch (error) {
             return this.handleServiceError(res, error, 'export form submissions');

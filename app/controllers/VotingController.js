@@ -20,6 +20,46 @@ export default class VotingController extends BaseController {
     }
 
     /**
+     * Cast a vote for a candidate
+     */
+    async castVote(req, res) {
+        try {
+            const voteData = {
+                userId: this.getUserId(req),
+                eventId: req.body.eventId,
+                categoryId: req.body.categoryId,
+                candidateId: req.body.candidateId,
+                voteCount: req.body.voteCount || 1,
+                voterIp: req.ip || req.connection.remoteAddress
+            };
+
+            // Validate required fields
+            const validation = this.validateRequiredParams(req, ['eventId', 'categoryId', 'candidateId']);
+            if (validation) {
+                return this.sendError(res, validation.message, 400, validation);
+            }
+
+            // Validate ObjectIds
+            if (!this.isValidObjectId(voteData.eventId) || 
+                !this.isValidObjectId(voteData.categoryId) || 
+                !this.isValidObjectId(voteData.candidateId)) {
+                return this.sendError(res, 'Invalid ID format provided', 400);
+            }
+
+            const result = await this.votingService.castVote(voteData);
+
+            if (!result.success) {
+                return this.sendError(res, result.error || 'Failed to cast vote', 400);
+            }
+
+            return this.sendSuccess(res, result.data, 'Vote cast successfully', 201);
+
+        } catch (error) {
+            return this.handleError(res, error, 'Failed to cast vote');
+        }
+    }
+
+    /**
      * Initiate a vote (triggers payment initialization for non-registered voters)
      */
     async initiateVote(req, res) {
@@ -214,16 +254,19 @@ export default class VotingController extends BaseController {
             const { format = 'json' } = req.query;
 
             const exportData = await this.votingService.exportResults(eventId, format);
+            const filename = `voting-results-${eventId}`;
 
             if (format === 'csv') {
-                res.setHeader('Content-Type', 'text/csv');
-                res.setHeader('Content-Disposition', `attachment; filename=voting-results-${eventId}.csv`);
+                return this.sendCSVDownload(res, exportData, `${filename}.csv`);
             } else {
-                res.setHeader('Content-Type', 'application/json');
-                res.setHeader('Content-Disposition', `attachment; filename=voting-results-${eventId}.json`);
+                // Parse JSON if it's a string
+                const jsonData = typeof exportData === 'string' ? JSON.parse(exportData) : exportData;
+                return this.sendExportResponse(res, jsonData, 'json', filename, true, {
+                    eventId,
+                    format,
+                    recordCount: Array.isArray(jsonData) ? jsonData.length : 1
+                });
             }
-
-            return res.send(exportData);
         } catch (error) {
             return this.handleError(res, error, 'Failed to export results');
         }

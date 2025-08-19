@@ -328,10 +328,13 @@ class ActivityService extends BaseService {
      */
     async getRecentActivities(limit = 50) {
         try {
+
+            limit = Math.min(limit, 100)
             this._log('get_recent_activities', { limit });
 
+
             const activities = await this.activityRepository.find({}, {
-                limit: Math.min(limit, 100), // Cap at 100
+                limit: limit, // Cap at 100
                 sort: { timestamp: -1 },
                 populate: [
                     { path: 'user', select: 'username email profile.firstName profile.lastName' }
@@ -343,10 +346,7 @@ class ActivityService extends BaseService {
                 id: activity._id,
                 user: {
                     id: activity.user._id,
-                    username: activity.user.username,
-                    name: activity.user.profile ? 
-                        `${activity.user.profile.firstName} ${activity.user.profile.lastName}`.trim() 
-                        : activity.user.username
+                    name: activity.user.name.trim() || activity.user.email
                 },
                 action: activity.action,
                 targetType: activity.targetType,

@@ -16,12 +16,15 @@ import CacheService from './CacheService.js';
 import FileService from './FileService.js';
 import CategoryService from './CategoryService.js';
 import ActivityService from './ActivityService.js';
+import AnalyticsService from './AnalyticsService.js';
 import CouponService from './CouponService.js';
 import FormService from './FormService.js';
 import SlideService from './SlideService.js';
 import PaymentService from './PaymentService.js';
 import EmailService from './EmailService.js';
 import VoteBundleService from './VoteBundleService.js';
+import NotificationService from './NotificationService.js';
+import SettingsService from './SettingsService.js';
 
 export {
     BaseService,
@@ -34,12 +37,15 @@ export {
     FileService,
     CategoryService,
     ActivityService,
+    AnalyticsService,
     CouponService,
     FormService,
     SlideService,
     PaymentService,
     EmailService,
-    VoteBundleService
+    VoteBundleService,
+    NotificationService,
+    SettingsService
 };
 
 export default {
@@ -53,10 +59,13 @@ export default {
     FileService,
     CategoryService,
     ActivityService,
+    AnalyticsService,
     CouponService,
     FormService,
     SlideService,
     PaymentService,
     EmailService,
-    VoteBundleService
+    VoteBundleService,
+    NotificationService,
+    SettingsService
 };

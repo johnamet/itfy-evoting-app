@@ -20,6 +20,13 @@ class Candidate extends BaseModel {
                 trim: true,
                 index: true // Index for faster lookups
             },
+            email: {
+                type: String,
+                required: true,
+                trim: true,
+                unique: true,
+                index: true // Index for faster lookups
+            },
             bio: {
                 type: String,
                 required: true,

@@ -16,6 +16,8 @@ import dbConnection from './utils/engine/db.js';
 import dbInitializer from './utils/engine/dbInitializer.js';
 import { cacheStatsMiddleware, cacheManagementMiddleware, cacheMiddleware } from './utils/engine/cacheMiddleware.js';
 import apiRoutes from './routes/index.js';
+import geoip from 'geoip-lite';
+
 
 const app = express();
 const server = createServer(app);
@@ -51,6 +53,34 @@ const io = new Server(server, {
 });
 
 app.use(cors(corsOptions));
+
+
+// Trust proxy so real IP is captured if behind load balancer / reverse proxy
+app.set("trust proxy", true);
+
+// Middleware to attach geo info
+app.use((req, res, next) => {
+    try {
+        // Get client IP
+        const ip = req.headers['x-forwarded-for']?.split(",")[0] || req.socket.remoteAddress;
+
+        // Lookup geo info
+        const geo = geoip.lookup(ip);
+
+        console.log(geo)
+
+        // Attach to request object
+        req.clientIp = ip;
+        req.geo = geo;
+
+        // Continue
+        next();
+    } catch (err) {
+        console.error("Geo middleware error:", err);
+        next(); // don't block request
+    }
+});
+
 
 // Middleware to capture raw body for webhook endpoints
 app.use('/api/v1/payments/webhook', express.raw({ type: 'application/json' }));
@@ -162,6 +192,7 @@ app.get("/api/time", (req, res) => {
 
 // Example API endpoint for testing cache invalidation
 app.post("/api/invalidate-test", (req, res) => {
+    
     return res.json({
         success: true,
         message: "This POST request will invalidate related cache entries",

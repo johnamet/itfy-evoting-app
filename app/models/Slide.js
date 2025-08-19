@@ -26,6 +26,34 @@ class Slide  extends BaseModel{
                 type: String,
                 required: true,
                 trim: true
+            },
+            button: {
+                label: {
+                    type: String,
+                    required: true,
+                    trim: true
+                },
+                link: {
+                    type: String,
+                    required: true,
+                    trim: true
+                }
+            },
+            isActive: {
+                type: Boolean,
+                default: true
+            },
+            published: {
+                type: Boolean,
+                default: false
+            },
+            settings: {
+                type: Object,
+                default: {}
+            },
+            order: {
+                type: Number,
+                required: true
             }
         }
 

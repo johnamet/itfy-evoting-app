@@ -118,7 +118,7 @@ export default class ActivityController extends BaseController {
             const stats = await this.activityService.getActivityStats(query);
             return this.sendSuccess(res, stats, 'Activity statistics retrieved successfully');
         } catch (error) {
-            return this.handleError(res, error, 'Failed to get activity statistics');
+            return this.handleError(res, error, new Error('Failed to get activity statistics'));
         }
     }
 
@@ -128,7 +128,8 @@ export default class ActivityController extends BaseController {
     async getRecentActivities(req, res) {
         try {
             const query = req.query;
-            const activities = await this.activityService.getRecentActivities(query);
+            const {limit} = query
+            const activities = await this.activityService.getRecentActivities(limit);
             return this.sendSuccess(res, activities, 'Recent activities retrieved successfully');
         } catch (error) {
             return this.handleError(res, error, 'Failed to get recent activities');
@@ -149,16 +150,19 @@ export default class ActivityController extends BaseController {
             }
 
             const exportData = await this.activityService.exportActivityLog(query, format);
+            const filename = 'activity-log';
 
             if (format === 'csv') {
-                res.setHeader('Content-Type', 'text/csv');
-                res.setHeader('Content-Disposition', 'attachment; filename=activity-log.csv');
+                return this.sendCSVDownload(res, exportData, `${filename}.csv`);
             } else {
-                res.setHeader('Content-Type', 'application/json');
-                res.setHeader('Content-Disposition', 'attachment; filename=activity-log.json');
+                // Parse JSON if it's a string
+                const jsonData = typeof exportData === 'string' ? JSON.parse(exportData) : exportData;
+                return this.sendExportResponse(res, jsonData, 'json', filename, true, {
+                    format,
+                    query,
+                    recordCount: Array.isArray(jsonData) ? jsonData.length : 1
+                });
             }
-
-            return res.send(exportData);
         } catch (error) {
             return this.handleError(res, error, 'Failed to export activity log');
         }

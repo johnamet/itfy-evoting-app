@@ -62,12 +62,18 @@ class PaymentService extends BaseService {
                 event: paymentData.eventId,
                 bundles: paymentData.bundles
             });
+            
+            for (const bundle of paymentData.bundles) {
+                if (bundle.category.id) {
+                    bundle.category._id = bundle.category.id;
+                }
+            }
 
             this._validateRequiredFields(paymentData, ['email', 'bundles', 'eventId', 'candidateId']);
 
             for (const bundle of paymentData.bundles) {
                 this._validateObjectId(bundle.bundle._id, 'Bundle ID');
-                this._validateObjectId(bundle.category._id, 'Category ID');
+                this._validateObjectId(bundle.category._id , 'Category ID');
             }
 
             this._validateObjectId(paymentData.candidateId, 'Candidate ID');
@@ -110,8 +116,6 @@ class PaymentService extends BaseService {
 
             // Generate unique reference
             const reference = this._generatePaymentReference();
-
-            console.log(bundleCalculation.validatedBundles)
 
             // Create payment record
             const paymentRecord = await this.paymentRepository.createPayment({
@@ -203,7 +207,6 @@ class PaymentService extends BaseService {
                 ]
             });
 
-            console.log(payment)
 
             if (!payment) {
                 throw new Error('Payment not found');

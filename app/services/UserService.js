@@ -353,7 +353,7 @@ class UserService extends BaseService {
             );
 
             // Create search filter
-            const filter = this._createSearchFilter(query, ['name', 'email']);
+            const filter = this._createSearchFilter(query, ['name', 'email', 'status']);
 
             // Add role filter if specified
             if (query.role) {

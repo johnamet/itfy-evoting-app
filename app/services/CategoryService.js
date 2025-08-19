@@ -13,6 +13,7 @@ import CandidateRepository from '../repositories/CandidateRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import VoteRepository from '../repositories/VoteRepository.js';
 import CacheService from './CacheService.js';
+import { populate } from 'dotenv';
 
 class CategoryService extends BaseService {
     constructor() {
@@ -403,8 +404,9 @@ class CategoryService extends BaseService {
             const categories = await this.categoryRepository.find(filter, {
                 skip: (page - 1) * limit,
                 limit,
-                sort: { createdAt: -1 }
-            });
+                sort: { createdAt: -1 },
+                populate: ['event', 'candidates']
+            },);
 
             // Get total count for pagination
             const total = await this.categoryRepository.countDocuments(filter);
@@ -417,11 +419,13 @@ class CategoryService extends BaseService {
                         id: category._id,
                         name: category.name,
                         description: category.description,
-                        eventId: category.eventId,
+                        event: category.event,
                         maxCandidates: category.maxCandidates,
                         allowMultipleVotes: category.allowMultipleVotes,
                         candidatesCount: candidates.length,
-                        createdAt: category.createdAt
+                        createdAt: category.createdAt,
+                        candidates: category.candidates
+
                     };
                 })
             );

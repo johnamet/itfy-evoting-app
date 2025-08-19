@@ -664,6 +664,32 @@ class CandidateRepository extends BaseRepository {
     }
 
     /**
+     * Increment vote count for a candidate
+     * @param {String|ObjectId} candidateId - Candidate ID
+     * @param {Number} voteCount - Number of votes to add
+     * @param {Object} options - Update options
+     * @returns {Promise<Object|null>} Updated candidate
+     */
+    async incrementVoteCount(candidateId, voteCount = 1, options = {}) {
+        try {
+            return await this.model.findByIdAndUpdate(
+                candidateId,
+                {
+                    $inc: { voteCount: voteCount },
+                    updatedAt: new Date()
+                },
+                {
+                    new: true,
+                    runValidators: true,
+                    ...options
+                }
+            );
+        } catch (error) {
+            throw this._handleError(error, 'incrementVoteCount');
+        }
+    }
+
+    /**
      * Delete candidate (only if no votes exist)
      * @param {String|ObjectId} candidateId - Candidate ID
      * @returns {Promise<Object|null>} Deleted candidate

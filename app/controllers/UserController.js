@@ -20,6 +20,62 @@ export default class UserController extends BaseController {
     }
 
     /**
+     * Get current user profile
+     * GET /api/users/profile
+     */
+    async getProfile(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return this.sendError(res, 'User not authenticated', 401);
+            }
+
+            const user = await this.userService.getUserById(userId, true);
+            
+            if (!user) {
+                return this.sendError(res, 'User not found', 404);
+            }
+
+            return this.sendSuccess(res, user, 'Profile retrieved successfully');
+        } catch (error) {
+            return this.handleError(res, error, 'Failed to get profile');
+        }
+    }
+
+    /**
+     * Update current user profile
+     * PUT /api/users/profile
+     */
+    async updateProfile(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return this.sendError(res, 'User not authenticated', 401);
+            }
+
+            const updateData = req.body;
+            
+            // Remove sensitive fields that shouldn't be updated via profile
+            delete updateData.role;
+            delete updateData.status;
+            delete updateData.permissions;
+
+            const user = await this.userService.updateUser(userId, {
+                ...updateData,
+                updatedBy: userId
+            });
+
+            if (!user) {
+                return this.sendError(res, 'User not found', 404);
+            }
+
+            return this.sendSuccess(res, user, 'Profile updated successfully');
+        } catch (error) {
+            return this.handleError(res, error, 'Failed to update profile');
+        }
+    }
+
+    /**
      * Get all users with filtering and pagination
      */
     async getUsers(req, res) {

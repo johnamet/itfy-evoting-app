@@ -6,6 +6,7 @@
  * It includes the schema definition for the Event model and methods specific to events.
  */
 
+import { type } from 'os';
 import BaseModel from './BaseModel.js';
 import mongoose, { mongo } from 'mongoose';
 
@@ -178,6 +179,11 @@ class Event extends BaseModel {
                     }
                 }],
                 default: []
+            },
+            registrations: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Form',
+                required: false
             }
         }
         super(schemaDefinition, { collection: 'events' });
