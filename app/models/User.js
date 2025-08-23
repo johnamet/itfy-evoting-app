@@ -50,6 +50,14 @@ class User extends BaseModel {
                 type: String,
                 trim: true
             },
+            phone: {
+                type: String,
+                trim: true
+            },
+            location: {
+                type: String,
+                trim: true
+            },
             passwordResetToken: {
                 type: String,
                 default: null

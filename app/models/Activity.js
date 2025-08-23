@@ -19,16 +19,16 @@ class Activity extends BaseModel{
             action: {
                 type: String,
                 required: true,
-                enum: ['create', 'update', 'delete', 'view', 'site_visit']
+                enum: ['create', 'update', 'delete', 'view', 'site_visit', 'login']
             },
             targetType: {
                 type: String,
                 required: true,
-                enum: ['user', 'candidate', 'event', 'vote', 'site']
+                enum: ['user', 'candidate', 'event', 'votebundle', 'coupon', 'site']
             },
             targetId: {
                 type: mongoose.Schema.Types.ObjectId,
-                required: true
+                required: false
             },
             timestamp: {
                 type: Date,

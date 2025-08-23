@@ -24,9 +24,16 @@ export default class FileController extends BaseController {
      */
     async uploadFile(req, res) {
         try {
-            console.log('File upload request received:', req.file, req.body);
+            console.log('File upload request received');
+            console.log('req.file:', req.file);
+            console.log('req.body:', req.body);
+            console.log('req.headers:', req.headers);
+            
             const file = req.file;
-            const { category, entityType, entityId } = req.body;
+            // Safely extract from req.body with defaults
+            const entityType = req.body?.entityType || 'default';
+            const entityId = req.body?.entityId || 'unknown';
+            const category = req.body?.category || 'general';
             const uploadedBy = req.user?.id || "688c82bc0e3aaea6fa5e73d3";
 
             if (!file) {
@@ -37,18 +44,16 @@ export default class FileController extends BaseController {
                 return this.sendError(res, 'User authentication required', 401);
             }
 
-            if (!entityType || !entityId) {
-                return this.sendError(res, 'entityType and entityId are required', 400);
-            }
+            console.log('Extracted values:', { entityType, entityId, category, uploadedBy });
 
             const uploadedFile = await this.fileService.uploadFile(file, {
-                category,
                 entityType,
                 entityId,
+                category,
                 uploadedBy
             });
 
-            const fileUrl = `/files/${uploadedFile.fileId}`;
+            const fileUrl = `${process.env.BASE_URL || 'http://localhost:3000/api/v1'}/files/open/${uploadedFile.fileId}`;
             return this.sendSuccess(res, { ...uploadedFile, url: fileUrl }, 'File uploaded successfully', 201);
         } catch (error) {
             return this.handleError(res, error, 'Failed to upload file');
@@ -60,9 +65,16 @@ export default class FileController extends BaseController {
      */
     async uploadMultipleFiles(req, res) {
         try {
+            console.log('Multiple files upload request received');
+            console.log('req.files:', req.files);
+            console.log('req.body:', req.body);
+            
             const files = req.files;
-            const { category, entityType, entityId } = req.body;
-            const uploadedBy = req.user?.id;
+            // Safely extract from req.body with defaults
+            const category = req.body?.category || 'general';
+            const entityType = req.body?.entityType || 'default';
+            const entityId = req.body?.entityId || 'unknown';
+            const uploadedBy = req.user?.id || "688c82bc0e3aaea6fa5e73d3";
 
             if (!files || files.length === 0) {
                 return this.sendError(res, 'Files are required', 400);
@@ -72,9 +84,7 @@ export default class FileController extends BaseController {
                 return this.sendError(res, 'User authentication required', 401);
             }
 
-            if (!entityType || !entityId) {
-                return this.sendError(res, 'entityType and entityId are required', 400);
-            }
+            console.log('Extracted values:', { category, entityType, entityId, uploadedBy });
 
             const uploadedFiles = await this.fileService.uploadMultipleFiles(files, {
                 category,
@@ -265,14 +275,20 @@ export default class FileController extends BaseController {
      */
     async validateFile(req, res) {
         try {
+            console.log('File validation request received');
+            console.log('req.file:', req.file);
+            console.log('req.body:', req.body);
+            
             const file = req.file;
-            const { category } = req.body;
+            const fileType = req.body?.fileType || 'image'; // Default to image
 
             if (!file) {
                 return this.sendError(res, 'File is required', 400);
             }
 
-            const validation = await this.fileService.validateFile(file, category);
+            console.log('Validating file with type:', fileType);
+
+            const validation = await this.fileService.validateFile(file, fileType);
             return this.sendSuccess(res, validation, 'File validation completed');
         } catch (error) {
             return this.handleError(res, error, 'File validation failed');

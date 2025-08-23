@@ -12,6 +12,7 @@ import RoleRepository from '../repositories/RoleRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import EmailService from './EmailService.js';
 import { populate } from 'dotenv';
+import mongoose from 'mongoose';
 
 class UserService extends BaseService {
     constructor() {
@@ -63,7 +64,7 @@ class UserService extends BaseService {
             if (createdBy) {
                 await this.activityRepository.logActivity({
                     user: createdBy,
-                    action: 'user_create',
+                    action: 'create',
                     targetType: 'user',
                     targetId: user._id,
                     metadata: { userEmail: user.email, roleName: role.name }
@@ -80,7 +81,7 @@ class UserService extends BaseService {
                 });
                 this._log('welcome_email_sent', { userId: user._id, email: user.email });
             } catch (emailError) {
-                this._logError('welcome_email_failed', emailError, { userId: user._id, email: user.email });
+                this._handleError('welcome_email_failed', emailError, { userId: user._id, email: user.email });
                 // Don't throw error - user creation should succeed even if email fails
             }
 
@@ -105,6 +106,7 @@ class UserService extends BaseService {
             throw this._handleError(error, 'create_user', { email: userData.email });
         }
     }
+
 
     /**
      * Get user by ID
@@ -210,7 +212,7 @@ class UserService extends BaseService {
             if (updatedBy) {
                 await this.activityRepository.logActivity({
                     user: updatedBy,
-                    action: 'user_update',
+                    action: 'update',
                     targetType: 'user',
                     targetId: userId,
                     metadata: { 
@@ -358,7 +360,7 @@ class UserService extends BaseService {
             // Add role filter if specified
             if (query.role) {
                 this._validateObjectId(query.role, 'Role ID');
-                filter.role = query.role;
+                filter.role = new mongoose.Types.ObjectId(query.role);
             }
 
             // Get users with pagination
@@ -379,6 +381,84 @@ class UserService extends BaseService {
             };
         } catch (error) {
             throw this._handleError(error, 'get_users', { query });
+        }
+    }
+
+    /**
+     * Get detailed stats for a user
+     * @param {String} userId - User ID
+     * @returns {Promise<Object>} User stats
+     */
+    async getUserStats(userId) {
+        try {
+            this._log('get_user_stats', { userId });
+
+            this._validateObjectId(userId, 'User ID');
+
+            // Events created by user
+            const events = await this.activityRepository.find({
+                user: userId,
+                action: 'create',
+                targetType: 'event'
+            });
+
+            // Categories created by user
+            const categories = await this.activityRepository.find({
+                user: userId,
+                action: 'create',
+                targetType: 'category'
+            });
+
+            // VoteBundles created by user
+            const voteBundles = await this.activityRepository.find({
+                user: userId,
+                action: 'create',
+                targetType: 'votebundle'
+            });
+
+            // Coupons created by user
+            const coupons = await this.activityRepository.find({
+                user: userId,
+                action: 'create',
+                targetType: 'coupon'
+            });
+
+            // Updates made by user
+            const updates = await this.activityRepository.find({
+                user: userId,
+                action: 'update'
+            });
+
+            // Logins made by user
+            const logins = await this.activityRepository.find({
+                user: userId,
+                action: 'login'
+            });
+
+            const recentActivity = await this.activityRepository.find({
+                user: userId,
+                createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } // Last 7 days
+            });
+
+            return {
+                success: true,
+                data: {
+                    eventsCreated: events.length,
+                    categoriesCreated: categories.length,
+                    voteBundlesCreated: voteBundles.length,
+                    couponsCreated: coupons.length,
+                    updatesMade: updates.length,
+                    recentActivity,
+                    totalLogins: logins.length,
+                    events,
+                    categories,
+                    voteBundles,
+                    coupons,
+                    updates
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_user_stats', { userId });
         }
     }
 
@@ -464,6 +544,24 @@ class UserService extends BaseService {
             };
         } catch (error) {
             throw this._handleError(error, 'search_users', { searchTerm });
+        }
+    }
+
+    /**
+     * Get roles
+     */
+    async getRoles() {
+        try {
+            this._log('get_roles');
+
+            const roles = await this.roleRepository.find();
+
+            return {
+                success: true,
+                data: roles
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_roles');
         }
     }
 }

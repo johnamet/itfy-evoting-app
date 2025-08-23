@@ -124,7 +124,7 @@ class EventRepository extends BaseRepository {
             const criteria = { status };
             return await this.find(criteria, {
                 ...options,
-                sort: { createdAt: -1 }
+                sort: { createdAt: -1 },
             });
         } catch (error) {
             throw this._handleError(error, 'findByStatus');

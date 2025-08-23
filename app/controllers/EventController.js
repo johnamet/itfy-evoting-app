@@ -212,7 +212,7 @@ export default class EventController extends BaseController {
             const includeDetails = req.query.include === 'details';
 
             const event = await this.eventService.getEventById(id, includeDetails);
-            
+
             if (!event) {
                 return this.sendError(res, 'Event not found', 404);
             }
@@ -227,15 +227,15 @@ export default class EventController extends BaseController {
      * Update event
      */
     async updateEvent(req, res) {
+        console.log("Update Event req", req)
         try {
             const { id } = req.params;
             const updateData = req.body;
-            const updatedBy = req.user?.id;
-
-            const event = await this.eventService.updateEvent(id, {
-                ...updateData,
+            const updatedBy = req.user.id
+            const event = await this.eventService.updateEvent(id,
+                updateData,
                 updatedBy
-            });
+            );
 
             if (!event) {
                 return this.sendError(res, 'Event not found', 404);
@@ -306,14 +306,9 @@ export default class EventController extends BaseController {
     async registerForEvent(req, res) {
         try {
             const { id } = req.params;
-            const userId = req.user?.id;
             const registrationData = req.body;
 
-            if (!userId) {
-                return this.sendError(res, 'User authentication required', 401);
-            }
-
-            const registration = await this.eventService.registerForEvent(id, userId, registrationData);
+            const registration = await this.eventService.registerForEvent(id, registrationData);
             return this.sendSuccess(res, registration, 'Successfully registered for event', 201);
         } catch (error) {
             return this.handleError(res, error, 'Failed to register for event');
@@ -370,7 +365,7 @@ export default class EventController extends BaseController {
     async getUpcomingEvents(req, res) {
         try {
             const query = req.query;
-            query.type = 'upcoming'; 
+            query.type = 'upcoming';
             const events = await this.eventService.getEvents(query);
             return this.sendSuccess(res, events, 'Upcoming events retrieved successfully');
         } catch (error) {

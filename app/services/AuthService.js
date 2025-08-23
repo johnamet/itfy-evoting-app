@@ -12,6 +12,8 @@ import BaseService from './BaseService.js';
 import UserRepository from '../repositories/UserRepository.js';
 import RoleRepository from '../repositories/RoleRepository.js';
 import EmailService from './EmailService.js';
+import config from '../config/ConfigManager.js';
+import ActivityService from './ActivityService.js';
 
 class AuthService extends BaseService {
     constructor() {
@@ -19,9 +21,13 @@ class AuthService extends BaseService {
         this.userRepository = new UserRepository();
         this.roleRepository = new RoleRepository();
         this.emailService = new EmailService();
-        this.jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
-        this.jwtExpiresIn = process.env.JWT_EXPIRES_IN || '24h';
-        this.refreshTokenExpiresIn = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
+        this.activityService = new ActivityService()
+        this.jwtSecret = config.get('jwt.secret');
+        this.jwtExpiresIn = config.get('jwt.expiresIn') || '24h';
+        this.refreshTokenExpiresIn = config.get('jwt.refreshExpiresIn') || '7d';
+        this.jwtAlgorithm = config.get('jwt.algorithm') || 'HS256';
+        this.jwtIssuer = config.get('jwt.issuer') || 'e-voting-app';
+        this.jwtAudience = config.get('jwt.audience') || 'e-voting-app-users';
     }
 
     /**
@@ -49,12 +55,6 @@ class AuthService extends BaseService {
                 throw new Error('Account is deactivated');
             }
 
-            // Get user role information
-            const role = await this.roleRepository.findById(user.role);
-            if (!role) {
-                throw new Error('User role not found');
-            }
-
             // Generate tokens
             const tokens = await this._generateTokens(user);
 
@@ -62,11 +62,23 @@ class AuthService extends BaseService {
             await this.userRepository.updateById(user._id, {
                 lastLogin: new Date(),
                 lastLoginIP: options.ipAddress || 'Unknown',
-                lastLoginLocation:options.locaton?`${options.location.country}, ${options.location.city}` : 'Unknown' 
+                lastLoginLocation: options.location ? `${options.location.country}, ${options.location.city}` : 'Unknown'
             });
 
-            this._log('login_success', { userId: user._id, email });
 
+            const role  = user.role
+            this._log('login_success', { userId: user._id, email, role: user.role.level });
+
+            //log activity
+            this.activityService.logActivity({
+                user: user._id,
+                action: "login",
+                targetType: "user",
+                targetId: user._id,
+                ipAddress: options.ipAddress || "Unknown",
+                userAgent: options.userAgent || "Unknown",
+                timestamp: new Date()
+            })
             return {
                 success: true,
                 user: {
@@ -359,7 +371,11 @@ class AuthService extends BaseService {
                 role: user.role
             },
             this.jwtSecret,
-            { expiresIn: this.jwtExpiresIn }
+            { expiresIn: this.jwtExpiresIn,
+                algorithm: this.jwtAlgorithm,
+                issuer: this.jwtIssuer,
+                audience: this.jwtAudience
+            }
         );
     }
 
@@ -376,7 +392,11 @@ class AuthService extends BaseService {
                 type: 'refresh'
             },
             this.jwtSecret,
-            { expiresIn: this.refreshTokenExpiresIn }
+            { expiresIn: this.refreshTokenExpiresIn,
+                algorithm: this.jwtAlgorithm,
+                issuer: this.jwtIssuer,
+                audience: this.jwtAudience
+             }
         );
     }
 

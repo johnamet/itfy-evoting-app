@@ -199,4 +199,20 @@ export default class ActivityController extends BaseController {
             return this.handleError(res, error, 'Failed to get activity types');
         }
     }
+
+    /**
+     * Track site visits
+     */
+
+    async trackSiteVisits(req, res){
+        try{
+            const user = req.user?.id || null
+        const {page} = req.query
+        const meta = req.body
+        this.activityService.logVisit(user, page, meta)
+        return this.sendSuccess(res, {}, "Visit Logged")}
+        catch(err){
+            this.handleError(res, new Error('Failed to Log Visit'))
+        }
+    }
 }

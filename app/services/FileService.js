@@ -6,7 +6,7 @@
  * compression, and storage management.
  */
 
-import fs from 'fs';
+import fs, { promises as fsPromises } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import File from '../models/File.js';
@@ -42,9 +42,9 @@ class FileService extends BaseService {
 
             for (const dir of directories) {
                 try {
-                    await fs.access(dir);
+                    await fsPromises.access(dir);
                 } catch (error) {
-                    await fs.mkdir(dir, { recursive: true });
+                    await fsPromises.mkdir(dir, { recursive: true });
                     console.log(`Created directory: ${dir}`);
                 }
             }
@@ -162,15 +162,15 @@ class FileService extends BaseService {
 
             // Ensure target directory exists
             try {
-                await fs.access(targetPath);
+                await fsPromises.access(targetPath);
             } catch (error) {
-                await fs.mkdir(targetPath, { recursive: true });
+                await fsPromises.mkdir(targetPath, { recursive: true });
             }
 
             // Write file
-            await fs.writeFile(fullPath, fileData.buffer);
+            await fsPromises.writeFile(fullPath, fileData.buffer);
 
-            const fileStats = await fs.stat(fullPath);
+            const fileStats = await fsPromises.stat(fullPath);
 
             // Save to File model
             const fileDoc = new File({
@@ -286,7 +286,7 @@ class FileService extends BaseService {
             );
             if (!file) throw new Error('File not found');
 
-            await fs.unlink(file.path);
+            await fsPromises.unlink(file.path);
 
             return { success: true, message: 'File deleted successfully' };
         } catch (error) {

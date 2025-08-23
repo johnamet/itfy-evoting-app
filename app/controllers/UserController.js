@@ -20,6 +20,21 @@ export default class UserController extends BaseController {
     }
 
     /**
+     * Create a new user
+     */
+    async createUser(req, res) {
+        try {
+            const userData = req.body;
+            const createdBy = req.user?.id;
+
+            const user = await this.userService.createUser(userData, createdBy);
+            return this.sendSuccess(res, user, 'User created successfully');
+        } catch (error) {
+            return this.handleError(res, error, 'Failed to create user');
+        }
+    }
+
+    /**
      * Get current user profile
      * GET /api/users/profile
      */
@@ -60,10 +75,10 @@ export default class UserController extends BaseController {
             delete updateData.status;
             delete updateData.permissions;
 
-            const user = await this.userService.updateUser(userId, {
-                ...updateData,
-                updatedBy: userId
-            });
+            const user = await this.userService.updateUser(userId,
+                { ...updateData, updatedBy: userId },
+                userId
+            );
 
             if (!user) {
                 return this.sendError(res, 'User not found', 404);
@@ -79,6 +94,7 @@ export default class UserController extends BaseController {
      * Get all users with filtering and pagination
      */
     async getUsers(req, res) {
+        console.log("Users request:", req.query);
         try {
             const query = req.query;
             const users = await this.userService.getUsers(query);
@@ -115,17 +131,21 @@ export default class UserController extends BaseController {
         try {
             const { id } = req.params;
             const updateData = req.body;
-            const updatedBy = req.user?.id;
+            const updatedBy = req.user?.id || req.user?._id;
 
             // Check if user is updating their own profile or has admin rights
-            if (id !== updatedBy && req.user?.role !== 'admin') {
+            if (id !== updatedBy && req.user?.role.level < 2) {
                 return this.sendError(res, 'Insufficient permissions', 403);
             }
+
+            console.log('Update data:', updateData);
 
             const user = await this.userService.updateUser(id, {
                 ...updateData,
                 updatedBy
-            });
+            }, updatedBy);
+
+            console.log('Updated user:', user);
 
             if (!user) {
                 return this.sendError(res, 'User not found', 404);
@@ -278,10 +298,10 @@ export default class UserController extends BaseController {
         try {
             const { id } = req.params;
 
-            // Users can only view their own stats unless they're admin
-            if (id !== req.user?.id && req.user?.role !== 'admin') {
-                return this.sendError(res, 'Insufficient permissions', 403);
-            }
+            // // Users can only view their own stats unless they're admin
+            // if (id !== req.user?.id && req.user?.role.level > 0) {
+            //     return this.sendError(res, 'Insufficient permissions', 403);
+            // }
 
             const stats = await this.userService.getUserStats(id);
 

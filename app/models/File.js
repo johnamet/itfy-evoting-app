@@ -8,6 +8,7 @@
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import BaseModel from './BaseModel.js';
+import { type } from 'os';
 
 class File extends BaseModel {
     constructor() {
@@ -49,17 +50,17 @@ class File extends BaseModel {
             },
             entityType: {
                 type: String,
-                enum: ['candidate', 'event', 'document'],
+                enum: ['candidate', 'event', 'document', 'avatar', 'slide', 'category', 'user'],
                 required: [true, 'Entity type is required']
             },
             entityId: {
                 type: mongoose.Schema.Types.ObjectId,
                 required: [true, 'Entity ID is required']
             },
-            category: {
+            category:{
                 type: String,
-                default: null
             },
+    
             status: {
                 type: String,
                 enum: ['pending', 'processed', 'deleted'],

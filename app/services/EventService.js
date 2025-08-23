@@ -131,7 +131,7 @@ class EventService extends BaseService {
                 throw new Error('Cannot update completed event');
             }
 
-            if (currentEvent.status === 'active' && updateData.startDate) {
+            if (currentEvent.status === 'active' && updateData.startDate === currentEvent.startDate) {
                 throw new Error('Cannot change start date of active event');
             }
 
@@ -158,17 +158,17 @@ class EventService extends BaseService {
             });
 
             // Send event update email
-            await this.emailService.sendEventNotification(
-                { email: this.adminEmail, name: 'Admin' },
-                {
-                    id: updatedEvent._id,
-                    name: updatedEvent.name,
-                    description: updatedEvent.description,
-                    startDate: updatedEvent.startDate,
-                    endDate: updatedEvent.endDate,
-                    status: updatedEvent.status
-                }
-            );
+            // await this.emailService.sendEventNotification(
+            //     { email: this.adminEmail, name: 'Admin' },
+            //     {
+            //         id: updatedEvent._id,
+            //         name: updatedEvent.name,
+            //         description: updatedEvent.description,
+            //         startDate: updatedEvent.startDate,
+            //         endDate: updatedEvent.endDate,
+            //         status: updatedEvent.status
+            //     }
+            // );
 
             this._log('update_event_success', { eventId });
 

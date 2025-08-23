@@ -12,20 +12,22 @@ import {
     requireCreate, 
     requireRead, 
     requireUpdate, 
-    requireDelete 
+    requireDelete, 
+    authenticate,
+    requireLevel
 } from '../middleware/auth.js';
 
 const router = express.Router();
 const eventController = new EventController();
 
 // Event CRUD operations
-router.post('/', requireCreate, (req, res) => eventController.createEvent(req, res));
+router.post('/', (req, res) => eventController.createEvent(req, res));
 router.get('/', optionalAuth, (req, res) => eventController.getEvents(req, res));
 router.get('/upcoming', optionalAuth, (req, res) => eventController.getUpcomingEvents(req, res));
 router.get('/past', optionalAuth, (req, res) => eventController.getPastEvents(req, res));
 router.get('/:id', optionalAuth, (req, res) => eventController.getEventById(req, res));
-router.put('/:id', requireUpdate, (req, res) => eventController.updateEvent(req, res));
-router.delete('/:id', requireDelete, (req, res) => eventController.deleteEvent(req, res));
+router.put('/:id', authenticate, (req, res) => eventController.updateEvent(req, res));
+router.delete('/:id', (req, res) => eventController.deleteEvent(req, res));
 
 // Event operations
 router.get('/:id/stats', (req, res) => eventController.getEventStats(req, res));

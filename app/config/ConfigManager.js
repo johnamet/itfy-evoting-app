@@ -55,7 +55,8 @@ class ConfigManager {
                 expiresIn: process.env.JWT_EXPIRES_IN || '24h',
                 refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
                 algorithm: process.env.JWT_ALGORITHM || 'HS256',
-                issuer: process.env.JWT_ISSUER || 'e-voting-app'
+                issuer: process.env.JWT_ISSUER || 'e-voting-app',
+                audience: process.env.JWT_AUDIENCE || 'e-voting-app-users',
             },
 
             // Security configuration

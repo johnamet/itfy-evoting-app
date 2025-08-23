@@ -8,18 +8,21 @@
 
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import config from '../config/ConfigManager.js';
 
 // Load environment variables
 dotenv.config();
 
 // JWT configuration from environment variables
 const JWT_CONFIG = {
-    secret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
-    issuer: process.env.JWT_ISSUER || 'itfy-evoting-app',
-    audience: process.env.JWT_AUDIENCE || 'itfy-evoting-users',
-    algorithms: ['HS256'],
-    expiresIn: process.env.JWT_EXPIRES_IN || '24h'
-};
+    secret: config.get('jwt.secret'),
+    issuer: config.get('jwt.issuer'),
+    audience: config.get('jwt.audience'),
+    algorithms: [config.get('jwt.algorithm')],
+    expiresIn: config.get('jwt.expiresIn')
+}
+
+console.log("JWT Configuration:", JWT_CONFIG);
 
 /**
  * Verify JWT token and extract user information
@@ -97,8 +100,7 @@ export const authenticate = (req, res, next) => {
 
         // Attach user information to request
         req.user = user;
-        req.userId = user.id;
-        
+        req.userId = user.id || user._id;
         next();
 
     } catch (error) {
@@ -157,7 +159,9 @@ export const optionalAuth = (req, res, next) => {
  * @param {string} operation - Operation type ('create', 'read', 'update', 'delete')
  */
 export const requireLevel = (requiredLevel, operation = 'read') => {
+    console.log("Checking level:", requiredLevel);
     return (req, res, next) => {
+        const user = req.user
         if (!req.user) {
             return res.status(401).json({
                 success: false,
@@ -166,7 +170,7 @@ export const requireLevel = (requiredLevel, operation = 'read') => {
             });
         }
 
-        const userLevel = req.user.roleLevel || 1; // Default to level 1 (read only)
+        const userLevel = req.user.role.level || 1; // Default to level 1 (read only)
         
         // Check if user level meets the required level
         if (userLevel < requiredLevel) {
@@ -186,6 +190,7 @@ export const requireLevel = (requiredLevel, operation = 'read') => {
                 message: `Your permission level (${userLevel}) does not allow '${operation}' operations`
             });
         }
+
 
         next();
     };
@@ -209,8 +214,8 @@ export const authorize = (requiredRoles = []) => {
             return next(); // No specific roles required
         }
 
-        const userRole = req.user.role || 'user';
-        const userLevel = req.user.roleLevel || 1;
+        const userRole = req.user.role.name || 'user';
+        const userLevel = req.user.role.level || 1;
         
         // Check if user has required role or sufficient level
         const hasRequiredRole = requiredRoles.includes(userRole) || 
@@ -282,7 +287,7 @@ export const requireOperations = (requiredOperations = [], minLevel = 1) => {
             });
         }
 
-        const userLevel = req.user.roleLevel || 1;
+        const userLevel = req.user.role.level || 1;
         
         // Check minimum level requirement
         if (userLevel < minLevel) {

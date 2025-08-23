@@ -607,14 +607,14 @@ class ActivityRepository extends BaseRepository {
             const dateKey = today.toISOString().split('T')[0]; // YYYY-MM-DD format
             const hour = today.getHours();
             
-            // Create unique identifier for the site visit document
-            const siteVisitId = `site_visit_${dateKey}`;
+            // // Create unique identifier for the site visit document
+            // const siteVisitId = `site_visit_${dateKey}`;
             
             // Find or create the site visit document for today
             const updateQuery = {
                 action: 'site_visit',
                 targetType: 'site',
-                targetId: siteVisitId,
+                // targetId: siteVisitId,
                 user: null // Site visits are tracked separately from user activities
             };
 
@@ -637,9 +637,12 @@ class ActivityRepository extends BaseRepository {
             };
 
             // Try to update existing document, or create new one
-            const existingDoc = await this.model.findOne(updateQuery);
+            // const existingDoc = await this.model.findOne(updateQuery);
+
+            const existingDoc = await this.model.findOne({action: 'site_visit'})
             
             if (existingDoc) {
+                existingDoc.targetId = existingDoc._id
                 // Update existing site visit document
                 const updateData = {
                     $inc: {

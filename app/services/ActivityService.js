@@ -25,10 +25,10 @@ class ActivityService extends BaseService {
      */
     async logActivity(activityData) {
         try {
-            this._log('log_activity', { 
-                user: activityData.user, 
+            this._log('log_activity', {
+                user: activityData.user,
                 action: activityData.action,
-                targetType: activityData.targetType 
+                targetType: activityData.targetType
             });
 
             // Validate required fields
@@ -52,9 +52,11 @@ class ActivityService extends BaseService {
                 action: activityData.action,
                 targetType: activityData.targetType || null,
                 targetId: activityData.targetId || null,
-                metadata: activityData.metadata || {},
-                ipAddress: activityData.ipAddress || null,
-                userAgent: activityData.userAgent || null,
+                metadata: {
+                    ipAddress: activityData.ipAddress || 'Unknown',
+                    userAgent: activityData.userAgent || 'Unknown',
+                    location: activityData.location || 'Unknown'
+                },
                 timestamp: new Date()
             };
 
@@ -83,6 +85,60 @@ class ActivityService extends BaseService {
     }
 
     /**
+     * Log Site Visits
+     */
+
+    async logVisit(userId = null, page = 'homepage', metadata={}){
+        try{
+            const siteVisits = await this.activityRepository.trackSiteVisit(userId, page, metadata)
+        }catch(err){
+            throw this._handleError(err, 'log_visit')
+        }
+    }
+
+    /**
+   * Get date range for a given period
+   * @param {string} period - Time period
+   * @returns {Object} Date range with start and end dates
+   */
+    getDateRangeForPeriod(period) {
+        const now = new Date();
+        let start, end;
+
+        switch (period) {
+            case 'hourly':
+                start = new Date(now.getTime() - 60 * 60 * 1000); // 1 hour ago
+                end = now;
+                break;
+            case 'daily':
+                start = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours ago
+                end = now;
+                break;
+            case 'weekly':
+                start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days ago
+                end = now;
+                break;
+            case 'monthly':
+                start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+                end = now;
+                break;
+            case 'yearly':
+                start = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000); // 365 days ago
+                end = now;
+                break;
+            case 'all-time':
+                start = new Date('2020-01-01'); // Arbitrary start date
+                end = now;
+                break;
+            default:
+                start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                end = now;
+        }
+
+        return { start, end };
+    }
+
+    /**
      * Get activities with filtering and pagination
      * @param {Object} query - Query parameters
      * @returns {Promise<Object>} Paginated activities
@@ -92,8 +148,8 @@ class ActivityService extends BaseService {
             this._log('get_activities', { query });
 
             const { page, limit } = this._generatePaginationOptions(
-                query.page, 
-                query.limit, 
+                query.page,
+                query.limit,
                 100
             );
 
@@ -133,6 +189,13 @@ class ActivityService extends BaseService {
                 }
             }
 
+            //Period filter
+            if (query.days) {
+                const now = new Date()
+                const start = new Date(now.getTime() - query.days * 60 * 60 * 1000);
+                filter.timestamp = { "$gte": start }
+            }
+
             const activities = await this.activityRepository.find(filter, {
                 skip: (page - 1) * limit,
                 limit,
@@ -145,8 +208,10 @@ class ActivityService extends BaseService {
             // Get total count for pagination
             const total = await this.activityRepository.countDocuments(filter);
 
+            //filter out site visit
+            const filteredActivities = activities.filter((activity) => activity.targetType !== 'site')
             // Format activities
-            const formattedActivities = activities.map(activity => ({
+            const formattedActivities = filteredActivities.map(activity => ({
                 id: activity._id,
                 user: {
                     id: activity.user._id,
@@ -337,16 +402,17 @@ class ActivityService extends BaseService {
                 limit: limit, // Cap at 100
                 sort: { timestamp: -1 },
                 populate: [
-                    { path: 'user', select: 'username email profile.firstName profile.lastName' }
+                    { path: 'user', select: 'email name' }
                 ]
             });
 
             // Format activities
-            const formattedActivities = activities.map(activity => ({
+            const formattedActivities = activities.filter(activity => activity.targetType !== 'site').map(activity => ({
                 id: activity._id,
                 user: {
                     id: activity.user._id,
-                    name: activity.user.name.trim() || activity.user.email
+                    name: activity.user.name.trim() || activity.user.email,
+                    email: activity.user.email
                 },
                 action: activity.action,
                 targetType: activity.targetType,
@@ -379,8 +445,8 @@ class ActivityService extends BaseService {
             }
 
             const { page, limit } = this._generatePaginationOptions(
-                query.page, 
-                query.limit, 
+                query.page,
+                query.limit,
                 50
             );
 
@@ -434,8 +500,8 @@ class ActivityService extends BaseService {
                     id: activity.user._id,
                     username: activity.user.username,
                     email: activity.user.email,
-                    name: activity.user.profile ? 
-                        `${activity.user.profile.firstName} ${activity.user.profile.lastName}`.trim() 
+                    name: activity.user.profile ?
+                        `${activity.user.profile.firstName} ${activity.user.profile.lastName}`.trim()
                         : activity.user.username
                 },
                 action: activity.action,
@@ -478,9 +544,9 @@ class ActivityService extends BaseService {
             // Delete old activities
             const deleteResult = await this.activityRepository.deleteMany(filter);
 
-            this._log('cleanup_old_activities_success', { 
-                daysOld, 
-                deleted: deleteResult.deletedCount 
+            this._log('cleanup_old_activities_success', {
+                daysOld,
+                deleted: deleteResult.deletedCount
             });
 
             return {

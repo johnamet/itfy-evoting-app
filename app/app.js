@@ -81,26 +81,23 @@ app.use((req, res, next) => {
     }
 });
 
-
-// Middleware to capture raw body for webhook endpoints
-app.use('/api/v1/payments/webhook', express.raw({ type: 'application/json' }));
-
-// Middleware to parse JSON for other endpoints
+// Conditional middleware for parsing request bodies
 app.use((req, res, next) => {
-    if (req.path === '/api/v1/payments/webhook') {
-        // For webhook, keep the raw body and parse JSON manually
-        req.rawBody = req.body;
-        try {
-            req.body = JSON.parse(req.body.toString('utf8'));
-        } catch (e) {
-            console.error('Error parsing webhook JSON:', e);
-            req.body = {};
-        }
+    const contentType = req.get('Content-Type') || '';
+    
+    // Skip parsing for file upload endpoints (multipart/form-data)
+    if (contentType.includes('multipart/form-data')) {
+        return next();
     }
-    next();
+    
+    // Parse JSON for other endpoints
+    if (contentType.includes('application/json')) {
+        express.json()(req, res, next);
+    } else {
+        // Parse URL-encoded data for form submissions
+        express.urlencoded({ extended: true })(req, res, next);
+    }
 });
-
-app.use(express.json());
 
 // Make io available throughout the app
 app.set('io', io);

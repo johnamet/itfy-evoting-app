@@ -14,18 +14,21 @@ import {
     requireRead,
     requireUpdate,
     requireDelete,
-    requireLevel
+    requireLevel,
+    authenticate
 } from '../middleware/auth.js';
 
 const router = express.Router();
 const fileController = new FileController();
+
+// router.use(authenticate);
 
 // Configure multer for memory storage
 const upload = multer({ storage: multer.memoryStorage() });
 // File upload operations
 router.post('/upload', upload.single('file'), (req, res) => fileController.uploadFile(req, res));
 router.post('/upload/multiple', requireCreate, upload.array('files', 10), (req, res) => fileController.uploadMultipleFiles(req, res));
-router.post('/validate', requireRead, upload.single('file'), (req, res) => fileController.validateFile(req, res));
+router.post('/validate', requireLevel(1), upload.single('file'), (req, res) => fileController.validateFile(req, res));
 
 // File operations
 router.get('/', requireRead, (req, res) => fileController.getFiles(req, res));
