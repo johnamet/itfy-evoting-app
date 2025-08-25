@@ -20,9 +20,9 @@ const activityController = new ActivityController();
 // Track site visit
 router.post('/visit', optionalAuth, (req, res) => activityController.trackSiteVisits(req, res))
 // Activity operations
-router.get('/', authenticate, requireLevel(1, 'read'), (req, res) => activityController.getActivities(req, res));
+router.get('/', (req, res) => activityController.getActivities(req, res));
 router.get('/recent', authenticate, requireLevel(1, 'read'), (req, res) => activityController.getRecentActivities(req, res));
-router.get('/stats', authenticate, requireLevel(1, 'read'), (req, res) => activityController.getActivityStats(req, res));
+router.get('/stats', (req, res) => activityController.getActivityStats(req, res));
 router.get('/types', authenticate, requireLevel(1, 'read'), (req, res) => activityController.getActivityTypes(req, res));
 router.get('/:id', authenticate, requireLevel(1, 'read'), (req, res) => activityController.getActivityById(req, res));
 

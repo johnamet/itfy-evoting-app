@@ -90,13 +90,18 @@ app.use((req, res, next) => {
         return next();
     }
     
-    // Parse JSON for other endpoints
+    // Parse JSON for application/json content type
     if (contentType.includes('application/json')) {
-        express.json()(req, res, next);
-    } else {
-        // Parse URL-encoded data for form submissions
-        express.urlencoded({ extended: true })(req, res, next);
+        return express.json()(req, res, next);
     }
+    
+    // Parse URL-encoded data for form submissions
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+        return express.urlencoded({ extended: true })(req, res, next);
+    }
+    
+    // For other content types, continue without parsing
+    next();
 });
 
 // Make io available throughout the app

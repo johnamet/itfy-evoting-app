@@ -11,7 +11,9 @@ import AnalyticsController from '../controllers/AnalyticsController.js';
 // import auth from '../middleware/auth.js';
 
 const router = express.Router();
+
 const analyticsController = new AnalyticsController();
+
 
 // Apply authentication middleware to all analytics routes
 // router.use(auth);

@@ -454,7 +454,8 @@ class UserService extends BaseService {
                     categories,
                     voteBundles,
                     coupons,
-                    updates
+                    updates,
+                    lastLogin: logins[0]?.createdAt || null
                 }
             };
         } catch (error) {

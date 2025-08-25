@@ -85,6 +85,10 @@ class AuthService extends BaseService {
                     id: user._id,
                     name: user.name,
                     email: user.email,
+                    image: user.image,
+                    bio: user.bio,
+                    location: user.location,
+                    phone: user.phone,
                     role: {
                         id: role._id,
                         name: role.name,

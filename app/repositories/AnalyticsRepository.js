@@ -714,7 +714,7 @@ class AnalyticsRepository extends BaseRepository {
             // In a production environment, you might want to cache these results
             const stats = await this.computeCollectionStatistics(start, end);
 
-            console.log(stats)
+            console.log("Collection", stats)
             return stats.data.collections;
 
         } catch (error) {
@@ -1613,6 +1613,230 @@ class AnalyticsRepository extends BaseRepository {
             console.error('Error computing event participation analytics:', error);
             throw error;
         }
+    }
+
+    /**
+     * Get collection statistics with historical data for growth calculation
+     * @param {Object} options - Options including date range
+     * @returns {Promise<Object>} Collection statistics with historical comparison
+     */
+    async getCollectionStatistics(options = {}) {
+        try {
+            const { startDate, endDate, includeHistorical = true } = options;
+            
+            const collections = {};
+
+            // Get current counts for all collections
+            const [
+                userCount,
+                eventCount,
+                voteCount,
+                paymentCount,
+                candidateCount,
+                categoryCount,
+                activityCount,
+                formCount
+            ] = await Promise.all([
+                User.countDocuments(startDate && endDate ? { 
+                    createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) } 
+                } : {}),
+                Event.countDocuments(startDate && endDate ? { 
+                    createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) } 
+                } : {}),
+                Vote.countDocuments(startDate && endDate ? { 
+                    votedAt: { $gte: new Date(startDate), $lte: new Date(endDate) } 
+                } : {}),
+                Payment.countDocuments(startDate && endDate ? { 
+                    createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) } 
+                } : {}),
+                Candidate.countDocuments(startDate && endDate ? { 
+                    createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) } 
+                } : {}),
+                Category.countDocuments(startDate && endDate ? { 
+                    createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) } 
+                } : {}),
+                Activity.countDocuments(startDate && endDate ? { 
+                    createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) } 
+                } : {}),
+                Form.countDocuments(startDate && endDate ? { 
+                    createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) } 
+                } : {})
+            ]);
+
+            // Build collections object
+            collections.users = {
+                count: userCount,
+                lastUpdated: new Date().toISOString(),
+                avgDocumentSize: 0.5 // KB estimate
+            };
+
+            collections.events = {
+                count: eventCount,
+                lastUpdated: new Date().toISOString(),
+                avgDocumentSize: 2.0 // KB estimate
+            };
+
+            collections.votes = {
+                count: voteCount,
+                lastUpdated: new Date().toISOString(),
+                avgDocumentSize: 0.3 // KB estimate
+            };
+
+            collections.payments = {
+                count: paymentCount,
+                lastUpdated: new Date().toISOString(),
+                avgDocumentSize: 1.5 // KB estimate
+            };
+
+            collections.candidates = {
+                count: candidateCount,
+                lastUpdated: new Date().toISOString(),
+                avgDocumentSize: 3.0 // KB estimate (includes images)
+            };
+
+            collections.categories = {
+                count: categoryCount,
+                lastUpdated: new Date().toISOString(),
+                avgDocumentSize: 1.0 // KB estimate
+            };
+
+            collections.activities = {
+                count: activityCount,
+                lastUpdated: new Date().toISOString(),
+                avgDocumentSize: 0.8 // KB estimate
+            };
+
+            collections.forms = {
+                count: formCount,
+                lastUpdated: new Date().toISOString(),
+                avgDocumentSize: 5.0 // KB estimate (includes form structure)
+            };
+
+            // If historical data is requested, get previous period data for comparison
+            let historicalCollections = null;
+            if (includeHistorical && startDate && endDate) {
+                const periodLength = new Date(endDate).getTime() - new Date(startDate).getTime();
+                const prevStartDate = new Date(new Date(startDate).getTime() - periodLength);
+                const prevEndDate = new Date(startDate);
+
+                historicalCollections = await this.getCollectionStatistics({
+                    startDate: prevStartDate,
+                    endDate: prevEndDate,
+                    includeHistorical: false
+                });
+            }
+
+            return {
+                collections,
+                historical: historicalCollections,
+                metadata: {
+                    computedAt: new Date(),
+                    periodStart: startDate ? new Date(startDate) : null,
+                    periodEnd: endDate ? new Date(endDate) : null,
+                    includeHistorical
+                }
+            };
+
+        } catch (error) {
+            console.error('Error getting collection statistics:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get time series data for a specific collection
+     * @param {string} collectionName - Name of the collection
+     * @param {Date} startDate - Start date
+     * @param {Date} endDate - End date
+     * @param {string} groupBy - Grouping period (daily, weekly, monthly)
+     * @returns {Promise<Array>} Time series data
+     */
+    async getTimeSeriesData(collectionName, startDate, endDate, groupBy = 'daily') {
+        try {
+            const model = this._getModelByCollectionName(collectionName);
+            if (!model) {
+                throw new Error(`Unknown collection: ${collectionName}`);
+            }
+
+            // Determine the date field to use
+            const dateField = collectionName === 'votes' ? 'votedAt' : 
+                             collectionName === 'payments' ? 'paidAt' : 'createdAt';
+
+            // Build grouping format based on period
+            let groupFormat;
+            switch (groupBy) {
+                case 'hourly':
+                    groupFormat = '%Y-%m-%d %H:00';
+                    break;
+                case 'daily':
+                    groupFormat = '%Y-%m-%d';
+                    break;
+                case 'weekly':
+                    groupFormat = '%Y-%U'; // Year-Week
+                    break;
+                case 'monthly':
+                    groupFormat = '%Y-%m';
+                    break;
+                default:
+                    groupFormat = '%Y-%m-%d';
+            }
+
+            const timeSeriesData = await model.aggregate([
+                {
+                    $match: {
+                        [dateField]: { $gte: startDate, $lte: endDate }
+                    }
+                },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: groupFormat,
+                                date: `$${dateField}`
+                            }
+                        },
+                        count: { $sum: 1 }
+                    }
+                },
+                {
+                    $sort: { '_id': 1 }
+                },
+                {
+                    $project: {
+                        period: '$_id',
+                        count: 1,
+                        _id: 0
+                    }
+                }
+            ]);
+
+            return timeSeriesData;
+
+        } catch (error) {
+            console.error('Error getting time series data:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get model by collection name
+     * @param {string} collectionName - Collection name
+     * @returns {Object} Mongoose model
+     * @private
+     */
+    _getModelByCollectionName(collectionName) {
+        const modelMap = {
+            'users': User,
+            'events': Event,
+            'votes': Vote,
+            'payments': Payment,
+            'candidates': Candidate,
+            'categories': Category,
+            'activities': Activity,
+            'forms': Form
+        };
+
+        return modelMap[collectionName] || null;
     }
 }
 

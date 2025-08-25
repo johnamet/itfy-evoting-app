@@ -494,10 +494,24 @@ class AnalyticsService extends BaseService {
                 endDate
             });
 
+
             // Enhance with additional metrics
+            // Filter out null or undefined collections
+            const validCollections = Object.entries(collections)
+                .filter(([_, data]) => data && data !== null && typeof data === 'object')
+                .reduce((acc, [name, data]) => {
+                    acc[name] = data;
+                    return acc;
+                }, {});
+
+            const totalCollections = Object.keys(validCollections).length;
+            const totalDocuments = Object.values(validCollections).reduce((sum, col) => sum + (col.count || 0), 0);
+
+            console.log('Collection Statistics:', validCollections);
+
             const enhancedStats = {
                 overview: {
-                    totalCollections: Object.keys(collections).length,
+                    totalCollections,
                     timestamp: new Date(),
                     period: {
                         startDate,
@@ -505,17 +519,16 @@ class AnalyticsService extends BaseService {
                         description: this._getPeriodDescription(startDate, endDate)
                     }
                 },
-                collections: collections,
+                collections: validCollections,
                 summary: {
-                    totalDocuments: Object.values(collections).reduce((sum, col) => sum + (col.count || 0), 0),
-                    averageDocumentsPerCollection: Math.round(
-                        Object.values(collections).reduce((sum, col) => sum + (col.count || 0), 0) / 
-                        Object.keys(collections).length
-                    ),
-                    largestCollection: this._findLargestCollection(collections),
-                    smallestCollection: this._findSmallestCollection(collections)
+                    totalDocuments,
+                    averageDocumentsPerCollection: totalCollections > 0
+                        ? Math.round(totalDocuments / totalCollections)
+                        : 0,
+                    largestCollection: this._findLargestCollection(validCollections),
+                    smallestCollection: this._findSmallestCollection(validCollections)
                 },
-                growth: await this._calculateCollectionGrowth(collections, startDate, endDate)
+                growth: await this._calculateCollectionGrowth(validCollections, startDate, endDate)
             };
 
             // Cache the result
@@ -783,31 +796,979 @@ class AnalyticsService extends BaseService {
     /**
      * Calculate collection growth rates
      * @param {Object} collections - Current collections data
-     * @param {Date} startDate - Period start
-     * @param {Date} endDate - Period end
+     * @param {Date|null} startDate - Period start
+     * @param {Date|null} endDate - Period end
      * @returns {Promise<Object>} Growth statistics
      * @private
      */
     async _calculateCollectionGrowth(collections, startDate, endDate) {
         try {
-            // For now, return basic growth metrics
-            // In a full implementation, you'd compare with previous periods
-            const totalCurrent = Object.values(collections).reduce((sum, col) => sum + (col.count || 0), 0);
-            
+            // If no start/end date, use all-time stats
+            if (!startDate || !endDate) {
+                // Get earliest and latest dates from repository if possible
+                const allTimeData = await this.repository.getCollectionStatistics({});
+
+                const filteredAllTimeData = Object.entries(allTimeData).filter(([_, data]) => data && data !== null && typeof data === 'object');
+                const totalDocuments = Object.values(filteredAllTimeData).reduce((sum, col) => sum + (col.count || 0), 0);
+
+                // No previous period, so growth is not applicable
+                const growthByCollection = {};
+                Object.keys(filteredAllTimeData).forEach(collectionName => {
+                    const current = filteredAllTimeData[collectionName]?.count || 0;
+                    growthByCollection[collectionName] = {
+                        current,
+                        previous: null,
+                        growth: null,
+                        growthRate: null,
+                        trend: 'stable'
+                    };
+                });
+
+                return {
+                    totalDocuments,
+                    totalGrowth: null,
+                    totalGrowthRate: null,
+                    growthByCollection,
+                    velocity: null,
+                    period: {
+                        current: null,
+                        previous: null
+                    },
+                    insights: [
+                        {
+                            type: 'info',
+                            message: 'General growth insight: All-time statistics only. Specify startDate and endDate for period-based growth.',
+                            priority: 'low'
+                        }
+                    ]
+                };
+            }
+
+            const currentPeriod = { start: startDate, end: endDate };
+            const periodLength = endDate - startDate;
+            const previousPeriod = { 
+                start: new Date(startDate.getTime() - periodLength), 
+                end: startDate 
+            };
+
+            // Get historical data for comparison
+            const [currentData, previousData] = await Promise.all([
+                this.repository.getCollectionStatistics({ 
+                    startDate: currentPeriod.start, 
+                    endDate: currentPeriod.end 
+                }),
+                this.repository.getCollectionStatistics({ 
+                    startDate: previousPeriod.start, 
+                    endDate: previousPeriod.end 
+                })
+            ]);
+
+            const currentTotal = Object.values(collections).reduce((sum, col) => sum + (col.count || 0), 0);
+            const previousTotal = Object.values(previousData).reduce((sum, col) => sum + (col.count || 0), 0);
+
+            // Calculate overall growth
+            const totalGrowth = currentTotal - previousTotal;
+            const totalGrowthRate = previousTotal > 0 ? ((totalGrowth / previousTotal) * 100) : 0;
+
+            // Calculate growth by collection
+            const growthByCollection = {};
+            Object.keys(collections).forEach(collectionName => {
+                const current = collections[collectionName]?.count || 0;
+                const previous = previousData[collectionName]?.count || 0;
+                const growth = current - previous;
+                const growthRate = previous > 0 ? ((growth / previous) * 100) : 0;
+
+                growthByCollection[collectionName] = {
+                    current,
+                    previous,
+                    growth,
+                    growthRate: Math.round(growthRate * 100) / 100,
+                    trend: this._calculateTrend(growthRate)
+                };
+            });
+
+            // Calculate growth velocity (acceleration)
+            const velocity = await this._calculateGrowthVelocity(collections, currentPeriod);
+
             return {
-                totalDocuments: totalCurrent,
-                periodGrowth: null, // Would need historical data
-                growthRate: null,   // Would need historical data
-                note: 'Historical comparison not implemented'
+                totalDocuments: currentTotal,
+                totalGrowth,
+                totalGrowthRate: Math.round(totalGrowthRate * 100) / 100,
+                growthByCollection,
+                velocity,
+                period: {
+                    current: currentPeriod,
+                    previous: previousPeriod
+                },
+                insights: this._generateGrowthInsights(growthByCollection, totalGrowthRate)
             };
         } catch (error) {
             console.error('Error calculating collection growth:', error);
             return {
                 totalDocuments: 0,
-                periodGrowth: null,
-                growthRate: null,
+                totalGrowth: 0,
+                totalGrowthRate: 0,
+                growthByCollection: {},
                 error: error.message
             };
+        }
+    }
+
+    /**
+     * Calculate growth velocity (rate of change of growth rate)
+     * @param {Object} collections - Current collections data
+     * @param {Object} period - Current period
+     * @returns {Promise<Object>} Velocity metrics
+     * @private
+     */
+    async _calculateGrowthVelocity(collections, period) {
+        try {
+            const periodLength = period.end - period.start;
+            const intervals = 4; // Quarter the period for velocity calculation
+            const intervalLength = periodLength / intervals;
+            
+            const velocityData = [];
+            
+            for (let i = 0; i < intervals; i++) {
+                const intervalStart = new Date(period.start.getTime() + (i * intervalLength));
+                const intervalEnd = new Date(period.start.getTime() + ((i + 1) * intervalLength));
+                
+                const intervalData = await this.repository.getCollectionStatistics({
+                    startDate: intervalStart,
+                    endDate: intervalEnd
+                });
+                
+                const totalDocs = Object.values(intervalData).reduce((sum, col) => sum + (col.count || 0), 0);
+                velocityData.push({
+                    interval: i + 1,
+                    totalDocuments: totalDocs,
+                    period: { start: intervalStart, end: intervalEnd }
+                });
+            }
+
+            // Calculate velocity between intervals
+            const velocities = [];
+            for (let i = 1; i < velocityData.length; i++) {
+                const current = velocityData[i].totalDocuments;
+                const previous = velocityData[i - 1].totalDocuments;
+                const velocity = current - previous;
+                velocities.push(velocity);
+            }
+
+            const avgVelocity = velocities.reduce((sum, v) => sum + v, 0) / velocities.length;
+            const acceleration = velocities.length > 1 ? 
+                (velocities[velocities.length - 1] - velocities[0]) / (velocities.length - 1) : 0;
+
+            return {
+                averageVelocity: Math.round(avgVelocity * 100) / 100,
+                acceleration: Math.round(acceleration * 100) / 100,
+                trend: this._calculateTrend(avgVelocity),
+                intervals: velocityData
+            };
+        } catch (error) {
+            console.error('Error calculating growth velocity:', error);
+            return {
+                averageVelocity: 0,
+                acceleration: 0,
+                trend: 'stable',
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Calculate trend direction based on growth rate
+     * @param {number} growthRate - Growth rate percentage
+     * @returns {string} Trend direction
+     * @private
+     */
+    _calculateTrend(growthRate) {
+        if (growthRate > 5) return 'strongly_positive';
+        if (growthRate > 1) return 'positive';
+        if (growthRate > -1) return 'stable';
+        if (growthRate > -5) return 'negative';
+        return 'strongly_negative';
+    }
+
+    /**
+     * Generate growth insights based on collection data
+     * @param {Object} growthByCollection - Growth data by collection
+     * @param {number} totalGrowthRate - Overall growth rate
+     * @returns {Array} Growth insights
+     * @private
+     */
+    _generateGrowthInsights(growthByCollection, totalGrowthRate) {
+        const insights = [];
+
+        // Overall growth insight
+        if (totalGrowthRate > 10) {
+            insights.push({
+                type: 'positive',
+                message: `Strong overall growth of ${totalGrowthRate.toFixed(1)}%`,
+                priority: 'high'
+            });
+        } else if (totalGrowthRate < -5) {
+            insights.push({
+                type: 'warning',
+                message: `Concerning decline of ${Math.abs(totalGrowthRate).toFixed(1)}%`,
+                priority: 'high'
+            });
+        }
+
+        // Collection-specific insights
+        Object.entries(growthByCollection).forEach(([collection, data]) => {
+            if (data.growthRate > 20) {
+                insights.push({
+                    type: 'positive',
+                    message: `${collection} showing exceptional growth (${data.growthRate.toFixed(1)}%)`,
+                    collection,
+                    priority: 'medium'
+                });
+            } else if (data.growthRate < -10) {
+                insights.push({
+                    type: 'warning',
+                    message: `${collection} experiencing significant decline (${Math.abs(data.growthRate).toFixed(1)}%)`,
+                    collection,
+                    priority: 'high'
+                });
+            }
+        });
+
+        // Identify fastest and slowest growing collections
+        const sortedCollections = Object.entries(growthByCollection)
+            .sort((a, b) => b[1].growthRate - a[1].growthRate);
+
+        if (sortedCollections.length > 0) {
+            const fastest = sortedCollections[0];
+            const slowest = sortedCollections[sortedCollections.length - 1];
+
+            insights.push({
+                type: 'info',
+                message: `Fastest growing: ${fastest[0]} (${fastest[1].growthRate.toFixed(1)}%)`,
+                priority: 'low'
+            });
+
+            insights.push({
+                type: 'info',
+                message: `Slowest growing: ${slowest[0]} (${slowest[1].growthRate.toFixed(1)}%)`,
+                priority: 'low'
+            });
+        }
+
+        return insights;
+    }
+
+    /**
+     * Calculate time-series growth data
+     * @param {string} collection - Collection name
+     * @param {Date} startDate - Start date
+     * @param {Date} endDate - End date
+     * @param {string} interval - Interval (daily, weekly, monthly)
+     * @returns {Promise<Array>} Time series data
+     */
+    async calculateTimeSeriesGrowth(collection, startDate, endDate, interval = 'daily') {
+        try {
+            const timePoints = this._generateTimePoints(startDate, endDate, interval);
+            const timeSeriesData = [];
+
+            for (let i = 0; i < timePoints.length; i++) {
+                const point = timePoints[i];
+                const collectionData = await this.repository.getCollectionStatistics({
+                    startDate: point.start,
+                    endDate: point.end
+                });
+
+                const count = collectionData[collection]?.count || 0;
+                const previousCount = i > 0 ? timeSeriesData[i - 1].count : 0;
+                const growth = count - previousCount;
+                const growthRate = previousCount > 0 ? ((growth / previousCount) * 100) : 0;
+
+                timeSeriesData.push({
+                    date: point.date,
+                    count,
+                    growth,
+                    growthRate: Math.round(growthRate * 100) / 100,
+                    period: point
+                });
+            }
+
+            // Calculate moving averages
+            const windowSize = Math.min(7, timeSeriesData.length);
+            timeSeriesData.forEach((point, index) => {
+                if (index >= windowSize - 1) {
+                    const window = timeSeriesData.slice(index - windowSize + 1, index + 1);
+                    point.movingAverage = window.reduce((sum, p) => sum + p.count, 0) / windowSize;
+                    point.movingAverageGrowth = window.reduce((sum, p) => sum + p.growthRate, 0) / windowSize;
+                }
+            });
+
+            return timeSeriesData;
+        } catch (error) {
+            console.error('Error calculating time series growth:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Generate time points for time series analysis
+     * @param {Date} startDate - Start date
+     * @param {Date} endDate - End date
+     * @param {string} interval - Interval type
+     * @returns {Array} Time points
+     * @private
+     */
+    _generateTimePoints(startDate, endDate, interval) {
+        const points = [];
+        let current = new Date(startDate);
+        const end = new Date(endDate);
+
+        const intervalMs = {
+            'daily': 24 * 60 * 60 * 1000,
+            'weekly': 7 * 24 * 60 * 60 * 1000,
+            'monthly': 30 * 24 * 60 * 60 * 1000
+        };
+
+        const step = intervalMs[interval] || intervalMs.daily;
+
+        while (current < end) {
+            const pointEnd = new Date(Math.min(current.getTime() + step, end.getTime()));
+            points.push({
+                date: new Date(current),
+                start: new Date(current),
+                end: pointEnd
+            });
+            current = new Date(pointEnd);
+        }
+
+        return points;
+    }
+
+    /**
+     * Calculate rolling growth metrics
+     * @param {string} collection - Collection name
+     * @param {number} windowDays - Rolling window in days
+     * @returns {Promise<Object>} Rolling metrics
+     */
+    async calculateRollingGrowth(collection, windowDays = 30) {
+        try {
+            const endDate = new Date();
+            const startDate = new Date(endDate.getTime() - (windowDays * 24 * 60 * 60 * 1000));
+
+            const timeSeriesData = await this.calculateTimeSeriesGrowth(
+                collection, 
+                startDate, 
+                endDate, 
+                'daily'
+            );
+
+            if (timeSeriesData.length === 0) {
+                return {
+                    rollingAverage: 0,
+                    rollingGrowthRate: 0,
+                    volatility: 0,
+                    trend: 'stable'
+                };
+            }
+
+            // Calculate rolling metrics
+            const counts = timeSeriesData.map(point => point.count);
+            const growthRates = timeSeriesData.map(point => point.growthRate);
+
+            const rollingAverage = counts.reduce((sum, count) => sum + count, 0) / counts.length;
+            const rollingGrowthRate = growthRates.reduce((sum, rate) => sum + rate, 0) / growthRates.length;
+
+            // Calculate volatility (standard deviation of growth rates)
+            const variance = growthRates.reduce((sum, rate) => {
+                return sum + Math.pow(rate - rollingGrowthRate, 2);
+            }, 0) / growthRates.length;
+            const volatility = Math.sqrt(variance);
+
+            // Determine trend
+            const recentGrowth = growthRates.slice(-7).reduce((sum, rate) => sum + rate, 0) / 7;
+            const trend = this._calculateTrend(recentGrowth);
+
+            return {
+                rollingAverage: Math.round(rollingAverage * 100) / 100,
+                rollingGrowthRate: Math.round(rollingGrowthRate * 100) / 100,
+                volatility: Math.round(volatility * 100) / 100,
+                trend,
+                windowDays,
+                dataPoints: timeSeriesData.length
+            };
+        } catch (error) {
+            console.error('Error calculating rolling growth:', error);
+            throw error;
+        }
+    }    /**
+     * Calculate growth trend direction
+     * @param {Object} growthByCollection - Growth data by collection
+     * @returns {string} Trend direction
+     * @private
+     */
+    _calculateGrowthTrend(growthByCollection) {
+        const positiveGrowth = Object.values(growthByCollection).filter(col => col.growth > 0).length;
+        const negativeGrowth = Object.values(growthByCollection).filter(col => col.growth < 0).length;
+        const total = Object.keys(growthByCollection).length;
+        
+        const positiveRatio = positiveGrowth / total;
+        
+        if (positiveRatio >= 0.7) return 'strong_growth';
+        if (positiveRatio >= 0.5) return 'moderate_growth';
+        if (positiveRatio >= 0.3) return 'mixed';
+        if (positiveRatio > 0) return 'moderate_decline';
+        return 'strong_decline';
+    }
+
+    /**
+     * Calculate growth momentum
+     * @param {Object} current - Current period data
+     * @param {Object} previous - Previous period data
+     * @returns {string} Momentum indicator
+     * @private
+     */
+    _calculateGrowthMomentum(current, previous) {
+        // This would be enhanced with more historical data in a full implementation
+        const currentTotal = Object.values(current).reduce((sum, col) => sum + (col.total || col.count || 0), 0);
+        const previousTotal = Object.values(previous).reduce((sum, col) => sum + (col.total || col.count || 0), 0);
+        
+        const growth = previousTotal > 0 ? ((currentTotal - previousTotal) / previousTotal) * 100 : 0;
+        
+        if (growth > 20) return 'accelerating';
+        if (growth > 5) return 'growing';
+        if (growth > -5) return 'stable';
+        if (growth > -20) return 'slowing';
+        return 'declining';
+    }
+
+    /**
+     * Calculate volatility from array of values
+     * @param {Array} values - Array of numeric values
+     * @returns {number} Volatility measure
+     * @private
+     */
+    _calculateVolatility(values) {
+        if (values.length < 2) return 0;
+        
+        const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
+        const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+        return Math.sqrt(variance);
+    }
+
+    /**
+     * Generate growth insights
+     * @param {Object} growthByCollection - Growth data by collection
+     * @param {number} totalGrowth - Overall growth percentage
+     * @returns {Array} Array of insight objects
+     * @private
+     */
+    _generateGrowthInsights(growthByCollection, totalGrowth) {
+        const insights = [];
+        
+        // Overall growth insights
+        if (totalGrowth > 25) {
+            insights.push({
+                type: 'positive',
+                category: 'overall_growth',
+                message: `Exceptional growth of ${totalGrowth.toFixed(1)}% across all collections`,
+                priority: 'high'
+            });
+        } else if (totalGrowth > 10) {
+            insights.push({
+                type: 'positive',
+                category: 'overall_growth',
+                message: `Strong growth of ${totalGrowth.toFixed(1)}% across collections`,
+                priority: 'medium'
+            });
+        } else if (totalGrowth < -10) {
+            insights.push({
+                type: 'warning',
+                category: 'overall_growth',
+                message: `Concerning decline of ${Math.abs(totalGrowth).toFixed(1)}% in total documents`,
+                priority: 'high'
+            });
+        }
+        
+        // Individual collection insights
+        Object.entries(growthByCollection).forEach(([collection, data]) => {
+            if (data.growth > 50) {
+                insights.push({
+                    type: 'positive',
+                    category: 'collection_growth',
+                    message: `${collection} showing exceptional growth of ${data.growth.toFixed(1)}%`,
+                    priority: 'medium'
+                });
+            } else if (data.growth < -25) {
+                insights.push({
+                    type: 'warning',
+                    category: 'collection_decline',
+                    message: `${collection} declining significantly by ${Math.abs(data.growth).toFixed(1)}%`,
+                    priority: 'high'
+                });
+            }
+        });
+        
+        // Top and bottom performers
+        const sortedCollections = Object.entries(growthByCollection)
+            .sort((a, b) => b[1].growth - a[1].growth);
+            
+        if (sortedCollections.length > 0) {
+            const topPerformer = sortedCollections[0];
+            const bottomPerformer = sortedCollections[sortedCollections.length - 1];
+            
+            insights.push({
+                type: 'info',
+                category: 'performance',
+                message: `Top performer: ${topPerformer[0]} (+${topPerformer[1].growth.toFixed(1)}%)`,
+                priority: 'low'
+            });
+            
+            if (bottomPerformer[1].growth < 0) {
+                insights.push({
+                    type: 'info',
+                    category: 'performance',
+                    message: `Needs attention: ${bottomPerformer[0]} (${bottomPerformer[1].growth.toFixed(1)}%)`,
+                    priority: 'medium'
+                });
+            }
+        }
+        
+        return insights;
+    }
+
+    /**
+     * Determine period type from date range
+     * @param {Date} startDate - Start date
+     * @param {Date} endDate - End date
+     * @returns {string} Period type
+     * @private
+     */
+    _determinePeriodType(startDate, endDate) {
+        const durationMs = endDate - startDate;
+        const days = durationMs / (24 * 60 * 60 * 1000);
+        
+        if (days <= 1) return 'daily';
+        if (days <= 7) return 'weekly';
+        if (days <= 31) return 'monthly';
+        if (days <= 92) return 'quarterly';
+        if (days <= 366) return 'yearly';
+        return 'custom';
+    }
+
+    /**
+     * Calculate voting analytics growth
+     * @param {Object} options - Options including date range and period type
+     * @returns {Promise<Object>} Voting growth analytics
+     */
+    async calculateVotingGrowth(options = {}) {
+        try {
+            const { 
+                period = 'daily', 
+                periodCount = 7,
+                endDate = new Date(),
+                eventId = null 
+            } = options;
+
+            const periods = this._generateDatePeriods(period, periodCount, endDate);
+            const votingData = [];
+
+            for (const periodData of periods) {
+                const matchQuery = {
+                    votedAt: { $gte: periodData.start, $lte: periodData.end }
+                };
+
+                if (eventId) {
+                    matchQuery.eventId = eventId;
+                }
+
+                const [totalVotes, uniqueVoters, eventVotes] = await Promise.all([
+                    Vote.countDocuments(matchQuery),
+                    Vote.distinct('userId', matchQuery).then(users => users.length),
+                    Vote.aggregate([
+                        { $match: matchQuery },
+                        {
+                            $group: {
+                                _id: '$eventId',
+                                votes: { $sum: 1 },
+                                voters: { $addToSet: '$userId' }
+                            }
+                        },
+                        {
+                            $project: {
+                                eventId: '$_id',
+                                votes: 1,
+                                uniqueVoters: { $size: '$voters' }
+                            }
+                        }
+                    ])
+                ]);
+
+                votingData.push({
+                    period: periodData.label,
+                    date: periodData.end,
+                    totalVotes,
+                    uniqueVoters,
+                    averageVotesPerVoter: uniqueVoters > 0 ? (totalVotes / uniqueVoters) : 0,
+                    eventBreakdown: eventVotes
+                });
+            }
+
+            return {
+                data: votingData,
+                growth: this._calculateTimeSeriesGrowth(votingData, 'totalVotes'),
+                voterGrowth: this._calculateTimeSeriesGrowth(votingData, 'uniqueVoters'),
+                trends: this._analyzeTrends(votingData, ['totalVotes', 'uniqueVoters']),
+                summary: {
+                    totalPeriods: votingData.length,
+                    avgVotesPerPeriod: votingData.reduce((sum, p) => sum + p.totalVotes, 0) / votingData.length,
+                    avgVotersPerPeriod: votingData.reduce((sum, p) => sum + p.uniqueVoters, 0) / votingData.length,
+                    peakVotingPeriod: votingData.reduce((max, p) => p.totalVotes > max.totalVotes ? p : max, votingData[0])
+                }
+            };
+
+        } catch (error) {
+            console.error('Error calculating voting growth:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Calculate user analytics growth
+     * @param {Object} options - Options including date range and period type
+     * @returns {Promise<Object>} User growth analytics
+     */
+    async calculateUserGrowth(options = {}) {
+        try {
+            const { 
+                period = 'daily', 
+                periodCount = 7,
+                endDate = new Date(),
+                includeActivity = true 
+            } = options;
+
+            const periods = this._generateDatePeriods(period, periodCount, endDate);
+            const userData = [];
+
+            for (const periodData of periods) {
+                const matchQuery = {
+                    createdAt: { $gte: periodData.start, $lte: periodData.end }
+                };
+
+                const [newUsers, activeUsers, usersByRole, userActivity] = await Promise.all([
+                    User.countDocuments(matchQuery),
+                    User.countDocuments({
+                        lastLoginAt: { $gte: periodData.start, $lte: periodData.end }
+                    }),
+                    User.aggregate([
+                        { $match: matchQuery },
+                        {
+                            $group: {
+                                _id: '$role.name',
+                                count: { $sum: 1 }
+                            }
+                        }
+                    ]),
+                    includeActivity ? Activity.aggregate([
+                        {
+                            $match: {
+                                createdAt: { $gte: periodData.start, $lte: periodData.end }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: '$userId',
+                                activities: { $sum: 1 }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                totalActivities: { $sum: '$activities' },
+                                activeUsers: { $sum: 1 },
+                                avgActivitiesPerUser: { $avg: '$activities' }
+                            }
+                        }
+                    ]).then(result => result[0] || { totalActivities: 0, activeUsers: 0, avgActivitiesPerUser: 0 }) : null
+                ]);
+
+                const roleBreakdown = usersByRole.reduce((acc, role) => {
+                    acc[role._id] = role.count;
+                    return acc;
+                }, {});
+
+                userData.push({
+                    period: periodData.label,
+                    date: periodData.end,
+                    newUsers,
+                    activeUsers,
+                    roleBreakdown,
+                    activity: userActivity
+                });
+            }
+
+            return {
+                data: userData,
+                growth: {
+                    newUsers: this._calculateTimeSeriesGrowth(userData, 'newUsers'),
+                    activeUsers: this._calculateTimeSeriesGrowth(userData, 'activeUsers')
+                },
+                trends: this._analyzeTrends(userData, ['newUsers', 'activeUsers']),
+                retention: await this._calculateUserRetention(periods),
+                summary: {
+                    totalPeriods: userData.length,
+                    avgNewUsersPerPeriod: userData.reduce((sum, p) => sum + p.newUsers, 0) / userData.length,
+                    avgActiveUsersPerPeriod: userData.reduce((sum, p) => sum + p.activeUsers, 0) / userData.length,
+                    peakRegistrationPeriod: userData.reduce((max, p) => p.newUsers > max.newUsers ? p : max, userData[0])
+                }
+            };
+
+        } catch (error) {
+            console.error('Error calculating user growth:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Calculate revenue analytics growth
+     * @param {Object} options - Options including date range and period type
+     * @returns {Promise<Object>} Revenue growth analytics
+     */
+    async calculateRevenueGrowth(options = {}) {
+        try {
+            const { 
+                period = 'daily', 
+                periodCount = 7,
+                endDate = new Date(),
+                currency = 'GHS' 
+            } = options;
+
+            const periods = this._generateDatePeriods(period, periodCount, endDate);
+            const revenueData = [];
+
+            for (const periodData of periods) {
+                const matchQuery = {
+                    status: 'success',
+                    paidAt: { $gte: periodData.start, $lte: periodData.end }
+                };
+
+                const [revenueStats, paymentMethods, transactionVolume] = await Promise.all([
+                    Payment.aggregate([
+                        { $match: matchQuery },
+                        {
+                            $group: {
+                                _id: null,
+                                totalRevenue: { $sum: '$finalAmount' },
+                                totalTransactions: { $sum: 1 },
+                                avgTransactionValue: { $avg: '$finalAmount' },
+                                maxTransaction: { $max: '$finalAmount' },
+                                minTransaction: { $min: '$finalAmount' }
+                            }
+                        }
+                    ]).then(result => result[0] || {
+                        totalRevenue: 0,
+                        totalTransactions: 0,
+                        avgTransactionValue: 0,
+                        maxTransaction: 0,
+                        minTransaction: 0
+                    }),
+                    Payment.aggregate([
+                        { $match: matchQuery },
+                        {
+                            $group: {
+                                _id: '$paymentMethod',
+                                revenue: { $sum: '$finalAmount' },
+                                transactions: { $sum: 1 }
+                            }
+                        }
+                    ]),
+                    Payment.aggregate([
+                        { $match: matchQuery },
+                        {
+                            $group: {
+                                _id: {
+                                    $dateToString: {
+                                        format: period === 'hourly' ? '%Y-%m-%d %H:00' : '%Y-%m-%d',
+                                        date: '$paidAt'
+                                    }
+                                },
+                                revenue: { $sum: '$finalAmount' },
+                                transactions: { $sum: 1 }
+                            }
+                        },
+                        { $sort: { '_id': 1 } }
+                    ])
+                ]);
+
+                const paymentMethodBreakdown = paymentMethods.reduce((acc, method) => {
+                    acc[method._id] = {
+                        revenue: method.revenue,
+                        transactions: method.transactions,
+                        avgValue: method.transactions > 0 ? method.revenue / method.transactions : 0
+                    };
+                    return acc;
+                }, {});
+
+                revenueData.push({
+                    period: periodData.label,
+                    date: periodData.end,
+                    ...revenueStats,
+                    paymentMethods: paymentMethodBreakdown,
+                    transactionVolume: transactionVolume,
+                    currency
+                });
+            }
+
+            return {
+                data: revenueData,
+                growth: {
+                    revenue: this._calculateTimeSeriesGrowth(revenueData, 'totalRevenue'),
+                    transactions: this._calculateTimeSeriesGrowth(revenueData, 'totalTransactions'),
+                    avgValue: this._calculateTimeSeriesGrowth(revenueData, 'avgTransactionValue')
+                },
+                trends: this._analyzeTrends(revenueData, ['totalRevenue', 'totalTransactions', 'avgTransactionValue']),
+                forecasting: this._generateRevenueForecast(revenueData),
+                summary: {
+                    totalPeriods: revenueData.length,
+                    totalRevenue: revenueData.reduce((sum, p) => sum + p.totalRevenue, 0),
+                    totalTransactions: revenueData.reduce((sum, p) => sum + p.totalTransactions, 0),
+                    avgRevenuePerPeriod: revenueData.reduce((sum, p) => sum + p.totalRevenue, 0) / revenueData.length,
+                    peakRevenuePeriod: revenueData.reduce((max, p) => p.totalRevenue > max.totalRevenue ? p : max, revenueData[0])
+                }
+            };
+
+        } catch (error) {
+            console.error('Error calculating revenue growth:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Calculate user retention rates
+     * @param {Array} periods - Array of period objects
+     * @returns {Promise<Object>} Retention analytics
+     * @private
+     */
+    async _calculateUserRetention(periods) {
+        try {
+            if (periods.length < 2) {
+                return { retentionRate: null, note: 'Insufficient periods for retention calculation' };
+            }
+
+            const retentionData = [];
+
+            for (let i = 1; i < periods.length; i++) {
+                const currentPeriod = periods[i];
+                const previousPeriod = periods[i - 1];
+
+                // Get users from previous period
+                const previousUsers = await User.find({
+                    createdAt: { $gte: previousPeriod.start, $lte: previousPeriod.end }
+                }).select('_id');
+
+                if (previousUsers.length === 0) {
+                    retentionData.push({
+                        period: currentPeriod.label,
+                        retentionRate: 0,
+                        retainedUsers: 0,
+                        totalPreviousUsers: 0
+                    });
+                    continue;
+                }
+
+                const previousUserIds = previousUsers.map(u => u._id);
+
+                // Check how many of those users were active in current period
+                const retainedUsers = await User.countDocuments({
+                    _id: { $in: previousUserIds },
+                    lastLoginAt: { $gte: currentPeriod.start, $lte: currentPeriod.end }
+                });
+
+                const retentionRate = (retainedUsers / previousUsers.length) * 100;
+
+                retentionData.push({
+                    period: currentPeriod.label,
+                    retentionRate: Math.round(retentionRate * 100) / 100,
+                    retainedUsers,
+                    totalPreviousUsers: previousUsers.length
+                });
+            }
+
+            const avgRetentionRate = retentionData.length > 0 
+                ? retentionData.reduce((sum, r) => sum + r.retentionRate, 0) / retentionData.length 
+                : 0;
+
+            return {
+                retentionData,
+                avgRetentionRate: Math.round(avgRetentionRate * 100) / 100,
+                trend: retentionData.length > 1 
+                    ? (retentionData[retentionData.length - 1].retentionRate - retentionData[0].retentionRate)
+                    : 0
+            };
+
+        } catch (error) {
+            console.error('Error calculating user retention:', error);
+            return { error: error.message };
+        }
+    }
+
+    /**
+     * Generate revenue forecast using linear regression
+     * @param {Array} revenueData - Historical revenue data
+     * @returns {Object} Forecast data
+     * @private
+     */
+    _generateRevenueForecast(revenueData) {
+        try {
+            if (revenueData.length < 3) {
+                return { forecast: null, note: 'Insufficient data for forecasting' };
+            }
+
+            // Simple linear regression for next 3 periods
+            const revenues = revenueData.map(d => d.totalRevenue);
+            const n = revenues.length;
+            const x = revenueData.map((_, i) => i);
+            
+            // Calculate slope and intercept
+            const sumX = x.reduce((a, b) => a + b, 0);
+            const sumY = revenues.reduce((a, b) => a + b, 0);
+            const sumXY = x.reduce((sum, xi, i) => sum + xi * revenues[i], 0);
+            const sumXX = x.reduce((sum, xi) => sum + xi * xi, 0);
+            
+            const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+            const intercept = (sumY - slope * sumX) / n;
+
+            // Generate forecast for next 3 periods
+            const forecast = [];
+            for (let i = 1; i <= 3; i++) {
+                const nextPeriodIndex = n + i - 1;
+                const predictedRevenue = Math.max(0, slope * nextPeriodIndex + intercept);
+                
+                forecast.push({
+                    period: `Forecast ${i}`,
+                    predictedRevenue: Math.round(predictedRevenue * 100) / 100,
+                    confidence: Math.max(0.5, 1 - (i * 0.15)) // Decreasing confidence
+                });
+            }
+
+            // Calculate trend direction
+            const recentTrend = slope > 0 ? 'increasing' : slope < 0 ? 'decreasing' : 'stable';
+            const trendStrength = Math.abs(slope) / (sumY / n); // Relative to average
+
+            return {
+                forecast,
+                trend: {
+                    direction: recentTrend,
+                    strength: Math.round(trendStrength * 10000) / 100, // As percentage
+                    slope: Math.round(slope * 100) / 100
+                },
+                confidence: {
+                    overall: Math.max(0.6, 1 - (Math.abs(slope) / (sumY / n)) * 0.1),
+                    note: 'Confidence decreases with prediction distance and data volatility'
+                }
+            };
+
+        } catch (error) {
+            console.error('Error generating revenue forecast:', error);
+            return { forecast: null, error: error.message };
         }
     }
 
