@@ -12,7 +12,7 @@ class Form extends BaseModel {
         const submissionSchema = new mongoose.Schema({
             submittedBy: {
             type:  String,
-            required: true
+            required: false
             },
             submittedAt: {
             type: Date,
@@ -58,7 +58,7 @@ class Form extends BaseModel {
             },
             fields: {
             type: [Object],
-            default: [{label:"Your Name", type: "text", required: true}]
+            default: [{label:"Your Name", type: "text", options: [], required: true}]
             },
             isActive: {
             type: Boolean,
@@ -81,7 +81,11 @@ class Form extends BaseModel {
             type: Number,
             default: 0
             },
-            submissions: [submissionSchema]
+            submissions: [submissionSchema],
+            maxSubmissions: {
+                type: Number,
+                default: 0
+            }
         }
 
         super(schemaDefinition, {collection: "forms"});

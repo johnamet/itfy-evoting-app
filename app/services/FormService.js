@@ -280,7 +280,7 @@ class FormService extends BaseService {
 
             this._log('submit_form_data', { formId, data: submissionData });
 
-            submissionData.submittedBy = submissionData.data["Your Name"]
+            submissionData.submittedBy = submissionData.data["Your Name"] || submissionData.data["Full Name"]
 
             this._validateObjectId(formId, 'Form ID');
 

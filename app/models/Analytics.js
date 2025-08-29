@@ -1,91 +1,36 @@
-#!/usr/bin/env node
 /**
  * Analytics model class for the application.
- * This file defines the Analytics class which extends the BaseModel class.
- * Stores pre-computed analytics data for efficient dashboard queries.
- * 
- * @module Analytics
+ * Defines the Analytics schema with enhanced metrics, anomalies, and forecasts.
  */
 
 import BaseModel from './BaseModel.js';
 import mongoose from 'mongoose';
 
-/**
- * Analytics model class extending BaseModel.
- * Represents analytics data with various metrics and time-based aggregations.
- * 
- * @class
- * @extends BaseModel
- */
 class Analytics extends BaseModel {
-    /**
-     * Initializes the Analytics schema with fields for different types of analytics data.
-     */
     constructor() {
         const schemaDefinition = {
-            // Analytics type and scope
             type: {
                 type: String,
                 required: true,
-                enum: [
-                    'overview',
-                    'voting',
-                    'events',
-                    'payments',
-                    'users',
-                    'candidates',
-                    'categories',
-                    'geographic',
-                    'trends'
-                ]
+                enum: ['overview', 'voting', 'payments', 'users', 'events', 'geographic', 'anomalies', 'forecasts', 'retention']
             },
-            
-            // Time period for the analytics
             period: {
                 type: String,
                 required: true,
-                enum: ['hourly', 'daily', 'weekly', 'monthly', 'yearly', 'all-time']
+                enum: ['hourly', 'daily', 'weekly', 'monthly', 'yearly', 'all-time', 'custom']
             },
-            
-            // Date range for the analytics
             dateRange: {
-                start: {
-                    type: Date,
-                    required: true
-                },
-                end: {
-                    type: Date,
-                    required: true
-                }
+                start: { type: Date, required: true },
+                end: { type: Date, required: true }
             },
-            
-            // Reference entities (optional)
             references: {
-                event: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'Event',
-                    required: false
-                },
-                category: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'Category',
-                    required: false
-                },
-                candidate: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'Candidate',
-                    required: false
-                },
-                user: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'User',
-                    required: false
-                }
+                event: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: false },
+                category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: false },
+                candidate: { type: mongoose.Schema.Types.ObjectId, ref: 'Candidate', required: false },
+                user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
+                bundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'VoteBundle', required: false }
             },
-            
-            // Analytics data
             data: {
-                // Overview metrics
                 overview: {
                     totalUsers: { type: Number, default: 0 },
                     totalEvents: { type: Number, default: 0 },
@@ -94,50 +39,32 @@ class Analytics extends BaseModel {
                     activeEvents: { type: Number, default: 0 },
                     completedEvents: { type: Number, default: 0 },
                     totalCandidates: { type: Number, default: 0 },
-                    totalCategories: { type: Number, default: 0 }
+                    totalCategories: { type: Number, default: 0 },
+                    overallParticipationRate: { type: Number, default: 0 },
+                    systemHealthScore: { type: Number, default: 0 },
+                    ciParticipationRate: { type: Object, default: { lower: 0, upper: 0 } }
                 },
-                
-                // Voting metrics
                 voting: {
                     totalVotes: { type: Number, default: 0 },
                     uniqueVoters: { type: Number, default: 0 },
                     averageVotesPerVoter: { type: Number, default: 0 },
                     votingRate: { type: Number, default: 0 },
                     peakVotingHour: { type: Number, default: 0 },
-                    votesPerHour: [{ hour: Number, votes: Number }],
+                    votesPerHour: [{ hour: Number, votes: Number, ci: { lower: Number, upper: Number } }],
                     topCandidates: [{
                         candidate: { type: mongoose.Schema.Types.ObjectId, ref: 'Candidate' },
                         votes: Number,
-                        percentage: Number
+                        percentage: Number,
+                        pValue: Number
                     }],
                     categoryBreakdown: [{
                         category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' },
                         votes: Number,
-                        percentage: Number
-                    }]
-                },
-                
-                // Event metrics
-                events: {
-                    totalEvents: { type: Number, default: 0 },
-                    activeEvents: { type: Number, default: 0 },
-                    completedEvents: { type: Number, default: 0 },
-                    upcomingEvents: { type: Number, default: 0 },
-                    averageParticipation: { type: Number, default: 0 },
-                    averageDuration: { type: Number, default: 0 },
-                    topEvents: [{
-                        event: { type: mongoose.Schema.Types.ObjectId, ref: 'Event' },
-                        votes: Number,
-                        participants: Number,
-                        revenue: Number
+                        percentage: Number,
+                        pValue: Number
                     }],
-                    eventsByStatus: [{
-                        status: String,
-                        count: Number
-                    }]
+                    anomalyScore: { type: Number, default: 0 }
                 },
-                
-                // Payment metrics
                 payments: {
                     totalRevenue: { type: Number, default: 0 },
                     totalTransactions: { type: Number, default: 0 },
@@ -153,114 +80,77 @@ class Analytics extends BaseModel {
                     couponUsage: {
                         totalCouponsUsed: { type: Number, default: 0 },
                         totalDiscount: { type: Number, default: 0 },
+                        redemptionRate: { type: Number, default: 0 },
                         topCoupons: [{
                             coupon: { type: mongoose.Schema.Types.ObjectId, ref: 'Coupon' },
                             usage: Number,
                             discount: Number
                         }]
-                    }
+                    },
+                    conversionFunnel: { type: Object, default: { paidToVotes: 0 } },
+                    fraudIndicator: { type: Number, default: 0 }
                 },
-                
-                // User metrics
                 users: {
-                    totalUsers: { type: Number, default: 0 },
-                    newUsers: { type: Number, default: 0 },
                     activeUsers: { type: Number, default: 0 },
-                    userGrowthRate: { type: Number, default: 0 },
-                    averageSessionDuration: { type: Number, default: 0 },
-                    usersByRole: [{
-                        role: String,
-                        count: Number
-                    }],
-                    registrationTrend: [{
-                        date: Date,
-                        count: Number
-                    }],
-                    topActiveUsers: [{
-                        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-                        activities: Number,
-                        lastActive: Date
-                    }]
+                    retentionRate: { type: Number, default: 0 },
+                    sessionAvg: { type: Number, default: 0 },
+                    roleBreakdown: [{ role: String, count: Number }]
                 },
-                
-                // Geographic metrics
+                events: {
+                    totalEvents: { type: Number, default: 0 },
+                    activeEvents: { type: Number, default: 0 },
+                    completedEvents: { type: Number, default: 0 },
+                    averageParticipation: { type: Number, default: 0 },
+                    averageDuration: { type: Number, default: 0 },
+                    geographicHeatmap: [{ region: String, votes: Number }]
+                },
                 geographic: {
-                    totalLocations: { type: Number, default: 0 },
-                    topCountries: [{
-                        country: String,
-                        votes: Number,
-                        users: Number
-                    }],
-                    topCities: [{
-                        city: String,
-                        country: String,
-                        votes: Number,
-                        users: Number
-                    }],
+                    topCountries: [{ country: String, votes: Number, users: Number }],
+                    topCities: [{ city: String, country: String, votes: Number, users: Number }],
                     votingByLocation: [{
                         location: String,
-                        coordinates: {
-                            lat: Number,
-                            lng: Number
-                        },
+                        coordinates: { lat: Number, lng: Number },
                         votes: Number,
                         events: Number
                     }]
                 },
-                
-                // Trend data
-                trends: {
-                    votingTrend: [{
-                        date: Date,
-                        votes: Number,
-                        uniqueVoters: Number
-                    }],
-                    revenueTrend: [{
-                        date: Date,
-                        revenue: Number,
-                        transactions: Number
-                    }],
-                    userGrowthTrend: [{
-                        date: Date,
-                        newUsers: Number,
-                        totalUsers: Number
-                    }],
-                    eventTrend: [{
-                        date: Date,
-                        newEvents: Number,
-                        activeEvents: Number
-                    }]
-                }
-            },
-            
-            // Metadata
-            metadata: {
-                computedAt: {
-                    type: Date,
-                    default: Date.now
-                },
-                computationTime: {
-                    type: Number, // milliseconds
-                    default: 0
-                },
-                dataPoints: {
-                    type: Number,
-                    default: 0
-                },
-                version: {
+                anomalies: [{
                     type: String,
-                    default: '1.0'
+                    details: { eventId: mongoose.Schema.Types.ObjectId, timestamp: Date, zScore: Number }
+                }],
+                forecasts: {
+                    revenueTrend: [{
+                        period: String,
+                        predicted: Number,
+                        ciLow: Number,
+                        ciHigh: Number
+                    }],
+                    voteTrend: [{
+                        period: String,
+                        predicted: Number,
+                        ciLow: Number,
+                        ciHigh: Number
+                    }]
+                },
+                retention: {
+                    cohortData: [{ period: String, retentionRate: Number, retained: Number }],
+                    avgRetentionRate: { type: Number, default: 0 }
                 }
             },
-            
-            // Cache control
+            metadata: {
+                computedAt: { type: Date, default: Date.now },
+                computationTime: { type: Number, default: 0 },
+                dataPoints: { type: Number, default: 0 },
+                version: { type: String, default: '2.0' },
+                confidenceLevel: { type: Number, default: 95 },
+                anomalyFlags: { type: Number, default: 0 },
+                differentialPrivacyApplied: { type: Boolean, default: false }
+            },
             expiresAt: {
                 type: Date,
                 required: true,
-                default: () => new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+                default: () => new Date(Date.now() + 24 * 60 * 60 * 1000)
             },
-            
-            // Status
             status: {
                 type: String,
                 enum: ['computing', 'completed', 'failed', 'expired'],
@@ -268,54 +158,34 @@ class Analytics extends BaseModel {
             }
         };
 
-        super(schemaDefinition, { collection: 'analytics' });
-    }
+        super(schemaDefinition, { collection: 'analytics', timestamps: true });
 
-    /**
-     * Returns the Mongoose schema with additional indexes and methods.
-     * @returns {mongoose.Schema} The constructed schema.
-     */
-    getSchema() {
-        const schema = super.getSchema();
+        // Indexes
+        this.schema.index({ type: 1, period: 1 });
+        this.schema.index({ 'dateRange.start': 1, 'dateRange.end': 1 });
+        this.schema.index({ 'references.event': 1 });
+        this.schema.index({ status: 1, expiresAt: 1 }, { expireAfterSeconds: 0 });
+        this.schema.index({ 'data.anomalyScore': -1 });
+        this.schema.index({ 'metadata.computedAt': -1 });
 
-        // Indexes for efficient queries
-        schema.index({ type: 1, period: 1 });
-        schema.index({ 'dateRange.start': 1, 'dateRange.end': 1 });
-        schema.index({ 'references.event': 1 });
-        schema.index({ 'references.category': 1 });
-        schema.index({ 'references.candidate': 1 });
-        schema.index({ status: 1 });
-        schema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // TTL index
-
-        // Compound indexes for common queries
-        schema.index({ type: 1, period: 1, 'references.event': 1 });
-        schema.index({ type: 1, status: 1, expiresAt: 1 });
-
-        // Virtual for checking if analytics is expired
-        schema.virtual('isExpired').get(function() {
-            return new Date() > this.expiresAt;
+        // Virtuals
+        this.schema.virtual('isAnomalous').get(function() {
+            return this.data.anomalies.length > 0 || this.data.voting.anomalyScore > 0.5;
         });
-
-        // Virtual for checking if analytics is fresh
-        schema.virtual('isFresh').get(function() {
+        this.schema.virtual('isFresh').get(function() {
             const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
             return this.metadata.computedAt > hourAgo && this.status === 'completed';
         });
 
-        // Static method to find analytics by type and period
-        schema.statics.findByTypeAndPeriod = function(type, period, options = {}) {
+        // Static methods
+        this.schema.statics.findByTypeAndPeriod = function(type, period, options = {}) {
             const query = { type, period, status: 'completed' };
-            
             if (options.event) query['references.event'] = options.event;
             if (options.category) query['references.category'] = options.category;
-            if (options.candidate) query['references.candidate'] = options.candidate;
-            if (options.user) query['references.user'] = options.user;
-            
             return this.findOne(query).sort({ 'metadata.computedAt': -1 });
         };
 
-        // Static method to find fresh analytics or create placeholder
-        schema.statics.findFreshOrCreate = async function(type, period, references = {}) {
+        this.schema.statics.findFreshOrCreate = async function(type, period, references = {}) {
             let analytics = await this.findOne({
                 type,
                 period,
@@ -328,38 +198,21 @@ class Analytics extends BaseModel {
             }).sort({ 'metadata.computedAt': -1 });
 
             if (!analytics) {
-                // Create placeholder for background computation
                 analytics = new this({
                     type,
                     period,
                     references,
-                    dateRange: {
-                        start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
-                        end: new Date()
-                    },
+                    dateRange: { start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), end: new Date() },
                     status: 'computing'
                 });
                 await analytics.save();
             }
-
             return analytics;
         };
+    }
 
-        // Instance method to mark as completed
-        schema.methods.markCompleted = function(computationTime = 0) {
-            this.status = 'completed';
-            this.metadata.computedAt = new Date();
-            this.metadata.computationTime = computationTime;
-            return this.save();
-        };
-
-        // Instance method to mark as failed
-        schema.methods.markFailed = function() {
-            this.status = 'failed';
-            return this.save();
-        };
-
-        return schema;
+    getSchema() {
+        return this.schema;
     }
 }
 

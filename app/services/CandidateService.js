@@ -14,6 +14,7 @@ import VoteRepository from '../repositories/VoteRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import FileService from './FileService.js';
 import { populate } from 'dotenv';
+import { stat } from 'fs';
 
 class CandidateService extends BaseService {
     constructor() {
@@ -478,7 +479,17 @@ class CandidateService extends BaseService {
 
             this._validateObjectId(candidateId, 'Candidate ID');
 
-            const statistics = await this.candidateRepository.getCandidateStats(candidateId);
+            const statistics = await this.candidateRepository.getCandidateStatistics(candidateId);
+
+            const votes = await this.voteRepository.getVotesByCandidate(candidateId);
+            const voteCount = votes.length;
+
+            const votesCast = votes.reduce((sum, vote) => sum + vote.voteBundles.reduce((bundleSum, bundle) => bundleSum + bundle.votes, 0), 0);
+
+            console.log("Candidate Statistics", votesCast, voteCount)
+
+            statistics.totalVotes = votesCast;
+            statistics.votesCast = voteCount;
 
             return {
                 success: true,

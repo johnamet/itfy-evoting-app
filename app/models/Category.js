@@ -53,11 +53,11 @@ class Category extends BaseModel {
             updatedBy: {
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'User',
-                required: true
+                required: false
             },
             icon: {
                 type: String,
-                required: true,
+                required: false,
                 trim: true
             },
             candidates: {

@@ -552,7 +552,6 @@ class CandidateRepository extends BaseRepository {
                         createdAt: { $first: '$createdAt' },
                         categories: { $first: '$categories' }, // Preserve the categories array
                         event: { $first: '$event' },
-                        totalVotes: { $sum: '$voteBundles.votes' } // Sum votes from all voteBundles
                     }
                 },
                 {
@@ -576,7 +575,6 @@ class CandidateRepository extends BaseRepository {
                         name: 1,
                         description: { $ifNull: ['$description', 'No description available'] },
                         image: { $ifNull: ['$image', 'No image available'] },
-                        totalVotes: 1,
                         categories: {
                             $map: {
                                 input: '$categories',

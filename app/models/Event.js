@@ -37,7 +37,7 @@ class Event extends BaseModel {
                     address: {
                         type: String,
                         required: true,
-                        trim: true
+                        trim: false
                     },
                     city: {
                         type: String,
@@ -180,11 +180,12 @@ class Event extends BaseModel {
                 }],
                 default: []
             },
-            registrations: {
+            form: {
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'Form',
                 required: false
-            }
+            },
+            
         }
         super(schemaDefinition, { collection: 'events' });
     }

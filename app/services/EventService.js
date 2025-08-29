@@ -390,6 +390,9 @@ class EventService extends BaseService {
                         path: 'categories',
                         model: 'Category',
                         select: 'name candidates'
+                    }, {
+                        path: "form",
+                        model: "Form",
                     }
                 ]
             });
