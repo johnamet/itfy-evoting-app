@@ -14,11 +14,13 @@ import RoleRepository from '../repositories/RoleRepository.js';
 import EmailService from './EmailService.js';
 import config from '../config/ConfigManager.js';
 import ActivityService from './ActivityService.js';
+import CandidateRepository from '../repositories/CandidateRepository.js';
 
 class AuthService extends BaseService {
     constructor() {
         super();
         this.userRepository = new UserRepository();
+        this.candidateRepository = new CandidateRepository()
         this.roleRepository = new RoleRepository();
         this.emailService = new EmailService();
         this.activityService = new ActivityService()
@@ -36,9 +38,9 @@ class AuthService extends BaseService {
      * @param {String} password - User password
      * @returns {Promise<Object>} Authentication result with tokens and user info
      */
-    async login(email, password, options={}) {
+    async login(email, password, options = {}) {
         try {
-            this._log('login', { email , options: options});
+            this._log('login', { email, options: options });
 
             // Validate required fields
             this._validateRequiredFields({ email, password }, ['email', 'password']);
@@ -66,7 +68,7 @@ class AuthService extends BaseService {
             });
 
 
-            const role  = user.role
+            const role = user.role
             this._log('login_success', { userId: user._id, email, role: user.role.level });
 
             //log activity
@@ -108,6 +110,134 @@ class AuthService extends BaseService {
     }
 
     /**
+     * Authenticate a candidate's email and password
+     * @param {string} email - The email of the candidate
+     * @param {string} password - The password of the candidate
+     */
+    async loginAsCandidateByEmail(email, password, options={}) {
+        try {
+            this._log('login_as_candidate', { email, password })
+
+            // Validate required fields
+            this._validateRequiredFields({ email, password }, ['email', 'password']);
+            this._validateEmail(email);
+
+            //Find the candidate and verify the password
+            const candidate = await this.candidateRepository.authenticateEmail(email, password);
+            if (!candidate) {
+                throw new Error('Invalid email or password');
+            }
+
+            //Check if candidate is active
+            if (!candidate.isActive) {
+                throw new Error('Candidate account is deactivated');
+            }
+
+            //Generate tokens
+            const tokens = await this._generateTokens(candidate, true);
+
+            this._log('login_as_candidate_success', { candidateId: candidate._id, email })
+
+            //log activity
+            this.activityService.logActivity({
+                user: candidate._id,
+                action: "login",
+                targetType: "candidate",
+                targetId: candidate._id,
+                userModel: 'Candidate',
+                ipAddress: options.ipAddress || "Unknown",
+                userAgent: options.userAgent || "Unknown",
+                timestamp: new Date()
+            })
+
+            return {
+                success: true,
+                candidate: {
+                    id: candidate._id,
+                    name: candidate.name,
+                    email: candidate.email,
+                    image: candidate.image,
+                    bio: candidate.bio,
+                    location: candidate.location,
+                    phone: candidate.phone,
+                    cId: candidate.cId,
+                    lastLogin: new Date()
+                },
+                tokens: {
+                    accessToken: tokens.accessToken,
+                    refreshToken: tokens.refreshToken,
+                    expiresIn: this.jwtExpiresIn
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'login_as_candidate');
+        }
+    }
+
+      /**
+     * Authenticate a candidate's cId and password
+     * @param {string} email - The email of the candidate
+     * @param {string} password - The password of the candidate
+     */
+    async loginAsCandidateByCId(cId, password, options={}) {
+        try {
+            this._log('login_as_candidate', { cId, password })
+
+            // Validate required fields
+            this._validateRequiredFields({ cId, password }, ['cId', 'password']);
+
+            //Find the candidate and verify the password
+            const candidate = await this.candidateRepository.authenticateCId(cId, password);
+            if (!candidate) {
+                throw new Error('Invalid email or password');
+            }
+
+            //Check if candidate is active
+            if (!candidate.isActive) {
+                throw new Error('Candidate account is deactivated');
+            }
+
+            //Generate tokens
+            const tokens = await this._generateTokens(candidate, true);
+
+            this._log('login_as_candidate_success', { candidateId: candidate._id, cId })
+
+            //log activity
+            this.activityService.logActivity({
+                user: candidate._id,
+                action: "login",
+                targetType: "candidate",
+                targetId: candidate._id,
+                userModel: 'Candidate',
+                ipAddress: options.ipAddress || "Unknown",
+                userAgent: options.userAgent || "Unknown",
+                timestamp: new Date()
+            })
+            return {
+                success: true,
+                candidate: {
+                    id: candidate._id,
+                    name: candidate.name,
+                    email: candidate.email,
+                    image: candidate.image,
+                    bio: candidate.bio,
+                    location: candidate.location,
+                    phone: candidate.phone,
+                    cId: candidate.cId,
+                    lastLogin: new Date()
+                },
+                tokens: {
+                    accessToken: tokens.accessToken,
+                    refreshToken: tokens.refreshToken,
+                    expiresIn: this.jwtExpiresIn
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'login_as_candidate');
+        }
+    }
+
+    /**
      * Refresh access token using refresh token
      * @param {String} refreshToken - Refresh token
      * @returns {Promise<Object>} New access token
@@ -122,7 +252,7 @@ class AuthService extends BaseService {
 
             // Verify refresh token
             const decoded = jwt.verify(refreshToken, this.jwtSecret);
-            
+
             // Find user
             const user = await this.userRepository.findById(decoded.userId);
             if (!user || !user.isActive) {
@@ -290,7 +420,7 @@ class AuthService extends BaseService {
 
             // Verify token
             const decoded = jwt.verify(token, this.jwtSecret);
-            
+
             // Find user
             const user = await this.userRepository.findById(decoded.userId);
             if (!user || !user.isActive) {
@@ -348,11 +478,12 @@ class AuthService extends BaseService {
     /**
      * Generate access and refresh tokens
      * @param {Object} user - User object
+     * @param {Boolean} isCandidate - Whether the user is a candidate
      * @returns {Object} Generated tokens
      * @private
      */
-    async _generateTokens(user) {
-        const accessToken = this._generateAccessToken(user);
+    async _generateTokens(user, isCandidate = false) {
+        const accessToken = this._generateAccessToken(user, isCandidate);
         const refreshToken = this._generateRefreshToken(user);
 
         return {
@@ -362,25 +493,77 @@ class AuthService extends BaseService {
     }
 
     /**
+     * Login as a candidate
+     * @param {password} - Candidate password
+     * @returns {Promise<Object>} Authentication result with tokens and candidate info
+     */
+
+    async candidateLogin(email, password) {
+        try {
+
+            // Generate tokens
+            const tokens = await this._generateTokens({
+                _id: user._id,
+                email: user.email,
+                role: {
+                    id: role._id,
+                    name: role.name,
+                    level: role.level
+                }
+            });
+
+            return {
+                success: true,
+                message: 'Login successful',
+                tokens,
+                user: {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: {
+                        id: role._id,
+                        name: role.name,
+                        level: role.level
+                    }
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'candidate_login');
+        }
+    }
+
+    /**
      * Generate access token
      * @param {Object} user - User object
+     * @param {Boolean} isCandidate - Whether the user is a candidate
      * @returns {String} Access token
      * @private
      */
-    _generateAccessToken(user) {
-        return jwt.sign(
+    _generateAccessToken(user, isCandidate = false) {
+        return isCandidate === false ? jwt.sign(
             {
                 userId: user._id,
                 email: user.email,
                 role: user.role
             },
             this.jwtSecret,
-            { expiresIn: this.jwtExpiresIn,
+            {
+                expiresIn: this.jwtExpiresIn,
                 algorithm: this.jwtAlgorithm,
                 issuer: this.jwtIssuer,
                 audience: this.jwtAudience
             }
-        );
+        ) : jwt.sign({
+            candidateId: user._id,
+            email: user.email,
+            cId: user.cId
+        }, this.jwtSecret,
+            {
+                expiresIn: this.jwtExpiresIn,
+                algorithm: this.jwtAlgorithm,
+                issuer: this.jwtIssuer,
+                audience: this.jwtAudience
+            });
     }
 
     /**
@@ -396,11 +579,12 @@ class AuthService extends BaseService {
                 type: 'refresh'
             },
             this.jwtSecret,
-            { expiresIn: this.refreshTokenExpiresIn,
+            {
+                expiresIn: this.refreshTokenExpiresIn,
                 algorithm: this.jwtAlgorithm,
                 issuer: this.jwtIssuer,
                 audience: this.jwtAudience
-             }
+            }
         );
     }
 
@@ -444,7 +628,7 @@ class AuthService extends BaseService {
                     email: user.email,
                     ipAddress
                 }, resetToken, 30);
-                
+
                 this._log('password_reset_email_sent', { userId: user._id, email });
             } catch (emailError) {
                 this._logError('password_reset_email_failed', emailError, { userId: user._id, email });

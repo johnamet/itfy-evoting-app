@@ -54,7 +54,8 @@ class Form extends BaseModel {
             model: {
             type: String,
             required: true,
-            trim: true
+            trim: true,
+            enum: ['Event', 'Candidate', 'Category'] // Restrict to known models
             },
             fields: {
             type: [Object],

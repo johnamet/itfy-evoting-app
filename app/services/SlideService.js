@@ -71,7 +71,7 @@ class SlideService extends BaseService {
                 action: 'slide_create',
                 targetType: 'slide',
                 targetId: slide._id,
-                metadata: { 
+                metadata: {
                     slideTitle: slide.title,
                     eventId: slide.eventId,
                     eventName: event.name,
@@ -139,16 +139,20 @@ class SlideService extends BaseService {
             delete sanitizedData.createdBy;
             sanitizedData.updatedAt = new Date();
 
+            if (!sanitizedData.isActive){
+                sanitizedData.published = sanitizedData.isActive === true
+            }
+
             // Update slide
             const updatedSlide = await this.slideRepository.updateById(slideId, sanitizedData);
 
             // Log activity
             await this.activityRepository.logActivity({
                 user: updatedBy,
-                action: 'slide_update',
+                action: 'update',
                 targetType: 'slide',
                 targetId: slideId,
-                metadata: { 
+                metadata: {
                     slideTitle: updatedSlide.title,
                     updatedFields: Object.keys(sanitizedData),
                     eventId: updatedSlide.eventId
@@ -156,8 +160,7 @@ class SlideService extends BaseService {
             });
 
             // Invalidate caches
-            CacheService.delete(`slide:${slideId}`);
-            CacheService.delete(`slides:event:${currentSlide.eventId}`);
+            CacheService.clearAll();
 
             this._log('update_slide_success', { slideId });
 
@@ -210,7 +213,7 @@ class SlideService extends BaseService {
                 action: 'slide_delete',
                 targetType: 'slide',
                 targetId: slideId,
-                metadata: { 
+                metadata: {
                     slideTitle: slide.title,
                     eventId: slide.eventId,
                     order: slide.order
@@ -295,7 +298,7 @@ class SlideService extends BaseService {
 
             if (!slides) {
                 const filter = { eventId };
-                
+
                 // Add active filter if specified
                 if (query.isActive !== undefined) {
                     filter.isActive = query.isActive === 'true';
@@ -372,7 +375,7 @@ class SlideService extends BaseService {
 
             // Update slide orders
             const updatePromises = slideOrder.map((slideId, index) => {
-                return this.slideRepository.updateById(slideId, { 
+                return this.slideRepository.updateById(slideId, {
                     order: index + 1,
                     updatedAt: new Date()
                 });
@@ -386,7 +389,7 @@ class SlideService extends BaseService {
                 action: 'slides_reorder',
                 targetType: 'event',
                 targetId: eventId,
-                metadata: { 
+                metadata: {
                     slidesCount: slideOrder.length,
                     newOrder: slideOrder
                 }
@@ -455,7 +458,7 @@ class SlideService extends BaseService {
                 action: 'slide_duplicate',
                 targetType: 'slide',
                 targetId: duplicatedSlide._id,
-                metadata: { 
+                metadata: {
                     originalSlideId: slideId,
                     originalTitle: originalSlide.title,
                     newTitle: duplicatedSlide.title,
@@ -466,9 +469,9 @@ class SlideService extends BaseService {
             // Invalidate cache
             CacheService.delete(`slides:event:${originalSlide.eventId}`);
 
-            this._log('duplicate_slide_success', { 
-                originalId: slideId, 
-                duplicateId: duplicatedSlide._id 
+            this._log('duplicate_slide_success', {
+                originalId: slideId,
+                duplicateId: duplicatedSlide._id
             });
 
             return {
@@ -523,7 +526,7 @@ class SlideService extends BaseService {
                 action: 'slide_status_toggle',
                 targetType: 'slide',
                 targetId: slideId,
-                metadata: { 
+                metadata: {
                     slideTitle: slide.title,
                     oldStatus: slide.isActive,
                     newStatus: newStatus,
@@ -659,16 +662,49 @@ class SlideService extends BaseService {
     }
 
     /**
+     * Get all slides
+     */
+    async getSlides(query) {
+        if (!query){
+            query = {}
+        }
+        try {
+            this._log('get_slides', {});
+            const slides = await this.slideRepository.find(query,{sort: {order: -1}})
+            // Format slides
+            const formattedSlides = slides.map(slide => ({
+                id: slide._id,
+                title: slide.title,
+                subtitle: slide.subtitle,
+                image: slide.image,
+                order: slide.order,
+                button: slide.button,
+                isActive: slide.isActive,
+                published: slide.published,
+                settings: slide.settings,
+                createdAt: slide.createdAt,
+                updatedAt: slide.updatedAt
+            }));
+            return {
+                success: true,
+                data: formattedSlides
+            };
+        } catch (error) {
+            throw this._handleError(error, 'get_slides', {});
+        }
+    }
+
+    /**
      * Get all published slides
      * @returns {Promise<Object>} Published slides
      */
-    async getPublishedSlides() {
+    async getPublishedSlides(query) {
         try {
             this._log('get_published_slides', {});
 
             // Find slides where isActive is true and published is true
             const slides = await this.slideRepository.find(
-                { isActive: true, published: true },
+                { ...query, isActive: true, published: true },
                 { sort: { createdAt: -1 } }
             );
 

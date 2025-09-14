@@ -27,9 +27,11 @@ const PORT = Config.serverConfig.port;
 // Configure CORS
 const corsOptions = {
     origin: [
+        'https://itfy-evoting.vercel.app',
         'http://localhost:3001',
         'http://127.0.0.1:3001',
-        'http://192.168.197.195:3001'
+        'http://192.168.197.195:3001',
+        'http://localhost:3000',
         // Add production frontend URL when available
         // 'https://your-frontend-domain.com'
     ],
@@ -103,6 +105,7 @@ app.use((req, res, next) => {
 
 // Conditional middleware for parsing request bodies
 app.use((req, res, next) => {
+
     const contentType = req.get('Content-Type') || '';
     
     // Skip parsing for file upload endpoints (multipart/form-data)

@@ -1,85 +1,132 @@
 #!/usr/bin/env node
 /**
- * Cache utility module
- * This module provides an in-memory caching system with TTL support
- * It includes features like expiration, size limits, and cache statistics
+ * Redis-based Cache utility module
+ * This module provides a Redis-backed caching system with TTL support
+ * It includes features like expiration, statistics, and distributed caching
  */
 
+import Redis from 'ioredis';
 import Config from '../../config/config.js';
 
-class Cache {
+class RedisCache {
     constructor(options = {}) {
-        this.cache = new Map();
-        this.timers = new Map();
         this.stats = {
             hits: 0,
             misses: 0,
             sets: 0,
             deletes: 0,
-            evictions: 0,
+            errors: 0,
             startTime: Date.now()
         };
         
         // Configuration
         this.config = {
-            maxSize: options.maxSize || 1000, // Maximum number of entries
-            defaultTTL: options.defaultTTL || 3600000, // Default TTL in milliseconds (1 hour)
-            checkInterval: options.checkInterval || 300000, // Check for expired entries every 5 minutes
-            enableStats: options.enableStats !== false, // Enable statistics by default
-            onEviction: options.onEviction || null // Callback when items are evicted
+            host: options.host || process.env.REDIS_HOST || 'localhost',
+            port: options.port || process.env.REDIS_PORT || 6379,
+            password: options.password || process.env.REDIS_PASSWORD || null,
+            db: options.db || process.env.REDIS_DB || 0,
+            keyPrefix: options.keyPrefix || 'itfy:cache:',
+            defaultTTL: options.defaultTTL || 3600, // Default TTL in seconds (1 hour)
+            enableStats: options.enableStats !== false,
+            retryDelayOnFailover: options.retryDelayOnFailover || 100,
+            maxRetriesPerRequest: options.maxRetriesPerRequest || 3,
+            lazyConnect: options.lazyConnect !== false,
+            onError: options.onError || null,
+            onConnect: options.onConnect || null,
+            onReady: options.onReady || null
         };
         
-        // Start cleanup interval
-        this.startCleanupInterval();
+        // Initialize Redis connection
+        this.redis = new Redis({
+            host: this.config.host,
+            port: this.config.port,
+            password: this.config.password,
+            db: this.config.db,
+            keyPrefix: this.config.keyPrefix,
+            retryDelayOnFailover: this.config.retryDelayOnFailover,
+            maxRetriesPerRequest: this.config.maxRetriesPerRequest,
+            lazyConnect: this.config.lazyConnect,
+            enableReadyCheck: true,
+            reconnectOnError: (err) => {
+                console.error('Redis reconnection error:', err.message);
+                return err.message.includes('READONLY');
+            }
+        });
         
-        console.log(`Cache initialized with max size: ${this.config.maxSize}, default TTL: ${this.config.defaultTTL}ms`);
+        this.setupEventHandlers();
+        
+        console.log(`Redis Cache initialized - Host: ${this.config.host}:${this.config.port}, DB: ${this.config.db}`);
+    }
+
+    /**
+     * Setup Redis event handlers
+     */
+    setupEventHandlers() {
+        this.redis.on('connect', () => {
+            console.log('✅ Redis connected');
+            if (this.config.onConnect) {
+                this.config.onConnect();
+            }
+        });
+
+        this.redis.on('ready', () => {
+            console.log('✅ Redis ready');
+            if (this.config.onReady) {
+                this.config.onReady();
+            }
+        });
+
+        this.redis.on('error', (err) => {
+            console.error('❌ Redis error:', err.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
+            if (this.config.onError) {
+                this.config.onError(err);
+            }
+        });
+
+        this.redis.on('close', () => {
+            console.log('⚠️  Redis connection closed');
+        });
+
+        this.redis.on('reconnecting', () => {
+            console.log('🔄 Redis reconnecting...');
+        });
     }
 
     /**
      * Set a value in the cache
      * @param {string} key - Cache key
      * @param {any} value - Value to cache
-     * @param {number} ttl - Time to live in milliseconds (optional)
-     * @returns {boolean} Success status
+     * @param {number} ttl - Time to live in seconds (optional)
+     * @returns {Promise<boolean>} Success status
      */
-    set(key, value, ttl = this.config.defaultTTL) {
+    async set(key, value, ttl = this.config.defaultTTL) {
         try {
-            // Check if we need to evict entries due to size limit
-            if (this.cache.size >= this.config.maxSize && !this.cache.has(key)) {
-                this.evictLRU();
-            }
-
-            // Clear existing timer if key already exists
-            if (this.timers.has(key)) {
-                clearTimeout(this.timers.get(key));
-            }
-
-            // Create cache entry
-            const entry = {
+            const serializedValue = JSON.stringify({
                 value,
                 createdAt: Date.now(),
-                expiresAt: Date.now() + ttl,
-                accessCount: 0,
-                lastAccessed: Date.now()
-            };
+                expiresAt: Date.now() + (ttl * 1000)
+            });
 
-            this.cache.set(key, entry);
-
-            // Set expiration timer
+            let result;
             if (ttl > 0) {
-                const timer = setTimeout(() => {
-                    this.delete(key);
-                }, ttl);
-                this.timers.set(key, timer);
+                result = await this.redis.setex(key, ttl, serializedValue);
+            } else {
+                result = await this.redis.set(key, serializedValue);
             }
 
             if (this.config.enableStats) {
                 this.stats.sets++;
             }
 
-            return true;
+            return result === 'OK';
         } catch (error) {
-            console.error('Cache set error:', error.message);
+            console.error('Redis set error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
             return false;
         }
     }
@@ -87,31 +134,20 @@ class Cache {
     /**
      * Get a value from the cache
      * @param {string} key - Cache key
-     * @returns {any} Cached value or null if not found/expired
+     * @returns {Promise<any>} Cached value or null if not found/expired
      */
-    get(key) {
+    async get(key) {
         try {
-            const entry = this.cache.get(key);
+            const serializedValue = await this.redis.get(key);
 
-            if (!entry) {
+            if (!serializedValue) {
                 if (this.config.enableStats) {
                     this.stats.misses++;
                 }
                 return null;
             }
 
-            // Check if entry has expired
-            if (Date.now() > entry.expiresAt) {
-                this.delete(key);
-                if (this.config.enableStats) {
-                    this.stats.misses++;
-                }
-                return null;
-            }
-
-            // Update access statistics
-            entry.accessCount++;
-            entry.lastAccessed = Date.now();
+            const entry = JSON.parse(serializedValue);
 
             if (this.config.enableStats) {
                 this.stats.hits++;
@@ -119,9 +155,10 @@ class Cache {
 
             return entry.value;
         } catch (error) {
-            console.error('Cache get error:', error.message);
+            console.error('Redis get error:', error.message);
             if (this.config.enableStats) {
                 this.stats.misses++;
+                this.stats.errors++;
             }
             return null;
         }
@@ -130,196 +167,200 @@ class Cache {
     /**
      * Check if a key exists in the cache
      * @param {string} key - Cache key
-     * @returns {boolean} True if key exists and not expired
+     * @returns {Promise<boolean>} True if key exists
      */
-    has(key) {
-        const entry = this.cache.get(key);
-        if (!entry) return false;
-        
-        if (Date.now() > entry.expiresAt) {
-            this.delete(key);
+    async has(key) {
+        try {
+            const exists = await this.redis.exists(key);
+            return exists === 1;
+        } catch (error) {
+            console.error('Redis has error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
             return false;
         }
-        
-        return true;
     }
 
     /**
      * Delete a key from the cache
      * @param {string} key - Cache key
-     * @returns {boolean} True if key was deleted
+     * @returns {Promise<boolean>} True if key was deleted
      */
-    delete(key) {
+    async delete(key) {
         try {
-            const deleted = this.cache.delete(key);
+            const deleted = await this.redis.del(key);
             
-            if (this.timers.has(key)) {
-                clearTimeout(this.timers.get(key));
-                this.timers.delete(key);
-            }
-
-            if (deleted && this.config.enableStats) {
+            if (deleted > 0 && this.config.enableStats) {
                 this.stats.deletes++;
             }
 
-            return deleted;
+            return deleted > 0;
         } catch (error) {
-            console.error('Cache delete error:', error.message);
+            console.error('Redis delete error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
             return false;
         }
     }
 
     /**
-     * Clear all entries from the cache
+     * Clear all entries from the cache (with prefix)
+     * @returns {Promise<boolean>} Success status
      */
-    clear() {
+    async clear() {
         try {
-            // Clear all timers
-            for (const timer of this.timers.values()) {
-                clearTimeout(timer);
+            const keys = await this.redis.keys(`${this.config.keyPrefix}*`);
+            
+            if (keys.length > 0) {
+                // Remove prefix from keys for deletion
+                const keysWithoutPrefix = keys.map(key => key.replace(this.config.keyPrefix, ''));
+                await this.redis.del(...keysWithoutPrefix);
+                console.log(`Cache cleared - ${keys.length} keys deleted`);
+            } else {
+                console.log('Cache clear - no keys found');
             }
             
-            this.cache.clear();
-            this.timers.clear();
-            
-            console.log('Cache cleared');
+            return true;
         } catch (error) {
-            console.error('Cache clear error:', error.message);
+            console.error('Redis clear error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
+            return false;
         }
     }
 
     /**
      * Get cache statistics
-     * @returns {Object} Cache statistics
+     * @returns {Promise<Object>} Cache statistics
      */
-    getStats() {
-        const uptime = Date.now() - this.stats.startTime;
-        const hitRate = this.stats.hits + this.stats.misses > 0 
-            ? (this.stats.hits / (this.stats.hits + this.stats.misses) * 100).toFixed(2)
-            : 0;
-
-        return {
-            ...this.stats,
-            uptime,
-            hitRate: `${hitRate}%`,
-            size: this.cache.size,
-            maxSize: this.config.maxSize,
-            memoryUsage: this.getMemoryUsage()
-        };
-    }
-
-    /**
-     * Get all cache keys
-     * @returns {Array} Array of cache keys
-     */
-    keys() {
-        return Array.from(this.cache.keys());
-    }
-
-    /**
-     * Get cache size
-     * @returns {number} Number of entries in cache
-     */
-    size() {
-        return this.cache.size;
-    }
-
-    /**
-     * Evict least recently used entry
-     */
-    evictLRU() {
-        let oldestKey = null;
-        let oldestTime = Date.now();
-
-        for (const [key, entry] of this.cache.entries()) {
-            if (entry.lastAccessed < oldestTime) {
-                oldestTime = entry.lastAccessed;
-                oldestKey = key;
-            }
-        }
-
-        if (oldestKey) {
-            const evictedEntry = this.cache.get(oldestKey);
-            this.delete(oldestKey);
-            
-            if (this.config.enableStats) {
-                this.stats.evictions++;
-            }
-            
-            if (this.config.onEviction) {
-                this.config.onEviction(oldestKey, evictedEntry.value, 'size');
-            }
-            
-            console.log(`Evicted LRU entry: ${oldestKey}`);
-        }
-    }
-
-    /**
-     * Clean up expired entries
-     */
-    cleanup() {
-        const now = Date.now();
-        let cleanedCount = 0;
-
-        for (const [key, entry] of this.cache.entries()) {
-            if (now > entry.expiresAt) {
-                const evictedEntry = this.cache.get(key);
-                this.delete(key);
-                cleanedCount++;
-                
-                if (this.config.onEviction) {
-                    this.config.onEviction(key, evictedEntry.value, 'expired');
-                }
-            }
-        }
-
-        if (cleanedCount > 0) {
-            console.log(`Cleaned up ${cleanedCount} expired cache entries`);
-        }
-    }
-
-    /**
-     * Start automatic cleanup interval
-     */
-    startCleanupInterval() {
-        this.cleanupInterval = setInterval(() => {
-            this.cleanup();
-        }, this.config.checkInterval);
-    }
-
-    /**
-     * Stop automatic cleanup interval
-     */
-    stopCleanupInterval() {
-        if (this.cleanupInterval) {
-            clearInterval(this.cleanupInterval);
-            this.cleanupInterval = null;
-        }
-    }
-
-    /**
-     * Get approximate memory usage
-     * @returns {Object} Memory usage information
-     */
-    getMemoryUsage() {
+    async getStats() {
         try {
-            const sampleEntries = Array.from(this.cache.entries()).slice(0, 10);
-            let totalSize = 0;
+            const uptime = Date.now() - this.stats.startTime;
+            const hitRate = this.stats.hits + this.stats.misses > 0 
+                ? (this.stats.hits / (this.stats.hits + this.stats.misses) * 100).toFixed(2)
+                : 0;
+
+            const redisInfo = await this.redis.info('memory');
+            const redisStats = await this.redis.info('stats');
             
-            for (const [key, entry] of sampleEntries) {
-                totalSize += JSON.stringify({ key, entry }).length * 2; // Rough estimate
-            }
-            
-            const avgEntrySize = sampleEntries.length > 0 ? totalSize / sampleEntries.length : 0;
-            const estimatedTotalSize = avgEntrySize * this.cache.size;
+            // Parse Redis info
+            const memoryUsed = this.parseRedisInfo(redisInfo, 'used_memory_human');
+            const totalConnections = this.parseRedisInfo(redisStats, 'total_connections_received');
             
             return {
-                estimatedSize: `${(estimatedTotalSize / 1024).toFixed(2)} KB`,
-                avgEntrySize: `${avgEntrySize.toFixed(0)} bytes`,
-                entries: this.cache.size
+                ...this.stats,
+                uptime,
+                hitRate: `${hitRate}%`,
+                redis: {
+                    memoryUsed,
+                    totalConnections,
+                    status: 'connected'
+                },
+                connection: {
+                    host: this.config.host,
+                    port: this.config.port,
+                    db: this.config.db
+                }
             };
         } catch (error) {
-            return { error: 'Unable to calculate memory usage' };
+            console.error('Redis getStats error:', error.message);
+            return {
+                ...this.stats,
+                error: 'Unable to fetch Redis stats',
+                redis: {
+                    status: 'error'
+                }
+            };
+        }
+    }
+
+    /**
+     * Parse Redis INFO command output
+     * @param {string} info - Redis INFO output
+     * @param {string} key - Key to extract
+     * @returns {string} Extracted value
+     */
+    parseRedisInfo(info, key) {
+        const lines = info.split('\r\n');
+        for (const line of lines) {
+            if (line.startsWith(`${key}:`)) {
+                return line.split(':')[1];
+            }
+        }
+        return 'unknown';
+    }
+
+    /**
+     * Get all cache keys (without prefix)
+     * @returns {Promise<Array>} Array of cache keys
+     */
+    async keys() {
+        try {
+            const keys = await this.redis.keys(`${this.config.keyPrefix}*`);
+            // Remove prefix from keys
+            return keys.map(key => key.replace(this.config.keyPrefix, ''));
+        } catch (error) {
+            console.error('Redis keys error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
+            return [];
+        }
+    }
+
+    /**
+     * Get cache size (number of keys)
+     * @returns {Promise<number>} Number of entries in cache
+     */
+    async size() {
+        try {
+            const keys = await this.keys();
+            return keys.length;
+        } catch (error) {
+            console.error('Redis size error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
+            return 0;
+        }
+    }
+
+    /**
+     * Set expiration time for a key
+     * @param {string} key - Cache key
+     * @param {number} ttl - Time to live in seconds
+     * @returns {Promise<boolean>} Success status
+     */
+    async expire(key, ttl) {
+        try {
+            const result = await this.redis.expire(key, ttl);
+            return result === 1;
+        } catch (error) {
+            console.error('Redis expire error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Get time to live for a key
+     * @param {string} key - Cache key
+     * @returns {Promise<number>} TTL in seconds (-1 if no TTL, -2 if key doesn't exist)
+     */
+    async ttl(key) {
+        try {
+            return await this.redis.ttl(key);
+        } catch (error) {
+            console.error('Redis ttl error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
+            return -2;
         }
     }
 
@@ -327,79 +368,208 @@ class Cache {
      * Increment a numeric value in the cache
      * @param {string} key - Cache key
      * @param {number} increment - Amount to increment (default: 1)
-     * @param {number} ttl - TTL for new entries
-     * @returns {number} New value
+     * @param {number} ttl - TTL for new entries in seconds
+     * @returns {Promise<number>} New value
      */
-    increment(key, increment = 1, ttl = this.config.defaultTTL) {
-        const current = this.get(key) || 0;
-        const newValue = Number(current) + increment;
-        this.set(key, newValue, ttl);
-        return newValue;
+    async increment(key, increment = 1, ttl = this.config.defaultTTL) {
+        try {
+            const newValue = await this.redis.incrby(key, increment);
+            
+            // Set TTL if this is a new key
+            if (newValue === increment && ttl > 0) {
+                await this.redis.expire(key, ttl);
+            }
+            
+            return newValue;
+        } catch (error) {
+            console.error('Redis increment error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
+            return 0;
+        }
     }
 
     /**
      * Decrement a numeric value in the cache
      * @param {string} key - Cache key
      * @param {number} decrement - Amount to decrement (default: 1)
-     * @param {number} ttl - TTL for new entries
-     * @returns {number} New value
+     * @param {number} ttl - TTL for new entries in seconds
+     * @returns {Promise<number>} New value
      */
-    decrement(key, decrement = 1, ttl = this.config.defaultTTL) {
-        return this.increment(key, -decrement, ttl);
+    async decrement(key, decrement = 1, ttl = this.config.defaultTTL) {
+        return await this.increment(key, -decrement, ttl);
     }
 
     /**
      * Get multiple values at once
      * @param {Array} keys - Array of cache keys
-     * @returns {Object} Object with key-value pairs
+     * @returns {Promise<Object>} Object with key-value pairs
      */
-    mget(keys) {
-        const result = {};
-        for (const key of keys) {
-            result[key] = this.get(key);
+    async mget(keys) {
+        try {
+            const values = await this.redis.mget(...keys);
+            const result = {};
+            
+            for (let i = 0; i < keys.length; i++) {
+                try {
+                    if (values[i]) {
+                        const entry = JSON.parse(values[i]);
+                        result[keys[i]] = entry.value;
+                        if (this.config.enableStats) {
+                            this.stats.hits++;
+                        }
+                    } else {
+                        result[keys[i]] = null;
+                        if (this.config.enableStats) {
+                            this.stats.misses++;
+                        }
+                    }
+                } catch (parseError) {
+                    result[keys[i]] = null;
+                    if (this.config.enableStats) {
+                        this.stats.misses++;
+                    }
+                }
+            }
+            
+            return result;
+        } catch (error) {
+            console.error('Redis mget error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
+            
+            // Return null for all keys on error
+            const result = {};
+            for (const key of keys) {
+                result[key] = null;
+            }
+            return result;
         }
-        return result;
     }
 
     /**
      * Set multiple values at once
      * @param {Object} entries - Object with key-value pairs
-     * @param {number} ttl - TTL for all entries
-     * @returns {boolean} Success status
+     * @param {number} ttl - TTL for all entries in seconds
+     * @returns {Promise<boolean>} Success status
      */
-    mset(entries, ttl = this.config.defaultTTL) {
+    async mset(entries, ttl = this.config.defaultTTL) {
         try {
+            const pipeline = this.redis.pipeline();
+            
             for (const [key, value] of Object.entries(entries)) {
-                this.set(key, value, ttl);
+                const serializedValue = JSON.stringify({
+                    value,
+                    createdAt: Date.now(),
+                    expiresAt: Date.now() + (ttl * 1000)
+                });
+                
+                if (ttl > 0) {
+                    pipeline.setex(key, ttl, serializedValue);
+                } else {
+                    pipeline.set(key, serializedValue);
+                }
             }
-            return true;
+            
+            const results = await pipeline.exec();
+            const success = results.every(result => result[1] === 'OK');
+            
+            if (success && this.config.enableStats) {
+                this.stats.sets += Object.keys(entries).length;
+            }
+            
+            return success;
         } catch (error) {
-            console.error('Cache mset error:', error.message);
+            console.error('Redis mset error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
             return false;
         }
     }
+
+    /**
+     * Execute a Redis pipeline for batch operations
+     * @param {Function} operations - Function that receives pipeline object
+     * @returns {Promise<Array>} Pipeline execution results
+     */
+    async pipeline(operations) {
+        try {
+            const pipeline = this.redis.pipeline();
+            operations(pipeline);
+            return await pipeline.exec();
+        } catch (error) {
+            console.error('Redis pipeline error:', error.message);
+            if (this.config.enableStats) {
+                this.stats.errors++;
+            }
+            return [];
+        }
+    }
+
+    /**
+     * Test Redis connection
+     * @returns {Promise<boolean>} Connection status
+     */
+    async ping() {
+        try {
+            const result = await this.redis.ping();
+            return result === 'PONG';
+        } catch (error) {
+            console.error('Redis ping error:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * Close Redis connection
+     * @returns {Promise<void>}
+     */
+    async disconnect() {
+        try {
+            await this.redis.quit();
+            console.log('Redis connection closed gracefully');
+        } catch (error) {
+            console.error('Redis disconnect error:', error.message);
+            this.redis.disconnect();
+        }
+    }
+
+    /**
+     * Get Redis connection status
+     * @returns {string} Connection status
+     */
+    getConnectionStatus() {
+        return this.redis.status;
+    }
 }
 
-// Create cache instances for different purposes
-const mainCache = new Cache({
-    maxSize: 1000,
-    defaultTTL: 3600000 // 1 hour
+// Create cache instances for different purposes with different Redis databases
+const mainCache = new RedisCache({
+    db: 0,
+    keyPrefix: 'itfy:main:',
+    defaultTTL: 3600 // 1 hour
 });
 
-const sessionCache = new Cache({
-    maxSize: 500,
-    defaultTTL: 1800000 // 30 minutes
+const sessionCache = new RedisCache({
+    db: 1,
+    keyPrefix: 'itfy:session:',
+    defaultTTL: 1800 // 30 minutes
 });
 
-const userCache = new Cache({
-    maxSize: 2000,
-    defaultTTL: 7200000 // 2 hours
+const userCache = new RedisCache({
+    db: 2,
+    keyPrefix: 'itfy:user:',
+    defaultTTL: 7200 // 2 hours
 });
 
-const eventCache = new Cache({
-    maxSize: 100,
-    defaultTTL: 1800000 // 30 minutes
+const eventCache = new RedisCache({
+    db: 3,
+    keyPrefix: 'itfy:event:',
+    defaultTTL: 1800 // 30 minutes
 });
 
 export default mainCache;
-export { Cache, sessionCache, userCache, eventCache, mainCache };
+export { RedisCache, sessionCache, userCache, eventCache, mainCache };

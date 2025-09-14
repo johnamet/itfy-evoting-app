@@ -13,6 +13,10 @@ import VoteRepository from '../repositories/VoteRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import EmailService from './EmailService.js';
 import { populate } from 'dotenv';
+import Form from '../models/Form.js';
+import FormsRepository from "../repositories/FormsRepository.js";
+import PaymentRepository from '../repositories/PaymentRepository.js';
+
 
 class EventService extends BaseService {
     constructor() {
@@ -22,6 +26,8 @@ class EventService extends BaseService {
         this.voteRepository = new VoteRepository();
         this.activityRepository = new ActivityRepository();
         this.emailService = new EmailService();
+        this.formRepository = new FormsRepository();
+        this.paymentRepository = new PaymentRepository();
         this.adminEmail = process.env.ADMIN_EMAIL || 'admin@itfy.com';
     }
 
@@ -67,7 +73,8 @@ class EventService extends BaseService {
                 metadata: { eventName: event.name, status: event.status }
             });
 
-            // Send event creation email
+            try {
+                 // Send event creation email
             await this.emailService.sendEventNotification(
                 { email: this.adminEmail, name: 'Admin' },
                 {
@@ -79,7 +86,10 @@ class EventService extends BaseService {
                     status: event.status
                 }
             );
-
+            } catch (emailError) {
+                console.error('Failed to send event creation email:', emailError);
+            }
+           
             this._log('create_event_success', { eventId: event._id, name: event.name });
 
             return {
@@ -818,21 +828,29 @@ class EventService extends BaseService {
      */
     async _getEventParticipants(eventId) {
         try {
+            // Get the event form
+            const form = await this.formRepository.findByModel("event", {modelId: eventId});
+
             // Get total registered participants
-            const totalVotes = await this.voteRepository.getVotesByEvent(eventId);
-            const uniqueVoters = new Set(totalVotes.map(vote => vote.user?.toString()));
-            
+            const participants = form?.submissions || []
+
+            // Get unique voters
+            const votes = await this.voteRepository.getVotesByEvent(eventId);
+
+            console.log("Event Stats", { participants, votes });
+
+            const uniqueVoters = new Set(votes.docs.map(vote => vote.voter));
+
             // Get all candidates for this event (they are also participants)
             const candidates = await this.candidateRepository.findByEvent(eventId);
-            const candidateUsers = new Set(candidates.map(candidate => candidate.user?.toString()));
 
             // Combine voters and candidates for total participants
-            const allParticipants = new Set([...uniqueVoters, ...candidateUsers]);
+            const allParticipants = new Set([...participants, ...candidates]);
 
             return {
                 total: allParticipants.size,
                 voted: uniqueVoters.size,
-                candidates: candidateUsers.size,
+                candidates: candidates.size,
                 votingRate: allParticipants.size > 0 
                     ? Math.round((uniqueVoters.size / allParticipants.size) * 100) 
                     : 0
@@ -852,33 +870,39 @@ class EventService extends BaseService {
     async _getDetailedVoteStats(eventId) {
         try {
             const votes = await this.voteRepository.getVotesByEvent(eventId);
+
+
+            
             
             let totalAmount = 0;
             let totalVotesCount = 0;
             const votesByCategory = {};
             const votesByCandidate = {};
 
-            votes.forEach(vote => {
+            votes.docs.forEach(vote => {
                 if (vote.voteBundles && Array.isArray(vote.voteBundles)) {
                     vote.voteBundles.forEach(bundle => {
+
+                        console.log("Bundle", bundle)
                         const votes = bundle.votes || 0;
-                        const amount = bundle.amount || 0;
+                        const amount = bundle.price || 0;
                         
                         totalVotesCount += votes;
                         totalAmount += amount;
 
                         // Group by category
-                        const categoryId = bundle.category?.toString();
+                        const categoryId = vote.category?.name;
                         if (categoryId) {
                             if (!votesByCategory[categoryId]) {
                                 votesByCategory[categoryId] = { votes: 0, amount: 0 };
                             }
                             votesByCategory[categoryId].votes += votes;
+
                             votesByCategory[categoryId].amount += amount;
                         }
 
                         // Group by candidate
-                        const candidateId = bundle.candidate?.toString();
+                        const candidateId = vote.candidate?.name;
                         if (candidateId) {
                             if (!votesByCandidate[candidateId]) {
                                 votesByCandidate[candidateId] = { votes: 0, amount: 0 };
@@ -896,7 +920,7 @@ class EventService extends BaseService {
                 averageVoteValue: totalVotesCount > 0 ? totalAmount / totalVotesCount : 0,
                 votesByCategory,
                 votesByCandidate,
-                uniqueVoters: votes.length
+                uniqueVoters: new Set(votes.docs.map(vote => vote.voter)).size
             };
         } catch (error) {
             this._log('get_detailed_vote_stats_error', { eventId, error: error.message }, 'error');
@@ -925,10 +949,18 @@ class EventService extends BaseService {
             let registrationRevenue = 0;
             let votingRevenue = 0;
 
-            votes.forEach(vote => {
+            const payment = await this.paymentRepository.getPaymentsByEvent(eventId);
+            payment.forEach(p => {
+                const amount = p.finalAmount || 0;
+                totalRevenue += amount;
+                votingRevenue += amount;
+            });
+
+            console.log("Total Revenue", totalRevenue);
+            votes.docs.forEach(vote => {
                 if (vote.voteBundles && Array.isArray(vote.voteBundles)) {
                     vote.voteBundles.forEach(bundle => {
-                        const amount = bundle.amount || 0;
+                        const amount = bundle.price || 0;
                         totalRevenue += amount;
                         votingRevenue += amount;
                     });
@@ -950,6 +982,106 @@ class EventService extends BaseService {
         } catch (error) {
             this._log('get_event_revenue_error', { eventId, error: error.message }, 'error');
             return { total: 0, voting: 0, registration: 0, averagePerParticipant: 0 };
+        }
+    }
+
+    /**
+     * Delete an event
+     * @param {String} eventId - Event ID
+     * @param {String} deletedBy - ID of user deleting the event
+     * @returns {Promise<Object>} Delete result
+     */
+    async deleteEvent(eventId, deletedBy) {
+        try {
+            this._log('delete_event', { eventId, deletedBy });
+
+            this._validateObjectId(eventId, 'Event ID');
+            this._validateObjectId(deletedBy, 'Deleted By User ID');
+
+            // Get current event to check if it can be deleted
+            const currentEvent = await this.eventRepository.findById(eventId);
+            if (!currentEvent) {
+                throw new Error('Event not found');
+            }
+
+            // Check if event can be deleted (business rules)
+            if (currentEvent.status === 'active') {
+                throw new Error('Cannot delete an active event. Please cancel the event first.');
+            }
+
+            // Check if event has votes (if completed event with votes, might want to keep for records)
+            if (currentEvent.status === 'completed') {
+                const votesCount = await this.voteRepository.countByEvent(eventId);
+                if (votesCount > 0) {
+                    throw new Error('Cannot delete a completed event that has votes. Consider archiving instead.');
+                }
+            }
+
+            // Delete related data first (candidates, votes, activities)
+            // Get candidates for this event
+            const candidates = await this.candidateRepository.findByEvent(eventId);
+            const candidateIds = candidates.map(candidate => candidate._id);
+
+            // Delete votes for all candidates in this event
+            if (candidateIds.length > 0) {
+                await this.voteRepository.deleteByEvent(eventId);
+                this._log('delete_event_votes', { eventId, votesDeleted: true });
+            }
+
+            // Delete candidates for this event
+            await this.candidateRepository.deleteByEvent(eventId);
+            this._log('delete_event_candidates', { eventId, candidatesDeleted: candidates.length });
+
+            // Delete the event itself
+            const deletedEvent = await this.eventRepository.deleteById(eventId);
+
+            // Log activity for audit trail
+            await this.activityRepository.logActivity({
+                user: deletedBy,
+                action: 'delete',
+                targetType: 'event',
+                targetId: eventId,
+                metadata: { 
+                    eventName: currentEvent.name,
+                    eventStatus: currentEvent.status,
+                    candidatesDeleted: candidates.length,
+                    deletedAt: new Date()
+                }
+            });
+
+            // Send notification email to admin
+            try {
+                await this.emailService.sendEventNotification(
+                    { email: this.adminEmail, name: 'Admin' },
+                    {
+                        id: eventId,
+                        name: currentEvent.name,
+                        description: currentEvent.description,
+                        status: 'deleted',
+                        deletedAt: new Date(),
+                        deletedBy: deletedBy
+                    }
+                );
+            } catch (emailError) {
+                this._log('delete_event_email_failed', { eventId, error: emailError.message }, 'warn');
+                // Don't fail the delete operation if email fails
+            }
+
+            this._log('delete_event_success', { eventId, eventName: currentEvent.name });
+
+            return {
+                success: true,
+                message: 'Event deleted successfully',
+                deletedEvent: {
+                    id: eventId,
+                    name: currentEvent.name,
+                    status: currentEvent.status,
+                    deletedAt: new Date()
+                }
+            };
+
+        } catch (error) {
+            throw this._handleError(error, 'delete_event', { eventId });
         }
     }
 }

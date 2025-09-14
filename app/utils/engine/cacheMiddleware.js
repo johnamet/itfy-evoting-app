@@ -201,6 +201,7 @@ export function rateLimitMiddleware(options = {}) {
                     (!skipFailedRequests || res.statusCode < 400)
                 );
 
+                
                 if (shouldCount) {
                     cache.increment(key, 1, windowMs);
                 }

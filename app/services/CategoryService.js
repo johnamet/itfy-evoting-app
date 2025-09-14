@@ -13,7 +13,6 @@ import CandidateRepository from '../repositories/CandidateRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import VoteRepository from '../repositories/VoteRepository.js';
 import CacheService from './CacheService.js';
-import { populate } from 'dotenv';
 
 class CategoryService extends BaseService {
     constructor() {
@@ -33,29 +32,36 @@ class CategoryService extends BaseService {
      */
     async createCategory(categoryData, createdBy) {
         try {
+            console.log(categoryData)
+            if (!categoryData.eventId){
+                categoryData.eventId = categoryData.event;
+            }
             this._log('create_category', { name: categoryData.name, eventId: categoryData.eventId, createdBy });
 
             // Validate required fields
             this._validateRequiredFields(categoryData, ['name', 'eventId']);
-            this._validateObjectId(categoryData.eventId, 'Event ID');
+            this._validateObjectId(categoryData.eventId? categoryData.eventId : categoryData.event, 'Event ID');
             this._validateObjectId(createdBy, 'Created By User ID');
 
             // Check if event exists
-            const event = await this.eventRepository.findById(categoryData.eventId);
+            const event = await this.eventRepository.findById(categoryData.eventId? categoryData.eventId : categoryData.event);
             if (!event) {
                 throw new Error('Event not found');
             }
 
             // Check if event can have categories added
-            if (event.status === 'active' || event.status === 'completed') {
-                throw new Error('Cannot add categories to active or completed events');
+            if (event.status === 'completed') {
+                throw new Error('Cannot add categories to completed events');
             }
 
             // Check for duplicate category name in the same event
-            const existingCategory = await this.categoryRepository.findByNameAndEvent(
-                categoryData.name,
-                categoryData.eventId
-            );
+            const existingCategory = await this.categoryRepository.findOne({
+                name: categoryData.name,
+                event: categoryData.eventId? categoryData.eventId : categoryData.event
+            });
+
+            console.log(existingCategory);
+
             if (existingCategory) {
                 throw new Error('Category with this name already exists in the event');
             }
@@ -78,12 +84,12 @@ class CategoryService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: createdBy,
-                action: 'category_create',
+                action: 'create',
                 targetType: 'category',
                 targetId: category._id,
                 metadata: {
                     categoryName: category.name,
-                    eventId: category.eventId,
+                    eventId: category.eventId? category.eventId : category.event,
                     eventName: event.name
                 }
             });
@@ -99,7 +105,7 @@ class CategoryService extends BaseService {
                     id: category._id,
                     name: category.name,
                     description: category.description,
-                    eventId: category.eventId,
+                    eventId: category.eventId? category.eventId : category.event,
                     maxCandidates: category.maxCandidates,
                     allowMultipleVotes: category.allowMultipleVotes,
                     createdAt: category.createdAt
@@ -119,6 +125,8 @@ class CategoryService extends BaseService {
      */
     async updateCategory(categoryId, updateData, updatedBy) {
         try {
+
+            console.log(updateData)
             this._log('update_category', { categoryId, updatedBy });
 
             this._validateObjectId(categoryId, 'Category ID');
@@ -131,16 +139,21 @@ class CategoryService extends BaseService {
             }
 
             // Check if event allows updates
-            const event = await this.eventRepository.findById(currentCategory.eventId);
-            if (event.status === 'active' || event.status === 'completed') {
-                throw new Error('Cannot update categories of active or completed events');
+            const event = await this.eventRepository.findById(currentCategory.event);
+
+            if (!event){
+                throw new Error('Event not found');
+            }
+            if (event.status === 'completed' && !updateData.status || updateData.status === 'completed') {
+                throw new Error('Cannot update categories of completed events');
             }
 
             // Check for duplicate name if name is being updated
             if (updateData.name && updateData.name !== currentCategory.name) {
-                const existingCategory = await this.categoryRepository.findByNameAndEvent(
-                    updateData.name,
-                    currentCategory.eventId
+                const existingCategory = await this.categoryRepository.findOne({
+                    name: updateData.name,
+                    event: currentCategory.event
+                }
                 );
                 if (existingCategory) {
                     throw new Error('Category with this name already exists in the event');
@@ -155,13 +168,21 @@ class CategoryService extends BaseService {
             delete sanitizedData.createdBy;
             sanitizedData.updatedAt = new Date();
 
+            //fail safe to set isActive based on status
+            if (sanitizedData.status) {
+                sanitizedData.isActive = sanitizedData.status.toLowerCase() === 'active' ? true : false;
+
+                if (sanitizedData.status.toLowerCase() === 'completed' || sanitizedData.status.toLowerCase() === 'inactive') {
+                    sanitizedData.isVotingOpen = false;
+                }
+            }
             // Update category
             const updatedCategory = await this.categoryRepository.updateById(categoryId, sanitizedData);
 
             // Log activity
             await this.activityRepository.logActivity({
                 user: updatedBy,
-                action: 'category_update',
+                action: 'update',
                 targetType: 'category',
                 targetId: categoryId,
                 metadata: {
@@ -200,7 +221,7 @@ class CategoryService extends BaseService {
      */
     async deleteCategory(categoryId, deletedBy) {
         try {
-            this._log('delete_category', { categoryId, deletedBy });
+            this._log('delete', { categoryId, deletedBy });
 
             this._validateObjectId(categoryId, 'Category ID');
             this._validateObjectId(deletedBy, 'Deleted By User ID');
@@ -212,7 +233,7 @@ class CategoryService extends BaseService {
             }
 
             // Check if event allows deletions
-            const event = await this.eventRepository.findById(category.eventId);
+            const event = await this.eventRepository.findById(category.event);
             if (event.status === 'active' || event.status === 'completed') {
                 throw new Error('Cannot delete categories from active or completed events');
             }
@@ -229,7 +250,7 @@ class CategoryService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: deletedBy,
-                action: 'category_delete',
+                action: 'delete',
                 targetType: 'category',
                 targetId: categoryId,
                 metadata: {
@@ -418,12 +439,21 @@ class CategoryService extends BaseService {
                     return {
                         id: category._id,
                         name: category.name,
+                        status: category.status,
+                        isActive: category.isActive,
+                        isDeleted: category.isDeleted,
+                        createdBy: category.createdBy,
+                        updatedBy: category.updatedBy,
+                        icon: category.icon,
+                        votingDeadline: category.votingDeadline,
+                        isVotingOpen: category.isVotingOpen,
                         description: category.description,
                         event: category.event,
                         maxCandidates: category.maxCandidates,
                         allowMultipleVotes: category.allowMultipleVotes,
                         candidatesCount: candidates.length,
                         createdAt: category.createdAt,
+                        updatedAt: category.updatedAt,
                         candidates: category.candidates
 
                     };

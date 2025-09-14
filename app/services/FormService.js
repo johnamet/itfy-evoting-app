@@ -11,7 +11,10 @@ import FormsRepository from '../repositories/FormsRepository.js';
 import UserRepository from '../repositories/UserRepository.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import CacheService from './CacheService.js';
-import mongoose from 'mongoose';
+import mongoose, { model } from 'mongoose';
+import EventRepository from '../repositories/EventRepository.js';
+import CandidateRepository from '../repositories/CandidateRepository.js';
+import CategoryRepository from '../repositories/CategoryRepository.js'
 
 class FormService extends BaseService {
     constructor() {
@@ -19,6 +22,8 @@ class FormService extends BaseService {
         this.formsRepository = new FormsRepository();
         this.userRepository = new UserRepository();
         this.activityRepository = new ActivityRepository();
+        this.eventRepository = new EventRepository();
+        this.categoryRepository = new CategoryRepository();
     }
 
     /**
@@ -47,15 +52,43 @@ class FormService extends BaseService {
                 createdAt: new Date()
             };
 
+            let model;
+
+            switch (formToCreate.model) {
+                case "Event":
+                    model = await this.eventRepository.findById(formToCreate.modelId)
+                    if (!model || model.status === "completed") {
+                        this._handleError(new Error("Cannot create form for a completed Event or nonexistent event"))
+                    }
+                case "Category":
+                    model = await this.categoryRepository.findById(formToCreate.modelId)
+                    if (!model || model.status === "completed") {
+                        this._handleError(new Error("Cannot create form for an archived category or nonexistent category"))
+                    }
+            }
+
             const form = await this.formsRepository.create(formToCreate);
+
+            switch (formToCreate.model) {
+                case "Event":
+                    model = await this.eventRepository.updateById(formToCreate.modelId, {form: form.id || form._id})
+                    if (!model || model.status === "completed") {
+                        this._handleError(new Error("Cannot create form for a completed Event or nonexistent event"))
+                    }
+                case 'Category':
+                    model = await this.categoryRepository.updateById(formToCreate.modelId, {form: form.id || form._id})
+                    if (!model || model.status === "completed") {
+                        this._handleError(new Error("Cannot create form for a completed Category or nonexistent category"))
+                    }
+            }
 
             // Log activity
             await this.activityRepository.logActivity({
                 user: createdBy,
-                action: 'form_create',
+                action: 'create',
                 targetType: 'form',
                 targetId: form._id,
-                metadata: { 
+                metadata: {
                     formTitle: form.title,
                     fieldsCount: form.fields.length
                 }
@@ -124,17 +157,17 @@ class FormService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: updatedBy,
-                action: 'form_update',
+                action: 'update',
                 targetType: 'form',
                 targetId: formId,
-                metadata: { 
+                metadata: {
                     formTitle: updatedForm.title,
                     updatedFields: Object.keys(sanitizedData)
                 }
             });
 
             // Invalidate cache
-            CacheService.delete(`form:${formId}`);
+            CacheService.clearAll();
 
             this._log('update_form_success', { formId });
 
@@ -185,10 +218,10 @@ class FormService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: deletedBy,
-                action: 'form_delete',
+                action: 'delete',
                 targetType: 'form',
                 targetId: formId,
-                metadata: { 
+                metadata: {
                     formTitle: form.title
                 }
             });
@@ -242,7 +275,11 @@ class FormService extends BaseService {
                 submissionCount: form.submissionCount,
                 settings: form.settings,
                 createdAt: form.createdAt,
-                updatedAt: form.updatedAt
+                updatedAt: form.updatedAt,
+                model: form.model,
+                modelId: form.modelId,
+                createdBy: form.createdBy,
+                updatedBy: form.updatedBy
             };
 
             // Include submissions if requested
@@ -349,8 +386,8 @@ class FormService extends BaseService {
             this._log('get_forms', { query });
 
             const { page, limit } = this._generatePaginationOptions(
-                query.page, 
-                query.limit, 
+                query.page,
+                query.limit,
                 50
             );
 
@@ -388,7 +425,10 @@ class FormService extends BaseService {
                 fields: form.fields,
                 updatedAt: form.updatedAt,
                 status: form.status,
-                isActive: form.isActive
+                isActive: form.isActive,
+                maxSubmissions: form.maxSubmissions,
+                model: form.model,
+                modelId: form.modelId
             }));
 
             return {
@@ -413,13 +453,13 @@ class FormService extends BaseService {
             this._validateObjectId(formId, 'Form ID');
 
             const { page, limit } = this._generatePaginationOptions(
-                query.page, 
-                query.limit, 
+                query.page,
+                query.limit,
                 50
             );
 
             // Date range filter
-            const filter = { formId };
+            const filter = { _id: formId };
             if (query.startDate || query.endDate) {
                 filter.submittedAt = {};
                 if (query.startDate) {
@@ -430,29 +470,24 @@ class FormService extends BaseService {
                 }
             }
 
-            const submissions = await this.formsRepository.findSubmissions(filter, {
-                skip: (page - 1) * limit,
-                limit,
-                sort: { submittedAt: -1 },
-                populate: [
-                    { path: 'submittedBy', select: 'username email profile.firstName profile.lastName' }
-                ]
-            });
+            const form = await this.formsRepository.findOne(filter, query);
 
-            const total = await this.formsRepository.countSubmissions(filter);
+
+            if (!form) {
+                throw new Error('Form not found');
+            }
+
+            console.log(form.submissions)
+
+            const submissions = form.submissions.slice((page - 1) * limit, page * limit);
+
+            // Get total count for pagination
+            const total = form.submissions.length;
 
             // Format submissions
             const formattedSubmissions = submissions.map(submission => ({
                 id: submission._id,
                 data: submission.data,
-                submittedBy: {
-                    id: submission.submittedBy._id,
-                    username: submission.submittedBy.username,
-                    email: submission.submittedBy.email,
-                    name: submission.submittedBy.profile ? 
-                        `${submission.submittedBy.profile.firstName} ${submission.submittedBy.profile.lastName}`.trim() 
-                        : submission.submittedBy.username
-                },
                 submittedAt: submission.submittedAt,
                 ipAddress: submission.ipAddress
             }));
@@ -497,7 +532,7 @@ class FormService extends BaseService {
                 action: 'form_archive',
                 targetType: 'form',
                 targetId: formId,
-                metadata: { 
+                metadata: {
                     formTitle: updatedForm.title
                 }
             });
@@ -536,7 +571,7 @@ class FormService extends BaseService {
 
         for (let i = 0; i < fields.length; i++) {
             const field = fields[i];
-            
+
             if (!field.name || !field.type) {
                 throw new Error(`Field ${i + 1} must have name and type`);
             }
@@ -624,11 +659,11 @@ class FormService extends BaseService {
 
             if (!form) {
                 // Find form by model and modelId
-                form = await this.formsRepository.findOne({ 
-                    model: model, 
+                form = await this.formsRepository.findOne({
+                    model: model,
                     modelId: modelId,
                     isActive: true,
-                    isDeleted: false 
+                    isDeleted: false
                 });
 
                 if (!form) {
@@ -665,10 +700,10 @@ class FormService extends BaseService {
                 }));
             }
 
-            this._log('get_form_by_model_and_modelid_success', { 
-                formId: form._id, 
-                model, 
-                modelId 
+            this._log('get_form_by_model_and_modelid_success', {
+                formId: form._id,
+                model,
+                modelId
             });
 
             return {
@@ -690,11 +725,11 @@ class FormService extends BaseService {
      */
     async createFormForModel(model, modelId, formData, createdBy) {
         try {
-            this._log('create_form_for_model', { 
-                model, 
-                modelId, 
-                title: formData.title, 
-                createdBy 
+            this._log('create_form_for_model', {
+                model,
+                modelId,
+                title: formData.title,
+                createdBy
             });
 
             // Validate inputs
@@ -739,7 +774,7 @@ class FormService extends BaseService {
                 action: 'form_create_for_model',
                 targetType: 'form',
                 targetId: form._id,
-                metadata: { 
+                metadata: {
                     formTitle: form.title,
                     model: form.model,
                     modelId: form.modelId,
@@ -747,11 +782,11 @@ class FormService extends BaseService {
                 }
             });
 
-            this._log('create_form_for_model_success', { 
-                formId: form._id, 
-                model, 
-                modelId, 
-                title: form.title 
+            this._log('create_form_for_model_success', {
+                formId: form._id,
+                model,
+                modelId,
+                title: form.title
             });
 
             return {
@@ -769,10 +804,10 @@ class FormService extends BaseService {
                 }
             };
         } catch (error) {
-            throw this._handleError(error, 'create_form_for_model', { 
-                model, 
-                modelId, 
-                title: formData.title 
+            throw this._handleError(error, 'create_form_for_model', {
+                model,
+                modelId,
+                title: formData.title
             });
         }
     }
@@ -793,8 +828,8 @@ class FormService extends BaseService {
             }
 
             const { page, limit } = this._generatePaginationOptions(
-                query.page, 
-                query.limit, 
+                query.page,
+                query.limit,
                 50
             );
 
@@ -850,10 +885,10 @@ class FormService extends BaseService {
                 updatedAt: form.updatedAt
             }));
 
-            this._log('get_forms_by_model_success', { 
-                model, 
-                count: formattedForms.length, 
-                total 
+            this._log('get_forms_by_model_success', {
+                model,
+                count: formattedForms.length,
+                total
             });
 
             return {
@@ -863,6 +898,217 @@ class FormService extends BaseService {
         } catch (error) {
             throw this._handleError(error, 'get_forms_by_model', { model, query });
         }
+    }
+
+    /**
+     * Export form submissions as CSV or JSON
+     * @param {String} formId - Form ID
+     * @param {String} format - Export format ('csv' or 'json')
+     * @param {Object} options - Export options (dateRange, fields, etc.)
+     * @returns {Promise<Object>} Export data or file path
+     */
+    async exportFormSubmissions(formId, format = 'csv', options = {}) {
+        try {
+            this._log('export_form_submissions', { formId, format, options });
+
+            this._validateObjectId(formId, 'Form ID');
+
+            // Validate format
+            const validFormats = ['csv', 'json', 'xlsx'];
+            if (!validFormats.includes(format.toLowerCase())) {
+                throw new Error(`Invalid export format. Supported formats: ${validFormats.join(', ')}`);
+            }
+
+            // Get form
+            const form = await this.formsRepository.findById(formId);
+            if (!form) {
+                throw new Error('Form not found');
+            }
+
+            // Get form submissions with filters
+            const filter = { _id: formId };
+            
+            // Apply date range filter if provided
+            if (options.startDate || options.endDate) {
+                filter.submittedAt = {};
+                if (options.startDate) {
+                    filter.submittedAt.$gte = new Date(options.startDate);
+                }
+                if (options.endDate) {
+                    filter.submittedAt.$lte = new Date(options.endDate);
+                }
+            }
+
+            const formWithSubmissions = await this.formsRepository.findOne(filter);
+            if (!formWithSubmissions || !formWithSubmissions.submissions) {
+                throw new Error('No submissions found for this form');
+            }
+
+            const submissions = formWithSubmissions.submissions;
+
+            // Prepare export data
+            let exportData;
+            let headers = [];
+
+            // Get all unique field keys from submissions
+            const allFields = new Set();
+            submissions.forEach(submission => {
+                if (submission.data) {
+                    Object.keys(submission.data).forEach(key => allFields.add(key));
+                }
+            });
+
+            // Create headers
+            headers = ['Submission ID', 'Submitted By', 'Submitted At', 'IP Address'];
+            headers.push(...Array.from(allFields));
+
+            switch (format.toLowerCase()) {
+                case 'csv':
+                    exportData = this._generateCSVData(submissions, headers);
+                    break;
+                case 'json':
+                    exportData = this._generateJSONData(submissions, form);
+                    break;
+                case 'xlsx':
+                    exportData = this._generateXLSXData(submissions, headers, form);
+                    break;
+                default:
+                    throw new Error(`Unsupported export format: ${format}`);
+            }
+
+            this._log('export_form_submissions_success', { 
+                formId, 
+                format, 
+                submissionCount: submissions.length 
+            });
+
+            return {
+                success: true,
+                data: exportData,
+                metadata: {
+                    formId: form._id,
+                    formTitle: form.title,
+                    exportFormat: format,
+                    submissionCount: submissions.length,
+                    exportedAt: new Date(),
+                    headers: headers
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'export_form_submissions', { formId, format });
+        }
+    }
+
+    /**
+     * Generate CSV data from form submissions
+     * @param {Array} submissions - Form submissions
+     * @param {Array} headers - CSV headers
+     * @returns {String} CSV data
+     */
+    _generateCSVData(submissions, headers) {
+        const csvRows = [];
+        
+        // Add headers
+        csvRows.push(headers.map(header => `"${header}"`).join(','));
+
+        // Add data rows
+        submissions.forEach(submission => {
+            const row = [];
+            
+            // Basic submission info
+            row.push(`"${submission._id}"`);
+            row.push(`"${submission.submittedBy || 'Anonymous'}"`);
+            row.push(`"${submission.submittedAt ? new Date(submission.submittedAt).toISOString() : ''}"`);
+            row.push(`"${submission.ipAddress || ''}"`);
+
+            // Form field data
+            headers.slice(4).forEach(fieldName => {
+                const value = submission.data && submission.data[fieldName] ? submission.data[fieldName] : '';
+                // Handle arrays and objects
+                const processedValue = Array.isArray(value) ? value.join('; ') : 
+                                     typeof value === 'object' ? JSON.stringify(value) : value;
+                row.push(`"${String(processedValue).replace(/"/g, '""')}"`);
+            });
+
+            csvRows.push(row.join(','));
+        });
+
+        return csvRows.join('\n');
+    }
+
+    /**
+     * Generate JSON data from form submissions
+     * @param {Array} submissions - Form submissions
+     * @param {Object} form - Form details
+     * @returns {Object} JSON data
+     */
+    _generateJSONData(submissions, form) {
+        return {
+            form: {
+                id: form._id,
+                title: form.title,
+                description: form.description,
+                fields: form.fields
+            },
+            submissions: submissions.map(submission => ({
+                id: submission._id,
+                submittedBy: submission.submittedBy,
+                submittedAt: submission.submittedAt,
+                ipAddress: submission.ipAddress,
+                data: submission.data
+            })),
+            exportMetadata: {
+                totalSubmissions: submissions.length,
+                exportedAt: new Date(),
+                exportFormat: 'json'
+            }
+        };
+    }
+
+    /**
+     * Generate XLSX data structure from form submissions
+     * @param {Array} submissions - Form submissions
+     * @param {Array} headers - Excel headers
+     * @param {Object} form - Form details
+     * @returns {Object} XLSX data structure
+     */
+    _generateXLSXData(submissions, headers, form) {
+        const worksheetData = [];
+        
+        // Add headers
+        worksheetData.push(headers);
+
+        // Add data rows
+        submissions.forEach(submission => {
+            const row = [];
+            
+            // Basic submission info
+            row.push(submission._id.toString());
+            row.push(submission.submittedBy || 'Anonymous');
+            row.push(submission.submittedAt ? new Date(submission.submittedAt) : '');
+            row.push(submission.ipAddress || '');
+
+            // Form field data
+            headers.slice(4).forEach(fieldName => {
+                const value = submission.data && submission.data[fieldName] ? submission.data[fieldName] : '';
+                // Handle arrays and objects
+                const processedValue = Array.isArray(value) ? value.join('; ') : 
+                                     typeof value === 'object' ? JSON.stringify(value) : value;
+                row.push(processedValue);
+            });
+
+            worksheetData.push(row);
+        });
+
+        return {
+            worksheetName: `${form.title} Submissions`,
+            data: worksheetData,
+            metadata: {
+                formTitle: form.title,
+                exportedAt: new Date(),
+                submissionCount: submissions.length
+            }
+        };
     }
 }
 

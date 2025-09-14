@@ -33,6 +33,7 @@ class BaseRepository {
     async create(data, options = {}) {
         try {
             const document = new this.model(data);
+            
             return await document.save(options);
         } catch (error) {
             throw this._handleError(error, 'create');
@@ -413,6 +414,34 @@ class BaseRepository {
         } catch (error) {
             throw this._handleError(error, 'getStats');
         }
+    }
+
+    /**
+     * Validate that a given value is a valid MongoDB ObjectId
+     * @private
+     * @param {any} id - The value to validate
+     * @param {String} [fieldName='ID'] - The name of the field being validated (for error messages)
+     * @throws {Error} If the ID is not valid
+     */
+    _validateObjectId(id, fieldName = 'ID') {
+        if (!id) {
+            throw new Error(`${fieldName} is required`);
+        }
+
+        // Check if it's already a mongoose ObjectId
+        if (mongoose.Types.ObjectId.isValid(id)) {
+            // Additional check to ensure it's a proper ObjectId format
+            // This catches cases where a valid 12-character string might pass isValid
+            // but isn't actually a proper ObjectId
+            if (typeof id === 'string' && id.length === 24 && /^[0-9a-fA-F]{24}$/.test(id)) {
+                return;
+            }
+            if (id instanceof mongoose.Types.ObjectId) {
+                return;
+            }
+        }
+
+        throw new Error(`${fieldName} must be a valid MongoDB ObjectId`);
     }
 
     /**

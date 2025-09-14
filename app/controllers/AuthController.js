@@ -190,11 +190,44 @@ export default class AuthController extends BaseController {
                 return this.sendError(res, 'Email and password are required', 400);
             }
 
-            const result = await this.authService.login(email, password, {ipAddress: req.ip, location: req.geo});
+            const result = await this.authService.login(email, password, { ipAddress: req.ip, location: req.geo, userAgent: req.userAgent });
             return this.sendSuccess(res, result, 'Login successful');
         } catch (error) {
             return this.handleError(res, error, 'Login failed');
         }
+    }
+
+    /**
+     * Candidate Login
+     * @swagger
+     * /auth/candidate/login:
+     *   post:
+     *      summary: Candidate Login
+     *      description: Logs in a candidate
+     * 
+     */
+
+    async loginAsCandidate(req, res) {
+        const { cId, email, password } = req.body
+
+        if (!cId && !email){
+            return this.sendError(res, 'Candidate Id or email is required', 400)
+        }
+
+        if (!password) {
+            return this.sendError(res, 'Email and password are required', 400);
+        }
+
+        let result;
+
+        if (email){
+        result = await this.authService.loginAsCandidateByEmail(email, password, { ipAddress: req.ip, location: req.geo, userAgent: req.userAgent });
+        }else{
+            result = await this.authService.loginAsCandidateByCId(cId, password, { ipAddress: req.ip, location: req.geo, userAgent: req.userAgent })
+        }
+        return this.sendSuccess(res, result, 'Login successful');
+    } catch(error) {
+        return this.handleError(res, error, 'Login failed');
     }
 
     /**
@@ -231,7 +264,7 @@ export default class AuthController extends BaseController {
     async logout(req, res) {
         try {
             const token = req.headers.authorization?.replace('Bearer ', '');
-            
+
             if (token) {
                 await this.authService.logout(token);
             }
@@ -287,7 +320,7 @@ export default class AuthController extends BaseController {
     async getProfile(req, res) {
         try {
             const userId = req.user?.id;
-            
+
             if (!userId) {
                 return this.sendError(res, 'User not authenticated', 401);
             }
@@ -364,14 +397,14 @@ export default class AuthController extends BaseController {
     async updateProfile(req, res) {
         try {
             const userId = req.user?.id;
-            
+
             if (!userId) {
                 return this.sendError(res, 'User not authenticated', 401);
             }
 
             const updateData = req.body;
             const updatedUser = await this.userService.updateUser(userId, updateData);
-            
+
             return this.sendSuccess(res, updatedUser, 'Profile updated successfully');
         } catch (error) {
             return this.handleError(res, error, 'Failed to update profile');

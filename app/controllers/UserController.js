@@ -140,7 +140,7 @@ export default class UserController extends BaseController {
 
             console.log('Update data:', updateData);
 
-            const user = await this.userService.updateUser(id, {
+            const user = await this.userService.updateUser(id? id: updateData.id, {
                 ...updateData,
                 updatedBy
             }, updatedBy);

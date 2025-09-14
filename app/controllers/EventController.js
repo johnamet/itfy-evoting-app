@@ -95,16 +95,18 @@ export default class EventController extends BaseController {
     async createEvent(req, res) {
         try {
             const eventData = req.body;
-            const createdBy = req.user?.id;
+            const createdBy = req.user?.id || req.user?._id;
+
+            console.log("createdBy:", createdBy);
 
             if (!createdBy) {
                 return this.sendError(res, 'User authentication required', 401);
             }
 
-            const event = await this.eventService.createEvent({
-                ...eventData,
+            const event = await this.eventService.createEvent(
+                eventData,
                 createdBy
-            });
+            );
 
             return this.sendSuccess(res, event, 'Event created successfully', 201);
         } catch (error) {
@@ -253,7 +255,7 @@ export default class EventController extends BaseController {
     async deleteEvent(req, res) {
         try {
             const { id } = req.params;
-            const deletedBy = req.user?.id;
+            const deletedBy = req.user?.id || req.user?._id;
 
             const result = await this.eventService.deleteEvent(id, deletedBy);
 

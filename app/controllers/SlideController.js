@@ -31,10 +31,10 @@ export default class SlideController extends BaseController {
                 return this.sendError(res, 'User authentication required', 401);
             }
 
-            const slide = await this.slideService.createSlide({
-                ...slideData,
+            const slide = await this.slideService.createSlide(
+                slideData,
                 createdBy
-            });
+            );
 
             return this.sendSuccess(res, slide, 'Slide created successfully', 201);
         } catch (error) {
@@ -45,7 +45,7 @@ export default class SlideController extends BaseController {
     /**
      * Get all slides with filtering and pagination
      */
-    async getSlides(req, res) {
+    async getPublishedSlides(req, res) {
         try {
             const query = req.query;
             const slides = await this.slideService.getPublishedSlides(query);
@@ -56,6 +56,21 @@ export default class SlideController extends BaseController {
     }
 
     /**
+     * Get all slides with filtering and pagination
+     * 
+     */
+    async getSlides(req, res) {
+        try {
+            const query = req.query
+            const slides = await this.slideService.getSlides(query)
+            return this.sendSuccess(res, slides, 'Slides retrieved successfully')
+        }catch(error){
+            return this.handleError(res, error, 'Failed to get slides')
+        }
+      
+    }
+
+    /**
      * Get slide by ID
      */
     async getSlideById(req, res) {
@@ -63,7 +78,7 @@ export default class SlideController extends BaseController {
             const { id } = req.params;
 
             const slide = await this.slideService.getSlideById(id);
-            
+
             if (!slide) {
                 return this.sendError(res, 'Slide not found', 404);
             }
@@ -83,13 +98,18 @@ export default class SlideController extends BaseController {
             const updateData = req.body;
             const updatedBy = req.user?.id;
 
-            const slide = await this.slideService.updateSlide(id, {
-                ...updateData,
+            const slide = await this.slideService.updateSlide(id,
+                updateData,
                 updatedBy
-            });
+            );
 
             if (!slide) {
                 return this.sendError(res, 'Slide not found', 404);
+            }
+
+            if (slide.isActive === false && updateData.published === true){
+                return this.sendError(res, 'Cannot publish inactive slide')
+
             }
 
             return this.sendSuccess(res, slide, 'Slide updated successfully');

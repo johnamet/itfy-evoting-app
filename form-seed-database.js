@@ -453,6 +453,15 @@ class DatabaseSeeder {
             this.createdData.categories.push(saved);
             console.log(`  ✓ Category: ${saved.name}`);
         }
+
+        for (const c of this.createdData.categories){
+            for (const e of this.createdData.events){
+                if (c.event.toString() === e._id.toString()){
+                    e.categories.push(c._id);
+                    await e.save();
+                }
+            }
+        }
     }
 
     async seedCandidates() {
@@ -499,7 +508,8 @@ class DatabaseSeeder {
                 isActive: true,
                 isDeleted: false,
                 votes: [],
-                nominatedBy: "John Mensah"
+                nominatedBy: "John Mensah",
+                password: 'candidate123'
             },
             {
                 name: 'Kwame Owusu',
@@ -540,7 +550,8 @@ class DatabaseSeeder {
                 isActive: true,
                 isDeleted: false,
                 votes: [],
-                nominatedBy: "Jane Doe"
+                nominatedBy: "Jane Doe",
+                password: 'candidate123'
             },
             {
                 name: 'Akua Addo',
@@ -581,7 +592,8 @@ class DatabaseSeeder {
                 isActive: true,
                 isDeleted: false,
                 votes: [],
-                nominatedBy: "John Mensah"
+                nominatedBy: "John Mensah",
+                password: 'candidate123'
             }
         ];
 
@@ -703,7 +715,7 @@ class DatabaseSeeder {
             {
                 title: `${cat1.name} Nomination`,
                 description: 'Form for nominating candidates for the Best Startup Founder category',
-                model: 'category',
+                model: 'Category',
                 modelId: cat1._id,
                 fields: [
                     { label: 'Nominee Full Name', type: 'text', required: true, options: [] },

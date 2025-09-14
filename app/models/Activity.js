@@ -13,8 +13,14 @@ class Activity extends BaseModel{
         const schemaDefinition = {
             user: {
                 type: mongoose.Schema.Types.ObjectId,
-                ref: 'User',
+                refPath: 'userModel',
                 required: false, // Made optional to support anonymous site visits
+            },
+            userModel: {
+                type: String,
+                default: 'User',
+                enum: ['User', 'Candidate'],
+                required: false
             },
             action: {
                 type: String,
@@ -24,7 +30,7 @@ class Activity extends BaseModel{
             targetType: {
                 type: String,
                 required: true,
-                enum: ['user', 'candidate', 'event', 'votebundle', 'coupon', 'site']
+                enum: ['user', 'candidate', 'event', 'votebundle', 'coupon', 'site', 'category', 'slide', 'form']
             },
             targetId: {
                 type: mongoose.Schema.Types.ObjectId,

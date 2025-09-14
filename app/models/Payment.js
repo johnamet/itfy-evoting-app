@@ -202,7 +202,7 @@ class Payment extends BaseModel {
             },
             expiresAt: {
                 type: Date,
-                required: true,
+                required: false, // Allow null for successful payments
                 default: () => new Date(Date.now() + 15 * 60 * 1000) // 15 minutes from now
             },
             verified: {
@@ -239,6 +239,8 @@ class Payment extends BaseModel {
         schema.pre('save', function(next) {
             if (this.isModified('status') && this.status === 'success') {
                 this.paidAt = new Date();
+                // Remove expiration for successful payments to prevent auto-deletion
+                this.expiresAt = undefined;
             }
             next();
         });

@@ -62,7 +62,7 @@ class EmailService extends BaseService {
         this.emailQueue = [];
         this.isProcessingQueue = false;
         this.rateLimitDelay = parseInt(process.env.EMAIL_RATE_LIMIT_MS) || 1000; // 1 second between emails
-        this._initializeTransporter();
+        // this._initializeTransporter();
     }
 
     /**

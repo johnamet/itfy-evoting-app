@@ -96,7 +96,20 @@ class AnalyticsService extends BaseService {
     }
 
     async computeAndUpdate(analytics, startDate, endDate) {
-        const method = `compute${analytics.type.charAt(0).toUpperCase() + analytics.type.slice(1)}Analytics`;
+        // Map analytics types to repository method names
+        const methodMap = {
+            'voting': 'computeVotingAnalytics',
+            'payments': 'computePaymentAnalytics', // Note: singular 'Payment' in repository
+            'overview': 'computeOverviewAnalytics',
+            'anomaly': 'computeAnomalyAnalytics',
+            'forecasts': 'computeForecasts'
+        };
+        
+        const method = methodMap[analytics.type];
+        if (!method || !this.repository[method]) {
+            throw new Error(`Analytics method for type '${analytics.type}' not found`);
+        }
+        
         const data = await this.repository[method](startDate, endDate, analytics.references.event);
         Object.assign(analytics, data);
         await analytics.markCompleted(data.metadata.computationTime);
@@ -161,7 +174,7 @@ class AnalyticsService extends BaseService {
             }
             return { success: true, data: analytics.data.payments, metadata: analytics.metadata, cached: false };
         } catch (error) {
-            console.error('Error getting payment analytics:', error);
+            console.error('Error getting payments analytics:', error);
             return { success: false, error: error.message };
         }
     }

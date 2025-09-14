@@ -388,26 +388,10 @@ class EventRepository extends BaseRepository {
                 {
                     $addFields: {
                         totalVotes: {
-                            $sum: {
-                                $map: {
-                                    input: '$votes',
-                                    as: 'voteDoc',
-                                    in: {
-                                        $sum: {
-                                            $map: {
-                                                input: '$$voteDoc.voteBundles',
-                                                as: 'bundle',
-                                                in: {
-                                                    $sum: '$$bundle.votes'
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            $sum: 1
                         },
                         candidateCount: { $size: '$candidates' },
-                        categoryCount: { $size: { $setUnion: ['$candidates.category'] } }
+                        categoryCount: { $size: '$categories' }
                     }
                 },
                 {

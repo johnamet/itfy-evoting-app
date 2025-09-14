@@ -7,6 +7,7 @@
 
 import BaseModel from './BaseModel.js';
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 
 
 class Candidate extends BaseModel {
@@ -34,7 +35,7 @@ class Candidate extends BaseModel {
             },
             isActive: {
                 type: Boolean,
-                default: true
+                default: false
             },
             isDeleted: {
                 type: Boolean,
@@ -51,7 +52,8 @@ class Candidate extends BaseModel {
             },
             status: {
                 type: String,
-                default: "pending"
+                default: "draft",
+                enum: ["draft", "pending", "approved", "rejected"]
             },
             event: {
                 type: mongoose.Schema.Types.ObjectId,
@@ -108,17 +110,41 @@ class Candidate extends BaseModel {
                 unique: true,
                 trim: true,
                 index: true // Index for faster lookups
-            }
+            },
+            password: {
+                type: String,
+                required: true,
+                trim: true
+            },
+            lastLogin: {
+                type: Date,
+                default: null
+            },
+            
         };
 
-        super(schemaDefinition, {collection: "candidates"});
+        super(schemaDefinition, { collection: "candidates" });
 
-        this.schema.pre('save', function(next) {
+        // Instance method to verify token
+        this.schema.methods.verifyToken = async function (password) {
+            return await bcrypt.compare(password, this.password);
+        };
+
+        this.schema.pre('save', async function (next) { 
+            if (!this.isModified('password'));
+            try {
+                const saltRounds = 12;
+                this.password = await bcrypt.hash(this.password, saltRounds);
+            } catch (error) {
+                next(error);
+            }
             if (!this.isModified('cId')) return next();
 
             // Ensure cId is unique and properly formatted
             this.cId = this.cId.trim().toUpperCase();
             next();
+
+           
         });
     }
 

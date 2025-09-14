@@ -10,12 +10,14 @@ import BaseService from './BaseService.js';
 import ActivityRepository from '../repositories/ActivityRepository.js';
 import UserRepository from '../repositories/UserRepository.js';
 import CacheService from './CacheService.js';
+import CandidateRepository from '../repositories/CandidateRepository.js';
 
 class ActivityService extends BaseService {
     constructor() {
         super();
         this.activityRepository = new ActivityRepository();
         this.userRepository = new UserRepository();
+        this.candidateRepository = new CandidateRepository()
     }
 
     /**
@@ -35,8 +37,15 @@ class ActivityService extends BaseService {
             this._validateRequiredFields(activityData, ['user', 'action']);
             this._validateObjectId(activityData.user, 'User ID');
 
+            let user;
             // Verify user exists
-            const user = await this.userRepository.findById(activityData.user);
+            if (activityData.userModel === 'User') {
+                user = await this.userRepository.findById(activityData.user);
+            }
+
+            if (activityData.userModel === 'Candidate') {
+                user = await this.candidateRepository.findById(activityData.user)
+            }
             if (!user) {
                 throw new Error('User not found');
             }
@@ -52,6 +61,7 @@ class ActivityService extends BaseService {
                 action: activityData.action,
                 targetType: activityData.targetType || null,
                 targetId: activityData.targetId || null,
+                userModel: activityData.userModel,
                 metadata: {
                     ipAddress: activityData.ipAddress || 'Unknown',
                     userAgent: activityData.userAgent || 'Unknown',
@@ -88,10 +98,10 @@ class ActivityService extends BaseService {
      * Log Site Visits
      */
 
-    async logVisit(userId = null, page = 'homepage', metadata={}){
-        try{
+    async logVisit(userId = null, page = 'homepage', metadata = {}) {
+        try {
             const siteVisits = await this.activityRepository.trackSiteVisit(userId, page, metadata)
-        }catch(err){
+        } catch (err) {
             throw this._handleError(err, 'log_visit')
         }
     }

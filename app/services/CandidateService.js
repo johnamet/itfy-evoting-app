@@ -28,6 +28,127 @@ class CandidateService extends BaseService {
     }
 
     /**
+     * Generate a unique candidate ID (cId) based on event, category, and sequence number
+     * Format: XXX#### (3 letters + 4 digits)
+     * @param {String} eventId - Event ID
+     * @param {String} primaryCategoryId - Primary category ID (first category)
+     * @returns {Promise<String>} Generated cId
+     */
+    async generateCandidateId(eventId, primaryCategoryId) {
+        try {
+            this._log('generate_candidate_id', { eventId, primaryCategoryId });
+
+            // Get event and category details
+            const [event, category] = await Promise.all([
+                this.eventRepository.findById(eventId),
+                this.categoryRepository.findById(primaryCategoryId)
+            ]);
+
+            if (!event) {
+                throw new Error('Event not found');
+            }
+
+            if (!category) {
+                throw new Error('Category not found');
+            }
+
+            // Generate 3-letter prefix from event and category names
+            const eventPrefix = this._extractPrefix(event.name, 2);
+            const categoryPrefix = this._extractPrefix(category.name, 1);
+            const letterPrefix = (eventPrefix + categoryPrefix).toUpperCase();
+
+            // Count existing candidates for this event to determine sequence number
+            const candidateCount = await this.candidateRepository.countDocuments({
+                event: eventId
+            });
+
+            // Generate 4-digit sequence number (starting from 0001)
+            const sequenceNumber = (candidateCount + 1).toString().padStart(4, '0');
+
+            const cId = letterPrefix + sequenceNumber;
+
+            // Ensure the generated cId is unique (in case of edge cases)
+            const existingCandidate = await this.candidateRepository.findByCId(cId);
+            if (existingCandidate) {
+                // If collision occurs, use timestamp-based fallback
+                const timestamp = Date.now().toString().slice(-4);
+                const fallbackCId = letterPrefix + timestamp;
+
+                this._log('generate_candidate_id_collision', {
+                    originalCId: cId,
+                    fallbackCId
+                });
+
+                return fallbackCId;
+            }
+
+            this._log('generate_candidate_id_success', {
+                cId,
+                eventName: event.name,
+                categoryName: category.name,
+                sequenceNumber
+            });
+
+            return cId;
+        } catch (error) {
+            throw this._handleError(error, 'generate_candidate_id', {
+                eventId,
+                primaryCategoryId
+            });
+        }
+    }
+
+    /**
+     * Extract prefix letters from a name
+     * @private
+     * @param {String} name - Name to extract from
+     * @param {Number} length - Number of characters to extract
+     * @returns {String} Extracted prefix
+     */
+    _extractPrefix(name, length) {
+        if (!name || typeof name !== 'string') {
+            return 'X'.repeat(length);
+        }
+
+        // Remove common words and clean the name
+        const cleanName = name
+            .replace(/\b(the|and|of|for|in|on|at|to|a|an)\b/gi, '')
+            .replace(/[^a-zA-Z\s]/g, '')
+            .trim();
+
+        // Split into words and take first letters
+        const words = cleanName.split(/\s+/).filter(word => word.length > 0);
+
+        if (words.length === 0) {
+            return 'X'.repeat(length);
+        }
+
+        let prefix = '';
+
+        // Take first letter of each word
+        for (let i = 0; i < words.length && prefix.length < length; i++) {
+            if (words[i].length > 0) {
+                prefix += words[i][0].toUpperCase();
+            }
+        }
+
+        // If we don't have enough letters, pad with additional letters from first word
+        if (prefix.length < length && words[0]) {
+            const firstWord = words[0].toUpperCase();
+            for (let i = 1; i < firstWord.length && prefix.length < length; i++) {
+                prefix += firstWord[i];
+            }
+        }
+
+        // If still not enough, pad with 'X'
+        while (prefix.length < length) {
+            prefix += 'X';
+        }
+
+        return prefix.substring(0, length);
+    }
+
+    /**
      * Create a new candidate
      * @param {Object} candidateData - Candidate data
      * @param {String} createdBy - ID of user creating the candidate
@@ -35,22 +156,22 @@ class CandidateService extends BaseService {
      */
     async createCandidate(candidateData, createdBy) {
         try {
-            this._log('create_candidate', { 
-                name: candidateData.name, 
+            this._log('create_candidate', {
+                name: candidateData.name,
                 event: candidateData.event,
-                createdBy 
+                createdBy
             });
 
             // Validate required fields
             this._validateRequiredFields(candidateData, ['name', 'event', 'categories']);
             this._validateObjectId(candidateData.event, 'Event ID');
             this._validateObjectId(createdBy, 'Created By User ID');
-            
+
             // Validate categories array
             if (!Array.isArray(candidateData.categories) || candidateData.categories.length === 0) {
                 throw new Error('Categories must be a non-empty array');
             }
-            
+
             // Validate each category ID
             for (const categoryId of candidateData.categories) {
                 this._validateObjectId(categoryId, 'Category ID');
@@ -66,10 +187,6 @@ class CandidateService extends BaseService {
                 throw new Error('Cannot add candidates to completed event');
             }
 
-            if (event.status === 'active') {
-                throw new Error('Cannot add candidates to active event');
-            }
-
             // Validate candidate name length and format
             if (candidateData.name.trim().length < 2) {
                 throw new Error('Candidate name must be at least 2 characters long');
@@ -79,38 +196,47 @@ class CandidateService extends BaseService {
                 throw new Error('Candidate name must be less than 100 characters');
             }
 
+            // Generate unique candidate ID (cId)
+            const cId = await this.generateCandidateId(
+                candidateData.event,
+                candidateData.categories[0] // Use first category as primary
+            );
+
             // Create candidate
             const candidateToCreate = {
                 ...this._sanitizeData(candidateData),
                 name: candidateData.name.trim(),
+                cId: cId,
                 createdBy,
                 createdAt: new Date()
             };
-
             const candidate = await this.candidateRepository.createCandidate(candidateToCreate);
 
             // Log activity
             await this.activityRepository.logActivity({
                 user: createdBy,
-                action: 'candidate_create',
+                action: 'create',
                 targetType: 'candidate',
                 targetId: candidate._id,
-                metadata: { 
+                metadata: {
                     candidateName: candidate.name,
+                    candidateCId: candidate.cId,
                     eventId: candidate.event,
                     categoryIds: candidate.categories
                 }
             });
 
-            this._log('create_candidate_success', { 
-                candidateId: candidate._id, 
-                name: candidate.name 
+            this._log('create_candidate_success', {
+                candidateId: candidate._id,
+                name: candidate.name,
+                cId: candidate.cId
             });
 
             return {
                 success: true,
                 candidate: {
                     id: candidate._id,
+                    cId: candidate.cId,
                     name: candidate.name,
                     bio: candidate.bio,
                     image: candidate.image,
@@ -120,9 +246,9 @@ class CandidateService extends BaseService {
                 }
             };
         } catch (error) {
-            throw this._handleError(error, 'create_candidate', { 
+            throw this._handleError(error, 'create_candidate', {
                 name: candidateData.name,
-                event: candidateData.event 
+                event: candidateData.event
             });
         }
     }
@@ -134,19 +260,25 @@ class CandidateService extends BaseService {
      * @param {String} updatedBy - ID of user updating the candidate
      * @returns {Promise<Object>} Updated candidate
      */
-    async updateCandidate(candidateId, updateData, updatedBy) {
+    async updateCandidate(candidateId, updateData, updatedBy, isAdmin = true) {
         try {
             this._log('update_candidate', { candidateId, updatedBy });
 
             this._validateObjectId(candidateId, 'Candidate ID');
             this._validateObjectId(updatedBy, 'Updated By User ID');
 
+            // If not admin, ensure candidate is updating their own profile
+            if (!isAdmin){
+                const isMatched = candidateId.toString() === updatedBy.toString();
+                if (!isMatched){
+                    throw new Error('Candidates can only update their own profile');
+                }
+            }
             // Get current candidate
             const currentCandidate = await this.candidateRepository.findById(candidateId);
             if (!currentCandidate) {
                 throw new Error('Candidate not found');
             }
-
             // Check if associated event allows updates
             const event = await this.eventRepository.findById(currentCandidate.event);
             if (event.status === 'completed') {
@@ -169,7 +301,7 @@ class CandidateService extends BaseService {
                 if (!Array.isArray(updateData.categories) || updateData.categories.length === 0) {
                     throw new Error('Categories must be a non-empty array');
                 }
-                
+
                 // Validate each category ID
                 for (const categoryId of updateData.categories) {
                     this._validateObjectId(categoryId, 'Category ID');
@@ -178,14 +310,18 @@ class CandidateService extends BaseService {
 
             // Sanitize update data
             const sanitizedData = this._sanitizeData(updateData);
-            
+
             // Remove fields that shouldn't be updated
             delete sanitizedData.event;
             delete sanitizedData._id;
             delete sanitizedData.createdAt;
             delete sanitizedData.createdBy;
-            
+
             sanitizedData.updatedAt = new Date();
+
+            if (!isAdmin){
+                sanitizedData.status = "pending"
+            }
 
             // Update candidate
             const updatedCandidate = await this.candidateRepository.updateById(candidateId, sanitizedData);
@@ -193,10 +329,11 @@ class CandidateService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: updatedBy,
-                action: 'candidate_update',
+                userModel: isAdmin ? 'User' : 'Candidate',
+                action: 'update',
                 targetType: 'candidate',
                 targetId: candidateId,
-                metadata: { 
+                metadata: {
                     candidateName: updatedCandidate.name,
                     updatedFields: Object.keys(sanitizedData)
                 }
@@ -259,7 +396,7 @@ class CandidateService extends BaseService {
                 action: 'candidate_delete',
                 targetType: 'candidate',
                 targetId: candidateId,
-                metadata: { 
+                metadata: {
                     candidateName: candidate.name,
                     eventId: candidate.event,
                     categoryIds: candidate.categories
@@ -299,6 +436,33 @@ class CandidateService extends BaseService {
             };
         } catch (error) {
             throw this._handleError(error, 'get_candidate_by_id', { candidateId });
+        }
+    }
+
+    /**
+     * Get candidate by cId
+     * @param {String} candidateId - Candidate cId
+     * @returns {Promise<Object>} Candidate with statistics
+     */
+    async findByCId(candidateId) {
+        try {
+            this._log('find_by_cid', { candidateId });
+
+            if (!candidateId || typeof candidateId !== 'string') {
+                throw new Error('Valid candidate cId is required');
+            }
+
+            const candidate = await this.candidateRepository.findByCId(candidateId);
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            return {
+                success: true,
+                candidate
+            };
+        } catch (error) {
+            throw this._handleError(error, 'find_by_cid', { candidateId });
         }
     }
 
@@ -362,6 +526,7 @@ class CandidateService extends BaseService {
         }
     }
 
+
     /**
      * Get all candidates with optional search and pagination
      * @param {Object} query - Query parameters
@@ -372,7 +537,7 @@ class CandidateService extends BaseService {
             this._log('get_candidates', { query });
 
             // Validate pagination parameters
-            const {page, limit } = this._generatePaginationOptions(
+            const { page, limit } = this._generatePaginationOptions(
                 query.page,
                 query.limit,
                 50
@@ -391,17 +556,27 @@ class CandidateService extends BaseService {
                     populate: [
                         {
                             path: 'event',
-                            select: 'name date location'
+                            select: 'name startDate location'
                         },
                         {
                             path: 'categories',
-                            select: 'id name votingDeadline'
+                            select: 'id name votingDeadline event'
+                        },
+                        {
+                            path: 'votes',
+                            select: 'voteBundles',
+                            populate: [
+                                {
+                                    path: 'voteBundles',
+                                    select: 'votes category'
+                                }
+                            ]
                         }
                     ]
                 }
             );
 
-            const total =  await this.candidateRepository.countDocuments(filter);
+            const total = await this.candidateRepository.countDocuments(filter);
 
             return {
                 success: true,
@@ -430,7 +605,7 @@ class CandidateService extends BaseService {
             }
 
             const candidates = await this.candidateRepository.searchCandidatesByName(
-                searchTerm, 
+                searchTerm,
                 options
             );
 
@@ -484,12 +659,24 @@ class CandidateService extends BaseService {
             const votes = await this.voteRepository.getVotesByCandidate(candidateId);
             const voteCount = votes.length;
 
+            // group votes by categories
+            const votesByCategory = votes.reduce((acc, vote) => {
+                vote.voteBundles.forEach(bundle => {
+                    if (!acc[vote.category.name]) {
+                        acc[vote.category.name] = 0;
+                    }
+                    acc[vote.category.name] += bundle.votes;
+                });
+                return acc;
+            }, {});
+
             const votesCast = votes.reduce((sum, vote) => sum + vote.voteBundles.reduce((bundleSum, bundle) => bundleSum + bundle.votes, 0), 0);
 
             console.log("Candidate Statistics", votesCast, voteCount)
 
             statistics.totalVotes = votesCast;
             statistics.votesCast = voteCount;
+            statistics.votesByCategory = votesByCategory;
 
             return {
                 success: true,
@@ -511,7 +698,7 @@ class CandidateService extends BaseService {
     async getCandidateStats(candidateId) {
         try {
             this._log('get_candidate_stats', { candidateId });
-            
+
             // Use the existing getCandidateStatistics method
             return await this.getCandidateStatistics(candidateId);
         } catch (error) {
@@ -527,9 +714,9 @@ class CandidateService extends BaseService {
      */
     async bulkCreateCandidates(candidatesData, createdBy) {
         try {
-            this._log('bulk_create_candidates', { 
-                count: candidatesData.length, 
-                createdBy 
+            this._log('bulk_create_candidates', {
+                count: candidatesData.length,
+                createdBy
             });
 
             this._validateObjectId(createdBy, 'Created By User ID');
@@ -542,12 +729,12 @@ class CandidateService extends BaseService {
             for (const candidateData of candidatesData) {
                 this._validateRequiredFields(candidateData, ['name', 'event', 'categories']);
                 this._validateObjectId(candidateData.event, 'Event ID');
-                
+
                 // Validate categories array
                 if (!Array.isArray(candidateData.categories) || candidateData.categories.length === 0) {
                     throw new Error(`Categories must be a non-empty array for candidate: ${candidateData.name}`);
                 }
-                
+
                 // Validate each category ID
                 for (const categoryId of candidateData.categories) {
                     this._validateObjectId(categoryId, 'Category ID');
@@ -569,19 +756,19 @@ class CandidateService extends BaseService {
             for (const candidate of result.success) {
                 await this.activityRepository.logActivity({
                     user: createdBy,
-                    action: 'candidate_bulk_create',
+                    action: 'create',
                     targetType: 'candidate',
                     targetId: candidate._id,
-                    metadata: { 
+                    metadata: {
                         candidateName: candidate.name,
                         batchSize: candidatesData.length
                     }
                 });
             }
 
-            this._log('bulk_create_candidates_success', { 
+            this._log('bulk_create_candidates_success', {
                 successCount: result.successCount,
-                errorCount: result.errorCount 
+                errorCount: result.errorCount
             });
 
             return {
@@ -589,8 +776,8 @@ class CandidateService extends BaseService {
                 data: result
             };
         } catch (error) {
-            throw this._handleError(error, 'bulk_create_candidates', { 
-                count: candidatesData.length 
+            throw this._handleError(error, 'bulk_create_candidates', {
+                count: candidatesData.length
             });
         }
     }
@@ -604,10 +791,10 @@ class CandidateService extends BaseService {
      */
     async addCategoryToCandidate(candidateId, categoryId, updatedBy) {
         try {
-            this._log('add_category_to_candidate', { 
-                candidateId, 
-                categoryId, 
-                updatedBy 
+            this._log('add_category_to_candidate', {
+                candidateId,
+                categoryId,
+                updatedBy
             });
 
             this._validateObjectId(candidateId, 'Candidate ID');
@@ -637,10 +824,6 @@ class CandidateService extends BaseService {
                 throw new Error('Associated event not found');
             }
 
-            if (event.status === 'active') {
-                throw new Error('Cannot modify candidate categories in active event');
-            }
-
             if (event.status === 'completed') {
                 throw new Error('Cannot modify candidate categories in completed event');
             }
@@ -654,6 +837,9 @@ class CandidateService extends BaseService {
             if (category.event.toString() !== candidate.event.toString()) {
                 throw new Error('Category must belong to the same event');
             }
+            if (candidate.status === 'rejected') {
+                throw new Error('Cannot modify categories for rejected candidate');
+            }
 
             // Add category to candidate
             const updatedCategories = [...candidate.categories, categoryId];
@@ -665,10 +851,10 @@ class CandidateService extends BaseService {
             // Log activity
             await this.activityRepository.logActivity({
                 user: updatedBy,
-                action: 'candidate_category_add',
+                action: 'update',
                 targetType: 'candidate',
                 targetId: candidateId,
-                metadata: { 
+                metadata: {
                     candidateName: candidate.name,
                     eventId: candidate.event,
                     addedCategoryId: categoryId,
@@ -677,7 +863,7 @@ class CandidateService extends BaseService {
                 }
             });
 
-            this._log('add_category_to_candidate_success', { 
+            this._log('add_category_to_candidate_success', {
                 candidateId,
                 categoryAdded: category.name,
                 totalCategories: updatedCategories.length
@@ -698,9 +884,9 @@ class CandidateService extends BaseService {
                 }
             };
         } catch (error) {
-            throw this._handleError(error, 'add_category_to_candidate', { 
-                candidateId, 
-                categoryId 
+            throw this._handleError(error, 'add_category_to_candidate', {
+                candidateId,
+                categoryId
             });
         }
     }
@@ -714,10 +900,10 @@ class CandidateService extends BaseService {
      */
     async removeCategoryFromCandidate(candidateId, categoryId, updatedBy) {
         try {
-            this._log('remove_category_from_candidate', { 
-                candidateId, 
-                categoryId, 
-                updatedBy 
+            this._log('remove_category_from_candidate', {
+                candidateId,
+                categoryId,
+                updatedBy
             });
 
             this._validateObjectId(candidateId, 'Candidate ID');
@@ -776,7 +962,7 @@ class CandidateService extends BaseService {
                 action: 'candidate_category_remove',
                 targetType: 'candidate',
                 targetId: candidateId,
-                metadata: { 
+                metadata: {
                     candidateName: candidate.name,
                     eventId: candidate.event,
                     removedCategoryId: categoryId,
@@ -785,7 +971,7 @@ class CandidateService extends BaseService {
                 }
             });
 
-            this._log('remove_category_from_candidate_success', { 
+            this._log('remove_category_from_candidate_success', {
                 candidateId,
                 categoryRemoved: category ? category.name : 'Unknown',
                 totalCategories: updatedCategories.length
@@ -806,9 +992,9 @@ class CandidateService extends BaseService {
                 }
             };
         } catch (error) {
-            throw this._handleError(error, 'remove_category_from_candidate', { 
-                candidateId, 
-                categoryId 
+            throw this._handleError(error, 'remove_category_from_candidate', {
+                candidateId,
+                categoryId
             });
         }
     }
@@ -855,8 +1041,8 @@ class CandidateService extends BaseService {
 
             // Upload new image
             const uploadResult = await this.fileService.uploadCandidateImage(
-                imageData, 
-                candidateId, 
+                imageData,
+                candidateId,
                 updatedBy
             );
 
@@ -888,7 +1074,7 @@ class CandidateService extends BaseService {
                 action: 'candidate_photo_update',
                 targetType: 'candidate',
                 targetId: candidateId,
-                metadata: { 
+                metadata: {
                     candidateName: candidate.name,
                     eventId: candidate.event,
                     oldImage: candidate.image,
@@ -898,7 +1084,7 @@ class CandidateService extends BaseService {
                 }
             });
 
-            this._log('update_candidate_photo_success', { 
+            this._log('update_candidate_photo_success', {
                 candidateId,
                 newImagePath: uploadResult.image.relativePath
             });
@@ -984,7 +1170,7 @@ class CandidateService extends BaseService {
                 action: 'candidate_photo_remove',
                 targetType: 'candidate',
                 targetId: candidateId,
-                metadata: { 
+                metadata: {
                     candidateName: candidate.name,
                     eventId: candidate.event,
                     removedImage: candidate.image,
@@ -992,7 +1178,7 @@ class CandidateService extends BaseService {
                 }
             });
 
-            this._log('remove_candidate_photo_success', { 
+            this._log('remove_candidate_photo_success', {
                 candidateId,
                 removedImagePath: candidate.image
             });
@@ -1030,28 +1216,36 @@ class CandidateService extends BaseService {
                 throw new Error('Candidate not found');
             }
 
+            const votes = await this.voteRepository.getVotesByCandidate(candidateId);
+
             // Get votes grouped by category for this candidate
             const votesByCategory = await this.voteRepository.getVoteCountsForCandidate(candidateId);
-            
+
+            console.log(votesByCategory)
             // Calculate total votes across all categories
             let totalVotes = 0;
+            let totalVotesCast = 0;
             const categoryBreakdown = [];
 
             for (const categoryVote of votesByCategory) {
                 totalVotes += categoryVote.voteCount;
+                totalVotesCast += categoryVote.votesCast;
                 categoryBreakdown.push({
                     categoryId: categoryVote.categoryId,
                     categoryName: categoryVote.categoryName,
-                    voteCount: categoryVote.voteCount
+                    voteCount: categoryVote.voteCount,
+                    votesCast: categoryVote.votesCast
                 });
             }
 
             return {
                 success: true,
                 data: {
+                    votes,
                     candidateId: candidateId,
                     candidateName: candidate.name,
                     totalVotes: totalVotes,
+                    totalVotesCast: totalVotesCast,
                     categoryBreakdown: categoryBreakdown,
                     generatedAt: new Date()
                 }
@@ -1070,11 +1264,11 @@ class CandidateService extends BaseService {
      * @returns {Error} - Formatted error
      */
     _handleError(error, context, data) {
-        this._log('error', { 
-            message: error.message, 
-            stack: error.stack, 
-            context, 
-            data 
+        this._log('error', {
+            message: error.message,
+            stack: error.stack,
+            context,
+            data
         });
 
         return new Error(`Error in ${context}: ${error.message}`);

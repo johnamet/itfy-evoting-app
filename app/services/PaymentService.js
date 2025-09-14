@@ -714,6 +714,7 @@ class PaymentService extends BaseService {
             const updatedPayment = await this.paymentRepository.updatePaymentStatus(reference, {
                 status: 'success',
                 paidAt: new Date(data.paid_at),
+                expiresAt: null,
                 paystackData: {
                     transaction_id: data.id,
                     gateway_response: data.gateway_response,

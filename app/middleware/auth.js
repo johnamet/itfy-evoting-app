@@ -42,11 +42,16 @@ const verifyToken = (token) => {
             throw new Error('Token missing user identifier');
         }
 
-        return {
+        return !decoded.cId ? {
             id: decoded.sub || decoded.userId || decoded.id,
             email: decoded.email,
             role: decoded.role || 'user',
             roleLevel: decoded.roleLevel || 0, // Default to lowest level
+            ...decoded
+        } : {
+            id: decoded.sub || decoded.userId || decoded.id,
+            email: decoded.email,
+            cId: decoded.cId,
             ...decoded
         };
     } catch (error) {
@@ -66,9 +71,9 @@ export const authenticate = (req, res, next) => {
             const devUserId = req.headers['x-dev-user-id'];
             const devUserLevel = parseInt(req.headers['x-dev-user-level']) || 4; // Default to max level in dev
             if (devUserId) {
-                req.user = { 
-                    id: devUserId, 
-                    role: 'admin', 
+                req.user = {
+                    id: devUserId,
+                    role: 'admin',
                     roleLevel: devUserLevel,
                     email: `${devUserId}@dev.local`
                 };
@@ -123,9 +128,9 @@ export const optionalAuth = (req, res, next) => {
         if (process.env.NODE_ENV === 'development') {
             const devUserId = req.headers['x-dev-user-id'];
             if (devUserId) {
-                req.user = { 
-                    id: devUserId, 
-                    role: 'admin', 
+                req.user = {
+                    id: devUserId,
+                    role: 'admin',
                     roleLevel: 1000, // Highest level for admin in dev mode
                     email: `${devUserId}@dev.local`
                 };
@@ -138,13 +143,14 @@ export const optionalAuth = (req, res, next) => {
         if (authHeader && authHeader.startsWith('Bearer ')) {
             const token = authHeader.substring(7);
             const user = verifyToken(token);
-            
+
             if (user) {
                 req.user = user;
                 req.userId = user.id;
+                req.cId = user.cId ? user.cId : null;
             }
         }
-        
+
         // Continue regardless of authentication status
         next();
     } catch (error) {
@@ -171,7 +177,7 @@ export const requireLevel = (requiredLevel, operation = 'read') => {
         }
 
         const userLevel = req.user.role.level || 1; // Default to level 1 (read only)
-        
+
         // Check if user level meets the required level
         if (userLevel < requiredLevel) {
             return res.status(403).json({
@@ -216,12 +222,12 @@ export const authorize = (requiredRoles = []) => {
 
         const userRole = req.user.role.name || 'user';
         const userLevel = req.user.role.level || 1;
-        
+
         // Check if user has required role or sufficient level
-        const hasRequiredRole = requiredRoles.includes(userRole) || 
-                               userRole === 'admin' ||
-                               userLevel >= 4; // Level 4 has all permissions
-        
+        const hasRequiredRole = requiredRoles.includes(userRole) ||
+            userRole === 'admin' ||
+            userLevel >= 4; // Level 4 has all permissions
+
         if (!hasRequiredRole) {
             return res.status(403).json({
                 success: false,
@@ -245,22 +251,22 @@ const checkOperationPermission = (userLevel, operation) => {
     if (userLevel === 1) {
         return operation === 'read';
     }
-    
+
     // Level 2: Read and Update
     if (userLevel === 2) {
         return ['read', 'update'].includes(operation);
     }
-    
+
     // Level 3: Create, Read, Update
     if (userLevel === 3) {
         return ['create', 'read', 'update'].includes(operation);
     }
-    
+
     // Level 4: Create, Read, Update, Delete (all operations)
     if (userLevel >= 4) {
         return true;
     }
-    
+
     return false;
 };
 
@@ -288,7 +294,7 @@ export const requireOperations = (requiredOperations = [], minLevel = 1) => {
         }
 
         const userLevel = req.user.role.level || 1;
-        
+
         // Check minimum level requirement
         if (userLevel < minLevel) {
             return res.status(403).json({
@@ -299,15 +305,15 @@ export const requireOperations = (requiredOperations = [], minLevel = 1) => {
         }
 
         // Check if user can perform all required operations
-        const canPerformAll = requiredOperations.every(operation => 
+        const canPerformAll = requiredOperations.every(operation =>
             checkOperationPermission(userLevel, operation)
         );
-        
+
         if (!canPerformAll) {
-            const disallowedOps = requiredOperations.filter(op => 
+            const disallowedOps = requiredOperations.filter(op =>
                 !checkOperationPermission(userLevel, op)
             );
-            
+
             return res.status(403).json({
                 success: false,
                 error: 'Insufficient permissions',

@@ -197,45 +197,71 @@ class VoteRepository extends BaseRepository {
     }
 
     /**
-     * Retrieves vote counts for a specific candidate across all categories
-     * @param {mongoose.Types.ObjectId|string} candidateId - The candidate ID.
-     * @returns {Promise<Array>} Vote counts grouped by category for the candidate.
-     * @throws {Error} If the operation encounters an error.
-     */
+   * Retrieves vote counts for a specific candidate across all categories
+   * @param {mongoose.Types.ObjectId|string} candidateId - The candidate ID.
+   * @returns {Promise<Array>} Vote counts grouped by category for the candidate.
+   * @throws {Error} If the operation encounters an error.
+   */
     async getVoteCountsForCandidate(candidateId) {
         try {
             const pipeline = [
+                // Match candidate votes
                 { $match: { candidate: new mongoose.Types.ObjectId(candidateId) } },
-                {
-                    $group: {
-                        _id: '$category',
-                        voteCount: { $sum: 1 }
-                    }
-                },
+
+                // Expand voteBundles
+                { $unwind: "$voteBundles" },
+
+                // Lookup bundle details
                 {
                     $lookup: {
-                        from: 'categories',
-                        localField: '_id',
-                        foreignField: '_id',
-                        as: 'categoryInfo'
+                        from: "voteBundles",
+                        localField: "voteBundles",
+                        foreignField: "_id",
+                        as: "bundle"
                     }
                 },
+                { $unwind: "$bundle" },
+
+                // Group by category and sum votes
+                {
+                    $group: {
+                        _id: "$category",
+                        votesCast: { $sum: "$bundle.votes" },
+                        voteCount: { $sum: 1 } // count of bundles linked
+                    }
+                },
+
+                // Lookup category info
+                {
+                    $lookup: {
+                        from: "categories",
+                        localField: "_id",
+                        foreignField: "_id",
+                        as: "categoryInfo"
+                    }
+                },
+                { $unwind: "$categoryInfo" },
+
+                // Final projection
                 {
                     $project: {
-                        categoryId: '$_id',
-                        categoryName: { $arrayElemAt: ['$categoryInfo.name', 0] },
+                        _id: 0,
+                        categoryId: "$_id",
+                        categoryName: "$categoryInfo.name",
                         voteCount: 1,
-                        _id: 0
+                        votesCast: 1
                     }
                 },
+
                 { $sort: { categoryName: 1 } }
             ];
 
             return await this.aggregate(pipeline);
         } catch (error) {
-            throw this._handleError(error, 'getVoteCountsForCandidate');
+            throw this._handleError(error, "getVoteCountsForCandidate");
         }
     }
+
 
     /**
      * Decrements votes for a specific candidate by removing a specified number of votes.
@@ -256,7 +282,7 @@ class VoteRepository extends BaseRepository {
             if (!candidateId) {
                 throw new Error('Candidate ID is required');
             }
-            
+
             if (!Number.isInteger(voteCount) || voteCount < 1) {
                 throw new Error('Vote count must be a positive integer');
             }
@@ -280,7 +306,7 @@ class VoteRepository extends BaseRepository {
 
             // Count existing votes before removal
             const existingVoteCount = await this.countDocuments(query);
-            
+
             if (existingVoteCount < voteCount) {
                 throw new Error(`Insufficient votes to decrement. Available: ${existingVoteCount}, Requested: ${voteCount}`);
             }
@@ -706,6 +732,49 @@ class VoteRepository extends BaseRepository {
             }
         } catch (error) {
             throw this._handleError(error, '_validateVoteData');
+        }
+    }
+
+    /**
+     * Deletes all votes for a specific event.
+     * @param {mongoose.Types.ObjectId|string} eventId - The event ID.
+     * @param {Object} [options={}] - Additional Mongoose options (e.g., session).
+     * @returns {Promise<Object>} Object with success status and deleted count.
+     * @throws {Error} If the operation fails.
+     */
+    async deleteByEvent(eventId, options = {}) {
+        try {
+            const result = await this.model.deleteMany(
+                { event: new mongoose.Types.ObjectId(eventId) },
+                options
+            );
+
+            return {
+                success: true,
+                deletedCount: result.deletedCount
+            };
+        } catch (error) {
+            throw this._handleError(error, 'deleteByEvent');
+        }
+    }
+
+    /**
+     * Counts all votes for a specific event.
+     * @param {mongoose.Types.ObjectId|string} eventId - The event ID.
+     * @param {Object} [options={}] - Additional Mongoose options.
+     * @returns {Promise<number>} The count of votes for the event.
+     * @throws {Error} If the operation fails.
+     */
+    async countByEvent(eventId, options = {}) {
+        try {
+            const count = await this.model.countDocuments(
+                { event: new mongoose.Types.ObjectId(eventId) },
+                options
+            );
+
+            return count;
+        } catch (error) {
+            throw this._handleError(error, 'countByEvent');
         }
     }
 }

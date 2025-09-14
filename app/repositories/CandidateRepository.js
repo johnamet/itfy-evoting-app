@@ -32,6 +32,7 @@ class CandidateRepository extends BaseRepository {
             throw this._handleError(error, 'createCandidate');
         }
     }
+    
 
     /**
      * Find candidates by event
@@ -74,6 +75,56 @@ class CandidateRepository extends BaseRepository {
             });
         } catch (error) {
             throw this._handleError(error, 'findByCategory');
+        }
+    }
+
+    /**
+     * Authenticate candidate by email and password
+     * @param {String} email - Candidate email
+     * @param {String} password - Candidate password
+     * @returns {Object} candidate object
+     */
+    async authenticateEmail(email, password) {
+        try {
+            const candidate = await this.findOne({ email });
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            const isMatch = await candidate.verifyToken(password);
+
+            if (!isMatch) {
+                throw new Error('Invalid password');
+            }
+
+            return candidate
+        } catch (error) {
+            throw this._handleError(error, 'authenticate', { email });
+        }
+    }
+
+    /**
+     * Authenticate candidate by cId and password
+     * @param {String} cId - Candidate assigned ID
+     * @param {String} password - Candidate's password
+     * @returns {Object} candidate object
+     */
+    async authenticateCId(cId, password){
+         try {
+            const candidate = await this.findOne({ cId });
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            const isMatch = await candidate.verifyToken(password);
+
+            if (!isMatch) {
+                throw new Error('Invalid password');
+            }
+
+            return candidate
+        } catch (error) {
+            throw this._handleError(error, 'authenticate', { cId });
         }
     }
 
@@ -498,6 +549,19 @@ class CandidateRepository extends BaseRepository {
     }
 
     /**
+     * Find candidate by cId
+     * @param {String} candidateId - The candidate cId
+     * @returns {Promise<Object>} The candidate object
+     */
+    async findByCId(candidateId){
+        try{
+            return await this.findOne({cId: candidateId})
+        } catch(error){
+            throw this._handleError(error, 'findByCId')
+        }
+    }
+
+    /**
      * Search candidates by name within a specific event
      * @param {String} searchTerm - Search term
      * @param {String|ObjectId} eventId - Event ID
@@ -548,7 +612,7 @@ class CandidateRepository extends BaseRepository {
                         _id: '$_id',
                         name: { $first: '$name' },
                         description: { $first: '$description' },
-                        image: { $first: '$image' },
+                        photo: { $first: '$photo' },
                         createdAt: { $first: '$createdAt' },
                         categories: { $first: '$categories' }, // Preserve the categories array
                         event: { $first: '$event' },
@@ -574,7 +638,7 @@ class CandidateRepository extends BaseRepository {
                     $project: {
                         name: 1,
                         description: { $ifNull: ['$description', 'No description available'] },
-                        image: { $ifNull: ['$image', 'No image available'] },
+                        photo: { $ifNull: ['$photo', 'No image available'] },
                         categories: {
                             $map: {
                                 input: '$categories',
@@ -734,6 +798,26 @@ class CandidateRepository extends BaseRepository {
 
         if (existingCandidate) {
             throw new Error(`Candidate "${name}" already exists with overlapping categories in this event`);
+        }
+    }
+
+    /**
+     * Delete all candidates for a specific event
+     * @param {String|ObjectId} eventId - Event ID
+     * @returns {Promise<Object>} Delete result
+     */
+    async deleteByEvent(eventId) {
+        try {
+            this._validateObjectId(eventId, 'Event ID');
+            
+            const deleteResult = await this.model.deleteMany({ event: eventId });
+            
+            return {
+                success: true,
+                deletedCount: deleteResult.deletedCount
+            };
+        } catch (error) {
+            throw this._handleError(error, 'deleteByEvent');
         }
     }
 }

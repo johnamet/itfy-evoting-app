@@ -31,10 +31,10 @@ export default class CategoryController extends BaseController {
                 return this.sendError(res, 'User authentication required', 401);
             }
 
-            const category = await this.categoryService.createCategory({
-                ...categoryData,
+            const category = await this.categoryService.createCategory(
+                categoryData,
                 createdBy
-            });
+            );
 
             return this.sendSuccess(res, category, 'Category created successfully', 201);
         } catch (error) {
@@ -86,10 +86,10 @@ export default class CategoryController extends BaseController {
             const updateData = req.body;
             const updatedBy = req.user?.id;
 
-            const category = await this.categoryService.updateCategory(id, {
-                ...updateData,
+            const category = await this.categoryService.updateCategory(id,
+                updateData,
                 updatedBy
-            });
+            );
 
             if (!category) {
                 return this.sendError(res, 'Category not found', 404);
@@ -144,13 +144,19 @@ export default class CategoryController extends BaseController {
         try {
             const { id } = req.params;
             const { status } = req.body;
-            const updatedBy = req.user?.id;
+            const updatedBy = req.user?.id || req.user?._id;
 
             if (!status) {
                 return this.sendError(res, 'Status is required', 400);
             }
 
-            const category = await this.categoryService.updateCategoryStatus(id, status, updatedBy);
+            const category = await this.categoryService.updateCategory(id,
+                {
+                    status,
+                    isActive: status.toLowerCase() === 'active' ? true : false
+                },
+                updatedBy
+            );
 
             if (!category) {
                 return this.sendError(res, 'Category not found', 404);

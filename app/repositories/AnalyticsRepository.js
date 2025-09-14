@@ -36,7 +36,7 @@ class AnalyticsRepository extends BaseRepository {
                 Vote.countDocuments({ votedAt: { $gte: startDate, $lte: endDate } }),
                 Candidate.countDocuments({ createdAt: { $gte: startDate, $lte: endDate } }),
                 Category.countDocuments({ createdAt: { $gte: startDate, $lte: endDate } }),
-                Event.countDocuments({ status: 'active', startDate: { $lte: endDate }, endDate: { $gte: startDate } }),
+                Event.countDocuments({ status: 'active'}),
                 Event.countDocuments({ status: 'completed', endDate: { $lte: endDate } })
             ]);
 

@@ -104,8 +104,8 @@ class User extends BaseModel {
         });
 
         // Instance method to verify password
-        this.schema.methods.verifyPassword = async function(candidatePassword) {
-            return await bcrypt.compare(candidatePassword, this.password);
+        this.schema.methods.verifyPassword = async function(userPassword) {
+            return await bcrypt.compare(userPassword, this.password);
         };
 
         // Static method to find user by email and verify password

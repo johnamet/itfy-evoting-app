@@ -474,7 +474,7 @@ class ActivityRepository extends BaseRepository {
             }
 
             // Validate targetType
-            const validTargetTypes = ['user', 'candidate', 'event', 'vote', 'site'];
+            const validTargetTypes = ['user', 'candidate', 'event', 'vote', 'site', 'category', 'slide', 'form', 'votebundle', 'coupon'];
             if (!activityData.targetType || !validTargetTypes.includes(activityData.targetType)) {
                 errors.push(`Target type must be one of: ${validTargetTypes.join(', ')}`);
             }
