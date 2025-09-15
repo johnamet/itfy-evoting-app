@@ -1,0 +1,179 @@
+@startuml ITFY E-Voting Data Flow
+
+!theme plain
+
+' ====== ACTORS ======
+actor Admin as admin
+actor "Admin" as organizer  
+actor "Public Voter" as voter
+actor "System" as system
+
+' ====== PROCESSES ======
+rectangle "Event Setup" as setup {
+  (Create Event) as create_event
+  (Define Categories) as create_categories
+  (Add Candidates) as add_candidates
+  (Configure Vote Bundles) as config_bundles
+  (Set Up Registration Form) as setup_form
+}
+
+rectangle "Payment & Voting" as voting {
+  (Browse Candidates) as browse
+  (Select Vote Bundle) as select_bundle
+  (Process Payment) as payment
+  (Cast Votes) as cast_votes
+  (Apply Coupon) as apply_coupon
+}
+
+rectangle "Analytics & Monitoring" as analytics {
+  (Track Activities) as track
+  (Generate Reports) as reports
+  (Monitor Payments) as monitor
+  (Send Notifications) as notify
+}
+
+rectangle "Content Management" as content {
+  (Upload Files) as upload
+  (Manage Forms) as manage_forms
+  (Update Settings) as settings
+  (Create Slides) as slides
+}
+
+' ====== DATA STORES ======
+database "MongoDB Collections" as db {
+  card Events
+  card Categories  
+  card Candidates
+  card Votes
+  card VoteBundles
+  card Payments
+  card Users
+  card Activities
+  card Analytics
+  card Forms
+  card Files
+  card Settings
+  card Coupons
+  card Notifications
+}
+
+' ====== EXTERNAL SYSTEMS ======
+cloud "Paystack API" as paystack
+cloud "Email Service" as email
+cloud "File Storage" as storage
+
+' ====== ADMIN FLOWS ======
+admin --> create_event
+admin --> create_categories  
+admin --> add_candidates
+admin --> config_bundles
+admin --> setup_form
+admin --> settings
+admin --> slides
+
+create_event --> Events
+create_categories --> Categories
+add_candidates --> Candidates
+config_bundles --> VoteBundles
+setup_form --> Forms
+settings --> Settings
+slides --> Settings
+
+' ====== ORGANIZER FLOWS ======
+organizer --> create_event
+organizer --> create_categories
+organizer --> add_candidates
+organizer --> reports
+
+reports --> Analytics
+reports --> Activities
+
+' ====== VOTER FLOWS ======
+voter --> browse
+voter --> select_bundle
+voter --> payment
+voter --> cast_votes
+voter --> apply_coupon
+
+browse --> Candidates
+browse --> Categories
+browse --> Events
+
+select_bundle --> VoteBundles
+payment --> Payments
+payment --> paystack
+cast_votes --> Votes
+apply_coupon --> Coupons
+
+paystack --> Payments : webhook
+
+' ====== SYSTEM FLOWS ======
+system --> track
+system --> monitor
+system --> notify
+
+track --> Activities
+monitor --> Payments
+monitor --> Analytics
+notify --> Notifications
+notify --> email
+
+' ====== FILE MANAGEMENT ======
+admin --> upload
+organizer --> upload
+upload --> Files
+upload --> storage
+
+' ====== FORM PROCESSING ======
+voter --> manage_forms
+manage_forms --> Forms
+
+' ====== CROSS-CUTTING CONCERNS ======
+Events --> Analytics : generates
+Votes --> Analytics : aggregated
+Payments --> Analytics : summarized
+Activities --> Analytics : processed
+
+Users --> Activities : logged
+Candidates --> Activities : tracked
+Events --> Activities : monitored
+Payments --> Activities : audited
+
+' ====== NOTIFICATIONS ======
+Payments --> Notifications : status updates
+Votes --> Notifications : confirmation
+Events --> Notifications : reminders
+
+' ====== NOTES ======
+note right of paystack
+  External payment processing
+  - Transaction verification
+  - Webhook callbacks
+  - Payment status updates
+end note
+
+note right of Analytics
+  Pre-computed metrics for:
+  - Dashboard performance
+  - Real-time vote counts
+  - Payment summaries
+  - User engagement
+end note
+
+note bottom of Activities
+  Comprehensive audit trail:
+  - User actions
+  - Site visits (anonymous)
+  - System operations
+  - Security events
+end note
+
+note left of Votes
+  Core voting logic:
+  - Links voter to candidate
+  - Uses purchased vote bundles
+  - Tracks in specific category
+  - Belongs to event
+end note
+
+@enduml

@@ -56,6 +56,10 @@ class BaseModel {
         this.schema.methods.toJSON = function() {
             const obj = this.toObject();
             delete obj.__v; // Exclude version key
+
+            if (obj.password) {
+                delete obj.password; // Exclude password field
+            }
             return obj;
         }
 

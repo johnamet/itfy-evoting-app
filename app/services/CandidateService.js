@@ -260,12 +260,14 @@ class CandidateService extends BaseService {
      * @param {String} updatedBy - ID of user updating the candidate
      * @returns {Promise<Object>} Updated candidate
      */
-    async updateCandidate(candidateId, updateData, updatedBy, isAdmin = true) {
+    async updateCandidate(candidateId, updateData, updatedBy) {
         try {
             this._log('update_candidate', { candidateId, updatedBy });
 
             this._validateObjectId(candidateId, 'Candidate ID');
             this._validateObjectId(updatedBy, 'Updated By User ID');
+
+            const isAdmin = updatedBy !== candidateId
 
             // If not admin, ensure candidate is updating their own profile
             if (!isAdmin){
@@ -1252,6 +1254,71 @@ class CandidateService extends BaseService {
             };
         } catch (error) {
             throw this._handleError(error, 'get_candidate_vote_count', { candidateId });
+        }
+    }
+
+    /**
+     * Change candidate password
+     * @param {String} candidateId - Candidate ID
+     * @param {String} currentPassword - Current password
+     * @param {String} newPassword - New password
+     * @returns {Promise<Object>} Password change result
+     */
+    async changePassword(candidateId, currentPassword, newPassword) {
+        try {
+            this._log('change_password', { candidateId });
+
+            // Validate input parameters
+            this._validateObjectId(candidateId, 'Candidate ID');
+            
+            if (!currentPassword || typeof currentPassword !== 'string') {
+                throw new Error('Current password is required and must be a string');
+            }
+
+            if (!newPassword || typeof newPassword !== 'string') {
+                throw new Error('New password is required and must be a string');
+            }
+
+            // Validate new password strength
+            if (newPassword.length < 6) {
+                throw new Error('New password must be at least 6 characters long');
+            }
+
+            if (newPassword === currentPassword) {
+                throw new Error('New password must be different from current password');
+            }
+
+            // Change password through repository
+            const result = await this.candidateRepository.changePassword(
+                candidateId, 
+                currentPassword, 
+                newPassword
+            );
+
+            // Log activity
+            await this.activityRepository.logActivity({
+                user: candidateId,
+                action: 'update',
+                targetType: 'candidate',
+                targetId: candidateId,
+                metadata: {
+                    timestamp: new Date(),
+                    ipAddress: null // Could be passed from request if needed
+                }
+            });
+
+            this._log('change_password_success', { candidateId });
+
+            return {
+                success: true,
+                message: 'Password changed successfully',
+                data: {
+                    candidateId: candidateId,
+                    changedAt: new Date()
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'change_password', { candidateId });
         }
     }
 

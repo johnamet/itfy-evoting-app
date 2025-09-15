@@ -1,0 +1,166 @@
+@startuml ITFY E-Voting System Relationships
+
+!theme plain
+
+' ====== CORE ENTITIES ======
+
+package "User Management" {
+  class User {
+    +email: String {unique}
+    +password: String {hashed}
+    +name: String
+    +role: Role
+  }
+  
+  class Role {
+    +name: String {unique}
+    +level: Number
+  }
+}
+
+package "Event System" {
+  class Event {
+    +name: String
+    +description: String
+    +startDate: Date
+    +endDate: Date
+    +location: Object
+  }
+  
+  class Category {
+    +name: String
+    +description: String
+    +votingDeadline: Date
+    +isVotingOpen: Boolean
+  }
+  
+  class Candidate {
+    +name: String
+    +email: String {unique}
+    +bio: String
+    +cId: String {unique}
+  }
+}
+
+package "Voting System" {
+  class Vote {
+    +votedAt: Date
+    +voter: Object
+    +ipAddress: String
+  }
+  
+  class VoteBundle {
+    +name: String
+    +votes: Number
+    +price: Number
+    +currency: String
+  }
+}
+
+package "Payment System" {
+  class Payment {
+    +reference: String {unique}
+    +voter: Object
+    +finalAmount: Number
+    +status: Enum
+    +paystackData: Object
+  }
+  
+  class Coupon {
+    +code: String
+    +discount: Number
+    +discountType: String
+    +expiryDate: Date
+  }
+}
+
+package "Support Systems" {
+  class Form {
+    +title: String
+    +fields: Array
+    +submissions: Array
+  }
+  
+  class Activity {
+    +action: Enum
+    +targetType: Enum
+    +timestamp: Date
+  }
+  
+  class Analytics {
+    +type: Enum
+    +period: Enum
+    +data: Object
+  }
+  
+  class File {
+    +filename: String
+    +path: String
+    +mimetype: String
+  }
+}
+
+' ====== RELATIONSHIPS ======
+
+' Core User Relationships
+User }|-- Role : has
+User ||--o{ Event : "creates/manages"
+User ||--o{ Category : "creates/manages"
+User ||--o{ File : uploads
+User ||--o{ Activity : performs
+
+' Event Hierarchy
+Event ||--o{ Category : contains
+Event ||--o{ Candidate : hosts
+Event ||--o{ Vote : "receives votes"
+Event ||--o{ Payment : "processes payments"
+Event ||--o| Form : "has registration"
+
+' Category Relationships
+Category ||--o{ Candidate : categorizes
+Category ||--o{ Vote : "receives votes for"
+Category ||--o{ VoteBundle : "applicable to"
+
+' Voting Flow
+Candidate ||--o{ Vote : receives
+Vote }|-- Candidate : "votes for"
+Vote }|-- Category : "cast in"
+Vote }|-- Event : "belongs to"
+Vote }|--o{ VoteBundle : uses
+
+' Payment Flow
+Payment }|-- Event : "payment for"
+Payment }|-- Candidate : "supports"
+Payment }|--o{ VoteBundle : purchases
+Payment }|--o| Coupon : "applies discount"
+
+' Cross-cutting Concerns
+Activity }|--o| User : "performed by"
+Analytics }|-- Event : "analyzes"
+Form }|--o| Event : "registration for"
+
+' ====== WORKFLOW NOTES ======
+
+note top of Event : Central entity that orchestrates\nthe entire voting process
+
+note right of Vote : Core voting transaction linking\nvoter, candidate, category, and event
+
+note left of Payment : Paystack-integrated payment\nprocessing with coupon support
+
+note bottom of Activity : Comprehensive audit trail\nfor all system operations
+
+note top of User : Role-based access control\nwith secure authentication
+
+' ====== DATA FLOW ======
+
+note as N1
+**Typical Voting Flow:**
+1. Admin creates Event with Categories
+2. Candidates are nominated for Categories
+3. Users purchase VoteBundles via Payment
+4. Votes are cast using purchased bundles
+5. All actions logged in Activity
+6. Analytics computed for reporting
+end note
+
+@enduml

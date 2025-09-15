@@ -24,6 +24,7 @@ const candidateController = new CandidateController();
 // Configure multer for file uploads
 const upload = multer({ dest: 'uploads/candidates/' });
 
+router.get('/top', optionalAuth, (req, res) => candidateController.getTopCandidates(req, res))
 router.get('/', optionalAuth, (req, res) => candidateController.getCandidates(req, res));
 router.get('/search', optionalAuth, (req, res) => candidateController.searchCandidates(req, res));
 router.get('/top/:eventId', optionalAuth, (req, res) => candidateController.getTopCandidates(req, res));
@@ -40,7 +41,8 @@ router.use(authenticate);
 router.post('/', requireLevel(3), (req, res) => candidateController.createCandidate(req, res));
 router.post('/bulk', requireLevel(3), (req, res) => candidateController.bulkCreateCandidates(req, res));
 router.put('/bulk-update', requireLevel(3), (req, res) => candidateController.bulkUpdateCandidates(req, res));
-router.put('/:id', requireLevel(2), (req, res) => candidateController.updateCandidate(req, res));
+router.put('/change-password/:id', (req, res) => candidateController.changePassword(req, res));
+router.put('/:id', (req, res) => candidateController.updateCandidate(req, res));
 router.delete('/:id', requireLevel(4), (req, res) => candidateController.deleteCandidate(req, res));
 
 // Category management

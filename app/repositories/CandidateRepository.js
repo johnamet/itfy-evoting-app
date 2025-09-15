@@ -820,6 +820,56 @@ class CandidateRepository extends BaseRepository {
             throw this._handleError(error, 'deleteByEvent');
         }
     }
+
+    /**
+     * Change candidate password
+     * @param {String|ObjectId} candidateId - Candidate ID
+     * @param {String} currentPassword - Current password
+     * @param {String} newPassword - New password
+     * @returns {Promise<Object>} Password change result
+     */
+    async changePassword(candidateId, currentPassword, newPassword) {
+        try {
+            this._validateObjectId(candidateId, 'Candidate ID');
+
+            if (!currentPassword) {
+                throw new Error('Current password is required');
+            }
+
+            if (!newPassword) {
+                throw new Error('New password is required');
+            }
+
+            // Find the candidate
+            const candidate = await this.findById(candidateId);
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            // Verify current password
+            const isCurrentPasswordValid = await candidate.verifyToken(currentPassword);
+            if (!isCurrentPasswordValid) {
+                throw new Error('Current password is incorrect');
+            }
+
+            // Update password (hashing will be done by the model pre-save middleware)
+            const updatedCandidate = await this.updateById(candidateId, {
+                password: await candidate.hashPassword(newPassword),
+                updatedAt: new Date()
+            });
+
+            if (!updatedCandidate) {
+                throw new Error('Failed to update password');
+            }
+
+            return {
+                success: true,
+                message: 'Password changed successfully'
+            };
+        } catch (error) {
+            throw this._handleError(error, 'changePassword');
+        }
+    }
 }
 
 export default CandidateRepository;

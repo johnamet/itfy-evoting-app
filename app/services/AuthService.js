@@ -75,6 +75,7 @@ class AuthService extends BaseService {
             this.activityService.logActivity({
                 user: user._id,
                 action: "login",
+                userModel: "User",
                 targetType: "user",
                 targetId: user._id,
                 ipAddress: options.ipAddress || "Unknown",

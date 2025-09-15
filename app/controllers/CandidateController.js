@@ -39,21 +39,6 @@ export default class CandidateController extends BaseController {
         }
     }
 
-    /**
-     * List candidates (alias for getCandidates)
-     * GET /api/candidates
-     */
-    async list(req, res) {
-        return this.getCandidates(req, res);
-    }
-
-    /**
-     * Create candidate (alias for createCandidate)
-     * POST /api/candidates
-     */
-    async create(req, res) {
-        return this.createCandidate(req, res);
-    }
 
     /**
      * Get all candidates with filtering and pagination
@@ -83,6 +68,8 @@ export default class CandidateController extends BaseController {
             const includeVotes = req.query.include === 'votes';
 
             const candidate = await this.candidateService.getCandidateById(id, includeVotes);
+
+            delete candidate.password
 
             if (!candidate) {
                 return this.sendError(res, 'Candidate not found', 404);
@@ -127,11 +114,13 @@ export default class CandidateController extends BaseController {
             const updateData = req.body;
             const updatedBy = req.user?.id;
 
+            
+
             if (!updatedBy) {
                 return this.sendError(res, 'User authentication required', 401);
             }
 
-            const candidate = await this.candidateService.updateCandidate(id, updateData, updatedBy);
+            const candidate = await this.candidateService.updateCandidate(id, updateData, updatedBy,);
 
             if (!candidate) {
                 return this.sendError(res, 'Candidate not found', 404);
@@ -645,6 +634,121 @@ export default class CandidateController extends BaseController {
             return this.sendSuccess(res, candidate, 'Candidate photo removed successfully');
         } catch (error) {
             return this.handleError(res, error, 'Failed to remove candidate photo');
+        }
+    }
+
+    /**
+     * Change candidate password
+     * @swagger
+     * /api/candidates/{id}/change-password:
+     *   put:
+     *     summary: Change candidate password
+     *     tags: [Candidates]
+     *     security:
+     *       - bearerAuth: []
+     *     parameters:
+     *       - in: path
+     *         name: id
+     *         required: true
+     *         schema:
+     *           type: string
+     *         description: Candidate ID
+     *     requestBody:
+     *       required: true
+     *       content:
+     *         application/json:
+     *           schema:
+     *             type: object
+     *             required:
+     *               - currentPassword
+     *               - newPassword
+     *             properties:
+     *               currentPassword:
+     *                 type: string
+     *                 description: Current password
+     *                 minLength: 1
+     *               newPassword:
+     *                 type: string
+     *                 description: New password
+     *                 minLength: 6
+     *             example:
+     *               currentPassword: "oldpassword123"
+     *               newPassword: "newpassword456"
+     *     responses:
+     *       200:
+     *         description: Password changed successfully
+     *         content:
+     *           application/json:
+     *             schema:
+     *               type: object
+     *               properties:
+     *                 success:
+     *                   type: boolean
+     *                   example: true
+     *                 message:
+     *                   type: string
+     *                   example: "Password changed successfully"
+     *                 data:
+     *                   type: object
+     *                   properties:
+     *                     candidateId:
+     *                       type: string
+     *                     changedAt:
+     *                       type: string
+     *                       format: date-time
+     *       400:
+     *         description: Invalid request data
+     *       401:
+     *         description: Authentication required or current password incorrect
+     *       404:
+     *         description: Candidate not found
+     */
+    async changePassword(req, res) {
+        try {
+            const { id } = req.params;
+            const { currentPassword, newPassword } = req.body;
+
+            // Validate required fields
+            if (!currentPassword) {
+                return this.sendError(res, 'Current password is required', 400);
+            }
+
+            if (!newPassword) {
+                return this.sendError(res, 'New password is required', 400);
+            }
+
+            // Optional: Validate that the authenticated user is the candidate or an admin
+            const authenticatedUserId = req.user?.id;
+            const userRole = req.user?.role;
+            
+            if (!authenticatedUserId) {
+                return this.sendError(res, 'Authentication required', 401);
+            }
+
+            // Allow admins to change any candidate's password, or candidates to change their own
+            if (userRole !== 'admin' && authenticatedUserId !== id) {
+                return this.sendError(res, 'You can only change your own password', 403);
+            }
+
+            const result = await this.candidateService.changePassword(id, currentPassword, newPassword);
+
+            return this.sendSuccess(res, result.data, result.message);
+        } catch (error) {
+            // Handle specific error cases
+            if (error.message.includes('Current password is incorrect')) {
+                return this.sendError(res, 'Current password is incorrect', 401);
+            }
+            
+            if (error.message.includes('not found')) {
+                return this.sendError(res, 'Candidate not found', 404);
+            }
+
+            if (error.message.includes('must be at least') || 
+                error.message.includes('must be different')) {
+                return this.sendError(res, error.message, 400);
+            }
+
+            return this.handleError(res, error, 'Failed to change password');
         }
     }
 }

@@ -20,7 +20,7 @@ export function cacheMiddleware(options = {}) {
         skipOnError = true
     } = options;
 
-    return (req, res, next) => {
+    return async (req, res, next) => {
         // Skip caching if condition is not met
         if (!condition(req)) {
             return next();
@@ -31,7 +31,7 @@ export function cacheMiddleware(options = {}) {
 
         try {
             // Try to get cached response
-            const cachedResponse = cache.get(cacheKey);
+            const cachedResponse = await cache.get(cacheKey);
             
             if (cachedResponse) {
                 console.log(`Cache HIT: ${cacheKey}`);

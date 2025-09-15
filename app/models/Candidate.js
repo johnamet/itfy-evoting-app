@@ -130,11 +130,18 @@ class Candidate extends BaseModel {
             return await bcrypt.compare(password, this.password);
         };
 
-        this.schema.pre('save', async function (next) { 
+        this.schema.methods.hashPassword = async function (password) {
+            const saltRounds = 12;
+            return await bcrypt.hash(password, saltRounds);
+        };
+
+        // Pre-save hook to hash password if modified
+
+        this.schema.pre('save', async function (next) {
             if (!this.isModified('password'));
+
             try {
-                const saltRounds = 12;
-                this.password = await bcrypt.hash(this.password, saltRounds);
+                this.password = await this.hashPassword(this.password);
             } catch (error) {
                 next(error);
             }

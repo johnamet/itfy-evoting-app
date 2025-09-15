@@ -36,11 +36,14 @@ const verifyToken = (token) => {
             issuer: JWT_CONFIG.issuer,
             audience: JWT_CONFIG.audience
         });
+        console.log("JWT verified successfully:", decoded);
 
         // Ensure required claims are present
-        if (!decoded.sub && !decoded.userId && !decoded.id) {
+        if (!decoded.sub && !decoded.userId && !decoded.id && !decoded.cId && !decoded.candidateId) {
             throw new Error('Token missing user identifier');
         }
+
+        console.log("Decoded JWT:", decoded);
 
         return !decoded.cId ? {
             id: decoded.sub || decoded.userId || decoded.id,
@@ -49,7 +52,7 @@ const verifyToken = (token) => {
             roleLevel: decoded.roleLevel || 0, // Default to lowest level
             ...decoded
         } : {
-            id: decoded.sub || decoded.userId || decoded.id,
+            id: decoded.sub || decoded.candidateId || decoded.id,
             email: decoded.email,
             cId: decoded.cId,
             ...decoded
@@ -93,6 +96,8 @@ export const authenticate = (req, res, next) => {
         }
 
         const token = authHeader.substring(7);
+
+        // Verify token and extract user info
         const user = verifyToken(token);
 
         if (!user) {

@@ -1,0 +1,527 @@
+@startuml ITFY E-Voting Backend Model Design
+
+!theme plain
+
+' ====== ABSTRACT BASE MODEL ======
+abstract class BaseModel {
+  #_id: ObjectId
+  #createdAt: Date
+  #updatedAt: Date
+  #__v: Number
+  --
+  +toJSON(): Object
+  +all(page, pageSize, filters): Array
+  +findOne(params): Object
+}
+
+' ====== CORE USER MANAGEMENT ======
+class User {
+  +name: String {required}
+  +email: String {required, unique}
+  +password: String {required, hashed}
+  +bio: String
+  +image: String
+  +phone: String
+  +location: String
+  +passwordResetToken: String
+  +passwordResetExpires: Date
+  +lastLogin: Date
+  +lastLoginIP: String
+  +lastLoginLocation: String
+  +isActive: Boolean {default: true}
+  +status: String {default: "active"}
+  --
+  +verifyPassword(password): Boolean
+  +findByEmailAndPassword(email, password): User
+}
+
+class Role {
+  +name: String {required, unique}
+  +level: Number {required}
+}
+
+' ====== EVENT MANAGEMENT ======
+class Event {
+  +name: String {required}
+  +description: String {required}
+  +startDate: Date {required}
+  +endDate: Date {required}
+  +location: LocationObject {required}
+  +gallery: Array<String>
+  +isActive: Boolean {default: true}
+  +isDeleted: Boolean {default: false}
+  +speakers: Array<Object>
+  +guestOfHonor: Array<Object>
+  +requirements: Array<String>
+  +sponsors: Array<Object>
+  +status: String {default: "active"}
+  +timeline: Array<TimelineItem>
+}
+
+class LocationObject <<embedded>> {
+  +name: String {required}
+  +address: String {required}
+  +city: String {required}
+  +coordinates: CoordinatesObject
+  +country: String
+  +zipCode: String
+  +website: String
+  +phone: String
+  +venueInfo: Array<String>
+  +directions: Array<String>
+}
+
+class CoordinatesObject <<embedded>> {
+  +lat: Number {required}
+  +lng: Number {required}
+}
+
+class TimelineItem <<embedded>> {
+  +title: String {required}
+  +description: String
+  +time: Date {required}
+}
+
+' ====== VOTING SYSTEM ======
+class Category {
+  +name: String {required}
+  +description: String {required}
+  +icon: String {required}
+  +isActive: Boolean {default: true}
+  +isDeleted: Boolean {default: false}
+  +status: String {default: "active"}
+  +votingDeadline: Date {required}
+  +isVotingOpen: Boolean {default: false}
+}
+
+class Candidate {
+  +name: String {required}
+  +email: String {required, unique}
+  +bio: String {required}
+  +title: String {required}
+  +location: String {required}
+  +cId: String {required, unique}
+  +photo: String
+  +isActive: Boolean {default: true}
+  +isDeleted: Boolean {default: false}
+  +projects: Array<Object>
+  +status: String {default: "pending"}
+  +skills: Array<String>
+  +nominatedBy: String {required}
+  +socialLinks: Object
+  +education: Object
+  +experience: Object
+  +achievements: Object
+}
+
+class Vote {
+  +votedAt: Date {immutable}
+  +ipAddress: String
+  +voter: VoterInfo
+}
+
+class VoterInfo <<embedded>> {
+  +name: String
+  +email: String
+}
+
+class VoteBundle {
+  +name: String {required}
+  +description: String {required}
+  +votes: Number {required}
+  +price: Number {required}
+  +currency: String {default: "GHS"}
+  +popular: Boolean {default: true}
+  +isActive: Boolean {default: true}
+  +features: Array<String>
+}
+
+' ====== PAYMENT SYSTEM ======
+class Payment {
+  +reference: String {required, unique}
+  +voter: PaymentVoterInfo {required}
+  +voteBundles: Array<VoteBundleItem>
+  +votesCast: Number {default: 0}
+  +originalAmount: Number {required}
+  +discountAmount: Number {default: 0}
+  +finalAmount: Number {required}
+  +currency: String {default: "GHS"}
+  +status: PaymentStatusEnum {default: "pending"}
+  +paystackData: PaystackData
+  +metadata: Object
+}
+
+class PaymentVoterInfo <<embedded>> {
+  +email: String {required}
+  +contact: String
+  +name: String
+  +ipAddress: String {required}
+  +userAgent: String
+}
+
+class VoteBundleItem <<embedded>> {
+  +quantity: Number {required, min: 1}
+  +price: Number {required, min: 0}
+  +votes: Number {required, min: 1}
+}
+
+class PaystackData <<embedded>> {
+  +authorization_url: String
+  +access_code: String
+  +transaction_id: String
+  +gateway_response: String
+  +paid_at: Date
+  +channel: String
+  +fees: Number
+  +customer: PaystackCustomer
+}
+
+class PaystackCustomer <<embedded>> {
+  +id: String
+  +email: String
+  +customer_code: String
+}
+
+enum PaymentStatusEnum {
+  pending
+  success
+  failed
+  abandoned
+  expired
+}
+
+' ====== COUPON SYSTEM ======
+class Coupon {
+  +code: String {required}
+  +discount: Number {required}
+  +discountType: String {default: "percentage"}
+  +expiryDate: Date {required}
+  +isActive: Boolean {default: true}
+  +maxUses: Number {default: 1}
+  +usedCount: Number {default: 0}
+  +minOrderAmount: Number {default: 0}
+}
+
+class CouponUsage {
+  +orderAmount: Number {required}
+  +discountAmount: Number {required}
+  +finalAmount: Number {required}
+  +usageDate: Date {default: Date.now}
+  +metadata: Object
+}
+
+' ====== FORM SYSTEM ======
+class Form {
+  +title: String {required}
+  +description: String
+  +modelId: ObjectId {required}
+  +model: String {required}
+  +fields: Array<Object> {default: defaultField}
+  +isActive: Boolean {default: true}
+  +isDeleted: Boolean {default: false}
+  +submissionCount: Number {default: 0}
+  +submissions: Array<FormSubmission>
+  +maxSubmissions: Number {default: 0}
+}
+
+class FormSubmission <<embedded>> {
+  +submittedBy: String
+  +submittedAt: Date {default: Date.now}
+  +data: Object {required}
+  +ipAddress: String {required}
+  +userAgent: String
+}
+
+' ====== FILE MANAGEMENT ======
+class File {
+  +fileId: String {unique, auto-generated}
+  +filename: String {required}
+  +originalName: String {required}
+  +path: String {required}
+  +relativePath: String {required}
+  +size: Number {required}
+  +mimetype: String {required}
+  +metadata: Object
+  +tags: Array<String>
+}
+
+' ====== ACTIVITY TRACKING ======
+class Activity {
+  +action: ActionEnum {required}
+  +targetType: TargetTypeEnum {required}
+  +targetId: ObjectId
+  +timestamp: Date {default: Date.now}
+  +siteVisits: SiteVisitsData
+}
+
+class SiteVisitsData <<embedded>> {
+  +date: String
+  +totalVisits: Number {default: 0}
+  +pages: Map<String, Number>
+  +hourly: Map<String, Number>
+  +users: Array<ObjectId>
+  +anonymousVisits: Number {default: 0}
+  +lastUpdated: Date {default: Date.now}
+  +metadata: Array<Mixed>
+}
+
+enum ActionEnum {
+  create
+  update
+  delete
+  view
+  site_visit
+  login
+}
+
+enum TargetTypeEnum {
+  user
+  candidate
+  event
+  votebundle
+  coupon
+  site
+}
+
+' ====== ANALYTICS SYSTEM ======
+class Analytics {
+  +type: AnalyticsTypeEnum {required}
+  +period: PeriodEnum {required}
+  +startDate: Date
+  +endDate: Date
+  +data: Object {required}
+  +metadata: Object
+}
+
+enum AnalyticsTypeEnum {
+  overview
+  voting
+  events
+  payments
+  users
+  candidates
+  categories
+  geographic
+  trends
+}
+
+enum PeriodEnum {
+  hourly
+  daily
+  weekly
+  monthly
+  yearly
+  all-time
+}
+
+' ====== NOTIFICATION SYSTEM ======
+class Notification {
+  +title: String {required, maxlength: 200}
+  +message: String {required, maxlength: 1000}
+  +type: NotificationTypeEnum {default: "info"}
+  +category: NotificationCategoryEnum {default: "general"}
+  +priority: PriorityEnum {default: "normal"}
+  +isRead: Boolean {default: false}
+  +readAt: Date
+  +metadata: Object
+}
+
+enum NotificationTypeEnum {
+  info
+  success
+  warning
+  error
+  system
+}
+
+enum NotificationCategoryEnum {
+  vote
+  payment
+  user
+  event
+  candidate
+  system
+  security
+  form
+  general
+}
+
+enum PriorityEnum {
+  low
+  normal
+  high
+  urgent
+}
+
+' ====== SETTINGS SYSTEM ======
+class Settings {
+  +key: String {required, maxlength: 100}
+  +type: SettingsTypeEnum {default: "general"}
+  +modelType: ModelTypeEnum
+  +modelId: ObjectId
+  +name: String {required, maxlength: 200}
+  +description: String
+  +value: Mixed {required}
+  +defaultValue: Mixed
+  +isEditable: Boolean {default: true}
+  +isVisible: Boolean {default: true}
+  +validation: ValidationRules
+  +metadata: Object
+}
+
+enum SettingsTypeEnum {
+  general
+  model
+  system
+  theme
+  security
+  payment
+  email
+  sms
+}
+
+enum ModelTypeEnum {
+  user
+  event
+  candidate
+  category
+  vote
+  payment
+  notification
+  form
+  slide
+}
+
+class ValidationRules <<embedded>> {
+  +required: Boolean
+  +type: String
+  +min: Number
+  +max: Number
+  +pattern: String
+  +enum: Array<String>
+}
+
+' ====== SLIDE SYSTEM ======
+class Slide {
+  +title: String {required}
+  +subtitle: String {required}
+  +image: String {required}
+  +button: ButtonConfig {required}
+  +isActive: Boolean {default: true}
+  +published: Boolean {default: false}
+  +settings: Object
+}
+
+class ButtonConfig <<embedded>> {
+  +label: String {required}
+  +link: String {required}
+}
+
+' ====== RELATIONSHIPS ======
+
+' Inheritance
+BaseModel <|-- User
+BaseModel <|-- Role
+BaseModel <|-- Event
+BaseModel <|-- Category
+BaseModel <|-- Candidate
+BaseModel <|-- Vote
+BaseModel <|-- VoteBundle
+BaseModel <|-- Payment
+BaseModel <|-- Coupon
+BaseModel <|-- CouponUsage
+BaseModel <|-- Form
+BaseModel <|-- File
+BaseModel <|-- Activity
+BaseModel <|-- Analytics
+BaseModel <|-- Notification
+BaseModel <|-- Settings
+BaseModel <|-- Slide
+
+' User Relationships
+User }o-- Role : has
+User ||--o{ Event : creates/updates
+User ||--o{ Category : creates/updates
+User ||--o{ Form : creates/updates
+User ||--o{ File : uploads
+User ||--o{ Activity : performs
+
+' Event Relationships
+Event ||--o{ Category : contains
+Event ||--o{ Candidate : hosts
+Event ||--o{ Vote : receives
+Event ||--o{ Payment : processes
+Event ||--o{ Coupon : applicable to
+Event ||--o{ VoteBundle : applicable to
+Event ||--o{ Form : has registration form
+
+' Category Relationships
+Category }o--o{ Candidate : categorizes
+Category ||--o{ Vote : receives votes for
+Category ||--o{ VoteBundle : applicable to
+Category ||--o{ Coupon : applicable to
+
+' Candidate Relationships
+Candidate ||--o{ Vote : receives
+Candidate }o-- Event : belongs to
+
+' Vote Relationships
+Vote }o-- Candidate : votes for
+Vote }o-- Event : cast in
+Vote }o-- Category : within
+Vote }o--o{ VoteBundle : uses
+
+' Payment Relationships
+Payment }o-- Event : for
+Payment }o-- Candidate : supports
+Payment }o--o{ VoteBundle : purchases
+Payment }o--o| Coupon : applies
+
+' Coupon Relationships
+Coupon }o-- Event : applicable to
+Coupon }o--o{ Category : applicable to
+Coupon }o--o{ VoteBundle : applicable to
+Coupon ||--o{ CouponUsage : tracked by
+
+' CouponUsage Relationships
+CouponUsage }o-- Coupon : tracks usage of
+CouponUsage }o--o| Event : used in
+CouponUsage }o--o{ Category : used for
+
+' Form Relationships
+Form }o--o| Event : registration for
+
+' Activity Relationships
+Activity }o--o| User : performed by
+
+' Notification Relationships
+Notification }o--o| User : sent to
+
+' Settings Relationships
+Settings }o--o| User : configured by
+
+' Embedded Objects
+Event *-- LocationObject
+LocationObject *-- CoordinatesObject
+Event *-- TimelineItem
+Vote *-- VoterInfo
+Payment *-- PaymentVoterInfo
+Payment *-- VoteBundleItem
+Payment *-- PaystackData
+PaystackData *-- PaystackCustomer
+Form *-- FormSubmission
+Activity *-- SiteVisitsData
+Settings *-- ValidationRules
+Slide *-- ButtonConfig
+
+note top of BaseModel : Abstract base class with common fields:\n- createdAt, updatedAt timestamps\n- MongoDB ObjectId (_id)\n- Version key (__v)\n- Common methods for CRUD operations
+
+note top of User : Secure user authentication:\n- Password hashing with bcrypt\n- Role-based access control\n- Session tracking (lastLogin, IP, location)\n- Password reset functionality
+
+note top of Payment : Paystack integration:\n- Webhook verification\n- Multiple payment status tracking\n- Support for coupon discounts\n- Detailed transaction logging
+
+note top of Activity : Comprehensive tracking:\n- User actions and site visits\n- Anonymous visit tracking\n- Hourly/page analytics\n- Audit trail for all operations
+
+note top of Analytics : Pre-computed metrics:\n- Dashboard performance optimization\n- Time-based aggregations\n- Multiple analytics types\n- Flexible data storage
+
+@enduml
