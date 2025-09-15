@@ -462,34 +462,47 @@ Development: http://localhost:3000/api/v1
 
 ##### Authentication
 ```http
+POST   /api/auth/register           # User registration
 POST   /api/auth/login              # User login
 POST   /api/auth/logout             # User logout
+GET    /api/auth/profile            # Get user profile
+PUT    /api/auth/profile            # Update user profile
+POST   /api/auth/change-password    # Change password
 POST   /api/auth/forgot-password    # Password reset request
 POST   /api/auth/reset-password     # Password reset confirmation
 POST   /api/auth/refresh-token      # Token refresh
-GET    /api/auth/profile            # Get user profile
-PUT    /api/auth/profile            # Update user profile
 ```
 
 ##### Events
 ```http
 GET    /api/events                  # List all events
 POST   /api/events                  # Create new event
+GET    /api/events/upcoming         # Get upcoming events
+GET    /api/events/past             # Get past events
 GET    /api/events/:id              # Get event details
 PUT    /api/events/:id              # Update event
 DELETE /api/events/:id              # Delete event
 GET    /api/events/:id/stats        # Event statistics
 GET    /api/events/:id/participants # Event participants
+POST   /api/events/:id/register     # Register for event
+DELETE /api/events/:id/register     # Unregister from event
+PATCH  /api/events/:id/status       # Update event status
 ```
 
 ##### Voting
 ```http
 POST   /api/voting/vote             # Cast a vote
 GET    /api/voting/history          # Voting history
-GET    /api/voting/results/:eventId # Event results
-GET    /api/voting/eligibility/:id  # Check voting eligibility
+GET    /api/voting/results/event/:eventId       # Event results
+GET    /api/voting/results/category/:categoryId # Category results
+GET    /api/voting/eligibility/:eventId         # Check voting eligibility
+GET    /api/voting/verify/:voteId               # Verify vote
 POST   /api/voting/bundles          # Purchase vote bundle
-GET    /api/voting/stats/:eventId   # Voting statistics
+GET    /api/voting/bundles/:bundleId            # Get vote bundle details
+GET    /api/voting/stats/:eventId               # Voting statistics
+GET    /api/voting/updates/:eventId             # Real-time voting updates
+GET    /api/voting/export/:eventId              # Export voting data
+GET    /api/voting/audit/:eventId               # Voting audit trail
 ```
 
 ##### Candidates
@@ -499,16 +512,242 @@ POST   /api/candidates              # Create candidate
 GET    /api/candidates/:id          # Get candidate details
 PUT    /api/candidates/:id          # Update candidate
 DELETE /api/candidates/:id          # Delete candidate
-GET    /api/candidates/:id/stats    # Candidate statistics
+GET    /api/candidates/event/:eventId          # Get candidates by event
+GET    /api/candidates/category/:categoryId    # Get candidates by category
+GET    /api/candidates/:id/votes               # Get candidate votes
+GET    /api/candidates/:id/stats               # Candidate statistics
+POST   /api/candidates/:id/image               # Upload candidate image
+PATCH  /api/candidates/:id/status              # Update candidate status
+```
+
+##### Categories
+```http
+GET    /api/categories              # List categories
+POST   /api/categories              # Create category
+GET    /api/categories/:id          # Get category details
+PUT    /api/categories/:id          # Update category
+DELETE /api/categories/:id          # Delete category
+GET    /api/categories/event/:eventId          # Get categories by event
+GET    /api/categories/:id/stats               # Category statistics
+PATCH  /api/categories/:id/status              # Update category status
+POST   /api/categories/reorder                 # Reorder categories
+```
+
+##### Users
+```http
+GET    /api/users                   # List users
+GET    /api/users/search            # Search users
+GET    /api/users/role/:role        # Get users by role
+GET    /api/users/:id               # Get user details
+PUT    /api/users/:id               # Update user
+DELETE /api/users/:id               # Delete user
+GET    /api/users/:id/activity      # Get user activity
+GET    /api/users/:id/stats         # User statistics
+POST   /api/users/:id/avatar        # Upload user avatar
+PATCH  /api/users/:id/role          # Update user role
+PATCH  /api/users/:id/status        # Update user status
+PATCH  /api/users/bulk-update       # Bulk update users
+```
+
+##### Role Management
+```http
+GET    /api/users/roles             # List roles
+POST   /api/users/roles             # Create role
+GET    /api/users/roles/:roleId     # Get role details
+PUT    /api/users/roles/:roleId     # Update role
+DELETE /api/users/roles/:roleId     # Delete role
+GET    /api/users/roles/:roleId/permissions     # Get role permissions
+PUT    /api/users/roles/:roleId/permissions     # Update role permissions
+POST   /api/users/:userId/roles/:roleId         # Assign role to user
+DELETE /api/users/:userId/roles/:roleId         # Remove role from user
+GET    /api/users/:id/roles                     # Get user roles
+```
+
+##### Payments
+```http
+POST   /api/payments/initialise     # Initialize payment
+GET    /api/payments/verify/:reference          # Verify payment
+POST   /api/payments/webhook        # Payment webhook
+GET    /api/payments/details/:reference         # Payment details
+GET    /api/payments/stats          # Payment statistics
+GET    /api/payments/list           # List payments
+GET    /api/payments/event/:eventId             # Payments by event
+GET    /api/payments/category/:categoryId       # Payments by category
+GET    /api/payments/summary        # Payment summary
+```
+
+##### Vote Bundles
+```http
+GET    /api/vote-bundles            # List vote bundles
+GET    /api/vote-bundles/stats      # Vote bundle statistics
+GET    /api/vote-bundles/:id        # Get vote bundle details
+GET    /api/vote-bundles/event/:eventId         # Vote bundles by event
+GET    /api/vote-bundles/category/:categoryId   # Vote bundles by category
+GET    /api/vote-bundles/event/:eventId/category/:categoryId # Vote bundles by event and category
+POST   /api/vote-bundles            # Create vote bundle
+PUT    /api/vote-bundles/:id        # Update vote bundle
+DELETE /api/vote-bundles/:id        # Delete vote bundle
+```
+
+##### Coupons
+```http
+GET    /api/coupons                 # List coupons
+POST   /api/coupons                 # Create coupon
+GET    /api/coupons/:id             # Get coupon details
+GET    /api/coupons/code/:code      # Get coupon by code
+PUT    /api/coupons/:id             # Update coupon
+DELETE /api/coupons/:id             # Delete coupon
+POST   /api/coupons/validate/:code  # Validate coupon
+POST   /api/coupons/use/:code       # Use coupon
+GET    /api/coupons/:id/stats       # Coupon statistics
+GET    /api/coupons/:id/usage-history          # Coupon usage history
+POST   /api/coupons/generate-bulk              # Generate bulk coupons
+PATCH  /api/coupons/:id/status                 # Update coupon status
+GET    /api/coupons/export/data                # Export coupon data
+```
+
+##### File Management
+```http
+POST   /api/files/upload            # Upload single file
+POST   /api/files/upload/multiple   # Upload multiple files
+POST   /api/files/validate          # Validate file
+GET    /api/files                   # List files
+GET    /api/files/:id               # Get file details
+GET    /api/files/:id/download      # Download file
+GET    /api/files/:id/thumbnail     # Get file thumbnail
+PUT    /api/files/:id               # Update file
+DELETE /api/files/:id               # Delete file
+GET    /api/files/entity/:entityType/:entityId # Files by entity
+POST   /api/files/:id/download-link            # Generate download link
+GET    /api/files/admin/stats                  # File statistics
+DELETE /api/files/admin/cleanup-temp           # Cleanup temp files
+```
+
+##### Forms
+```http
+GET    /api/forms                   # List forms
+POST   /api/forms                   # Create form
+GET    /api/forms/:id               # Get form details
+PUT    /api/forms/:id               # Update form
+DELETE /api/forms/:id               # Delete form
+POST   /api/forms/:id/submit        # Submit form
+GET    /api/forms/:id/submissions   # Get form submissions
+GET    /api/forms/:id/export        # Export form data
+POST   /api/forms/:id/duplicate     # Duplicate form
+PATCH  /api/forms/:id/status        # Update form status
+GET    /api/forms/:id/analytics     # Form analytics
+GET    /api/forms/model/:model      # Forms by model
+GET    /api/forms/model/:model/:modelId        # Form by model instance
+POST   /api/forms/model/:model/:modelId        # Submit form for model
+```
+
+##### Slides
+```http
+GET    /api/slides                  # List slides
+POST   /api/slides                  # Create slide
+GET    /api/slides/:id              # Get slide details
+PUT    /api/slides/:id              # Update slide
+DELETE /api/slides/:id              # Delete slide
+GET    /api/slides/event/:eventId   # Slides by event
+POST   /api/slides/reorder          # Reorder slides
+POST   /api/slides/:id/duplicate    # Duplicate slide
+GET    /api/slides/:id/preview      # Preview slide
+POST   /api/slides/:id/media        # Upload slide media
+PATCH  /api/slides/:id/status       # Update slide status
+```
+
+##### Activities
+```http
+GET    /api/activities              # List activities
+GET    /api/activities/recent       # Recent activities
+GET    /api/activities/stats        # Activity statistics
+GET    /api/activities/types        # Activity types
+GET    /api/activities/:id          # Get activity details
+GET    /api/activities/user/:userId # Activities by user
+GET    /api/activities/entity/:entityType/:entityId # Activities by entity
+POST   /api/activities              # Create activity
+GET    /api/activities/export/log   # Export activity log
+DELETE /api/activities/cleanup/old  # Cleanup old activities
+```
+
+##### Notifications
+```http
+GET    /api/notifications           # List notifications
+GET    /api/notifications/user/:userId         # Notifications by user
+GET    /api/notifications/category/:category   # Notifications by category
+GET    /api/notifications/statistics           # Notification statistics
+POST   /api/notifications           # Create notification
+POST   /api/notifications/system    # Create system notification
+POST   /api/notifications/test      # Test notification
+PUT    /api/notifications/:id       # Update notification
+PATCH  /api/notifications/:id/read  # Mark notification as read
+PATCH  /api/notifications/mark-all-read       # Mark all as read
+DELETE /api/notifications/:id       # Delete notification
+DELETE /api/notifications/cleanup   # Cleanup notifications
+```
+
+##### Settings
+```http
+GET    /api/settings/public         # Public settings
+GET    /api/settings/site-config    # Site configuration
+GET    /api/settings/theme          # Theme settings
+GET    /api/settings                # List settings
+GET    /api/settings/model/:model   # Settings by model
+GET    /api/settings/category/:category        # Settings by category
+POST   /api/settings                # Create setting
+POST   /api/settings/bulk           # Create bulk settings
+POST   /api/settings/initialize     # Initialize settings
+PUT    /api/settings/:id            # Update setting
+PUT    /api/settings/bulk-update    # Bulk update settings
+PUT    /api/settings/site-config    # Update site config
+PUT    /api/settings/theme          # Update theme
+DELETE /api/settings/:id            # Delete setting
+DELETE /api/settings/reset          # Reset settings
+POST   /api/settings/backup         # Backup settings
+POST   /api/settings/restore        # Restore settings
+GET    /api/settings/backup/list    # List backups
+```
+
+##### Cache Management
+```http
+GET    /api/cache/stats             # Cache statistics
+GET    /api/cache/health            # Cache health check
+GET    /api/cache/config            # Cache configuration
+GET    /api/cache/keys              # List cache keys
+GET    /api/cache/value/:key        # Get cache value
+DELETE /api/cache/clear/all          # Clear all cache
+DELETE /api/cache/clear/type/:type   # Clear cache by type
+DELETE /api/cache/clear/pattern      # Clear cache by pattern
+DELETE /api/cache/key/:key           # Delete cache key
+DELETE /api/cache/user/:userId       # Clear user cache
+DELETE /api/cache/event/:eventId     # Clear event cache
+PUT    /api/cache/config             # Update cache config
+POST   /api/cache/warm-up            # Warm up cache
 ```
 
 ##### Analytics
 ```http
-GET    /api/analytics/dashboard     # Dashboard overview
+GET    /api/analytics/dashboard/overview        # Dashboard overview
 GET    /api/analytics/voting        # Voting analytics
 GET    /api/analytics/payments      # Payment analytics
 GET    /api/analytics/users         # User analytics
 GET    /api/analytics/events        # Event analytics
+GET    /api/analytics/events/:eventId          # Event-specific analytics
+GET    /api/analytics/comprehensive             # Comprehensive analytics
+GET    /api/analytics/realtime      # Real-time analytics
+GET    /api/analytics/trends        # Analytics trends
+GET    /api/analytics/export        # Export analytics
+POST   /api/analytics/summary       # Generate analytics summary
+POST   /api/analytics/schedule      # Schedule analytics
+GET    /api/analytics/health        # Analytics health check
+DELETE /api/analytics/cache          # Clear analytics cache
+DELETE /api/analytics/cache/:type    # Clear analytics cache by type
+DELETE /api/analytics/cleanup        # Cleanup analytics data
+```
+
+##### System Health
+```http
+GET    /api/health                  # API health check
 ```
 
 ### Response Format
