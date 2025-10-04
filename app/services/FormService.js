@@ -71,12 +71,12 @@ class FormService extends BaseService {
 
             switch (formToCreate.model) {
                 case "Event":
-                    model = await this.eventRepository.updateById(formToCreate.modelId, {form: form.id || form._id})
+                    model = await this.eventRepository.updateById(formToCreate.modelId, { form: form.id || form._id })
                     if (!model || model.status === "completed") {
                         this._handleError(new Error("Cannot create form for a completed Event or nonexistent event"))
                     }
                 case 'Category':
-                    model = await this.categoryRepository.updateById(formToCreate.modelId, {form: form.id || form._id})
+                    model = await this.categoryRepository.updateById(formToCreate.modelId, { form: form.id || form._id })
                     if (!model || model.status === "completed") {
                         this._handleError(new Error("Cannot create form for a completed Category or nonexistent category"))
                     }
@@ -477,7 +477,6 @@ class FormService extends BaseService {
                 throw new Error('Form not found');
             }
 
-            console.log(form.submissions)
 
             const submissions = form.submissions.slice((page - 1) * limit, page * limit);
 
@@ -489,6 +488,9 @@ class FormService extends BaseService {
                 id: submission._id,
                 data: submission.data,
                 submittedAt: submission.submittedAt,
+                status: submission.status,
+                updatedAt: submission.updatedAt,
+                updatedBy: submission.updatedBy,
                 ipAddress: submission.ipAddress
             }));
 
@@ -901,6 +903,68 @@ class FormService extends BaseService {
     }
 
     /**
+     * Update submission status (e.g., mark as reviewed)
+     * @param {String} formId - Form ID
+     * @param {String} submissionId - Submission ID
+     * @param {String} status - New status (e.g., 'reviewed', 'pending')
+     * @param {String} updatedBy - ID of user updating the status
+     * @returns {Promise<Object>} Updated submission
+     */
+    async updateSubmissionStatus(formId, submissionId, status, updatedBy) {
+        try {
+            this._log('update_submission_status', { formId, submissionId, status, updatedBy });
+
+            this._validateObjectId(formId, 'Form ID');
+            this._validateObjectId(submissionId, 'Submission ID');
+            this._validateObjectId(updatedBy, 'Updated By User ID');
+
+            const validStatuses = ['pending', 'reviewed', 'approved', 'rejected'];
+            if (!validStatuses.includes(status)) {
+                throw new Error(`Invalid status. Valid statuses: ${validStatuses.join(', ')}`);
+            }
+
+            // Update submission status
+            const updatedSubmission = await this.formsRepository.updateSubmissionStatus(
+                formId,
+                submissionId,
+                status,
+                updatedBy
+            );
+
+            if (!updatedSubmission) {
+                throw new Error('Submission not found');
+            }
+
+
+            // Log activity
+            await this.activityRepository.logActivity({
+                user: updatedBy,
+                action: 'update',
+                targetType: 'form_submission',
+                targetId: submissionId,
+                metadata: {
+                    formId,
+                    newStatus: status
+                }
+            });
+
+            this._log('update_submission_status_success', { formId, submissionId, status });
+
+            return {
+                success: true,
+                submission: {
+                    id: updatedSubmission._id,
+                    status: updatedSubmission.status,
+                    updatedAt: updatedSubmission.updatedAt
+                }
+            };
+        } catch (error) {
+            throw this._handleError(error, 'update_submission_status', { formId, submissionId });
+        }
+    }
+
+
+    /**
      * Export form submissions as CSV or JSON
      * @param {String} formId - Form ID
      * @param {String} format - Export format ('csv' or 'json')
@@ -927,7 +991,7 @@ class FormService extends BaseService {
 
             // Get form submissions with filters
             const filter = { _id: formId };
-            
+
             // Apply date range filter if provided
             if (options.startDate || options.endDate) {
                 filter.submittedAt = {};
@@ -976,10 +1040,10 @@ class FormService extends BaseService {
                     throw new Error(`Unsupported export format: ${format}`);
             }
 
-            this._log('export_form_submissions_success', { 
-                formId, 
-                format, 
-                submissionCount: submissions.length 
+            this._log('export_form_submissions_success', {
+                formId,
+                format,
+                submissionCount: submissions.length
             });
 
             return {
@@ -1007,14 +1071,14 @@ class FormService extends BaseService {
      */
     _generateCSVData(submissions, headers) {
         const csvRows = [];
-        
+
         // Add headers
         csvRows.push(headers.map(header => `"${header}"`).join(','));
 
         // Add data rows
         submissions.forEach(submission => {
             const row = [];
-            
+
             // Basic submission info
             row.push(`"${submission._id}"`);
             row.push(`"${submission.submittedBy || 'Anonymous'}"`);
@@ -1025,8 +1089,8 @@ class FormService extends BaseService {
             headers.slice(4).forEach(fieldName => {
                 const value = submission.data && submission.data[fieldName] ? submission.data[fieldName] : '';
                 // Handle arrays and objects
-                const processedValue = Array.isArray(value) ? value.join('; ') : 
-                                     typeof value === 'object' ? JSON.stringify(value) : value;
+                const processedValue = Array.isArray(value) ? value.join('; ') :
+                    typeof value === 'object' ? JSON.stringify(value) : value;
                 row.push(`"${String(processedValue).replace(/"/g, '""')}"`);
             });
 
@@ -1074,14 +1138,14 @@ class FormService extends BaseService {
      */
     _generateXLSXData(submissions, headers, form) {
         const worksheetData = [];
-        
+
         // Add headers
         worksheetData.push(headers);
 
         // Add data rows
         submissions.forEach(submission => {
             const row = [];
-            
+
             // Basic submission info
             row.push(submission._id.toString());
             row.push(submission.submittedBy || 'Anonymous');
@@ -1092,8 +1156,8 @@ class FormService extends BaseService {
             headers.slice(4).forEach(fieldName => {
                 const value = submission.data && submission.data[fieldName] ? submission.data[fieldName] : '';
                 // Handle arrays and objects
-                const processedValue = Array.isArray(value) ? value.join('; ') : 
-                                     typeof value === 'object' ? JSON.stringify(value) : value;
+                const processedValue = Array.isArray(value) ? value.join('; ') :
+                    typeof value === 'object' ? JSON.stringify(value) : value;
                 row.push(processedValue);
             });
 

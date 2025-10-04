@@ -32,7 +32,7 @@ class CandidateRepository extends BaseRepository {
             throw this._handleError(error, 'createCandidate');
         }
     }
-    
+
 
     /**
      * Find candidates by event
@@ -109,8 +109,8 @@ class CandidateRepository extends BaseRepository {
      * @param {String} password - Candidate's password
      * @returns {Object} candidate object
      */
-    async authenticateCId(cId, password){
-         try {
+    async authenticateCId(cId, password) {
+        try {
             const candidate = await this.findOne({ cId });
             if (!candidate) {
                 throw new Error('Candidate not found');
@@ -339,7 +339,7 @@ class CandidateRepository extends BaseRepository {
     async getTopCandidates(eventId = null, limit = 10) {
         try {
             const matchStage = eventId
-                ? { $match: { event: new mongoose.Types.ObjectId(eventId) } }
+                ? { $match: { event: eventId } }
                 : { $match: {} };
 
             const pipeline = [
@@ -352,19 +352,32 @@ class CandidateRepository extends BaseRepository {
                         as: 'votes'
                     }
                 },
+                { $unwind: { path: "$votes", preserveNullAndEmptyArrays: true } },
                 {
-                    $addFields: {
-                        voteCount: {
-                            $sum: {
-                                $map: {
-                                    input: '$votes',
-                                    as: 'vote',
-                                    in: { $size: { $ifNull: ['$$vote.voteBundle.votes', []] } }
-                                }
-                            }
-                        }
+                    $lookup: {
+                        from: "voteBundles",
+                        localField: "votes.voteBundles",
+                        foreignField: "_id",
+                        as: "voteBundleDocs"
                     }
                 },
+                {
+                    $addFields: {
+                        voteBundleCount: { $sum: "$voteBundleDocs.votes" }
+                    }
+                },
+                // Group back by candidate
+                {
+                    $group: {
+                        _id: "$_id",
+                        name: { $first: "$name" },
+                        categories: { $first: "$categories" },
+                        event: { $first: "$event" },
+                        voteCount: { $sum: "$voteBundleCount" }
+                    }
+                },
+
+                // Lookup category + event info
                 {
                     $lookup: {
                         from: 'categories',
@@ -387,17 +400,47 @@ class CandidateRepository extends BaseRepository {
                         event: { $arrayElemAt: ['$eventInfo', 0] }
                     }
                 },
+
+                // --- compute totalVotes for all candidates
+                {
+                    $group: {
+                        _id: null,
+                        candidates: { $push: "$$ROOT" },
+                        totalVotes: { $sum: "$voteCount" }
+                    }
+                },
+                { $unwind: "$candidates" },
+                {
+                    $addFields: {
+                        "candidates.totalVotes": "$totalVotes",
+                        "candidates.votePercentage": {
+                            $cond: [
+                                { $eq: ["$totalVotes", 0] },
+                                0,
+                                {
+                                    $multiply: [
+                                        { $divide: ["$candidates.voteCount", "$totalVotes"] },
+                                        100
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    $replaceRoot: { newRoot: "$candidates" }
+                },
+
+                // --- sort + limit
                 {
                     $sort: { voteCount: -1, name: 1 }
                 },
-                {
-                    $limit: limit
-                },
+                { $limit: limit },
+
                 {
                     $project: {
                         categoryInfo: 0,
-                        eventInfo: 0,
-                        votes: 0
+                        eventInfo: 0
                     }
                 }
             ];
@@ -553,10 +596,10 @@ class CandidateRepository extends BaseRepository {
      * @param {String} candidateId - The candidate cId
      * @returns {Promise<Object>} The candidate object
      */
-    async findByCId(candidateId){
-        try{
-            return await this.findOne({cId: candidateId})
-        } catch(error){
+    async findByCId(candidateId) {
+        try {
+            return await this.findOne({ cId: candidateId })
+        } catch (error) {
             throw this._handleError(error, 'findByCId')
         }
     }
@@ -809,9 +852,9 @@ class CandidateRepository extends BaseRepository {
     async deleteByEvent(eventId) {
         try {
             this._validateObjectId(eventId, 'Event ID');
-            
+
             const deleteResult = await this.model.deleteMany({ event: eventId });
-            
+
             return {
                 success: true,
                 deletedCount: deleteResult.deletedCount

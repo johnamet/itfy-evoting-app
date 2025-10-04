@@ -30,7 +30,7 @@ class Activity extends BaseModel{
             targetType: {
                 type: String,
                 required: true,
-                enum: ['user', 'candidate', 'event', 'votebundle', 'coupon', 'site', 'category', 'slide', 'form']
+                enum: ['user', 'candidate', 'event', 'votebundle', 'coupon', 'site', 'category', 'slide', 'form', 'form_submission']
             },
             targetId: {
                 type: mongoose.Schema.Types.ObjectId,

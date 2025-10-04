@@ -28,6 +28,21 @@ class CandidateService extends BaseService {
     }
 
     /**
+     * @private
+     * Generate a temporary password
+     * @param {Number} length - Length of the password (default: 10)
+     * @returns {String} Temporary password
+     */
+    _generateTempPassword(length = 10) {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+        let password = '';
+        for (let i = 0; i < length; i++) {
+            password += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return password;
+    }
+
+    /**
      * Generate a unique candidate ID (cId) based on event, category, and sequence number
      * Format: XXX#### (3 letters + 4 digits)
      * @param {String} eventId - Event ID
@@ -202,15 +217,21 @@ class CandidateService extends BaseService {
                 candidateData.categories[0] // Use first category as primary
             );
 
+            // Generate a temporary password
+            const password = this._generateTempPassword(12);
+
             // Create candidate
             const candidateToCreate = {
                 ...this._sanitizeData(candidateData),
                 name: candidateData.name.trim(),
                 cId: cId,
+                password,
                 createdBy,
                 createdAt: new Date()
             };
             const candidate = await this.candidateRepository.createCandidate(candidateToCreate);
+
+            console.log('Temporary password for candidate:', password); // In real app, email this to candidate
 
             // Log activity
             await this.activityRepository.logActivity({
@@ -635,6 +656,7 @@ class CandidateService extends BaseService {
             }
 
             const topCandidates = await this.candidateRepository.getTopCandidates(eventId, limit);
+
 
             return {
                 success: true,
@@ -1223,7 +1245,6 @@ class CandidateService extends BaseService {
             // Get votes grouped by category for this candidate
             const votesByCategory = await this.voteRepository.getVoteCountsForCandidate(candidateId);
 
-            console.log(votesByCategory)
             // Calculate total votes across all categories
             let totalVotes = 0;
             let totalVotesCast = 0;

@@ -13,10 +13,11 @@ class AnalyticsController extends BaseController {
     }
 
     async getDashboardOverview(req, res) {
+        const { period } = req.query
         try {
-            const result = await this.analyticsService.getDashboardOverview();
+            const result = await this.analyticsService.getDashboardOverview({ period });
             if (!result.success) return this.handleError(res, new Error(result.error), 500);
-            return this.sendSuccess(res, {...result.data,cached: result.cached }, 'Dashboard overview retrieved successfully');
+            return this.sendSuccess(res, { ...result.data, cached: result.cached }, 'Dashboard overview retrieved successfully');
         } catch (error) {
             console.error('Error in getDashboardOverview:', error);
             return this.handleError(res, new Error('Failed to retrieve dashboard overview'), 500);
@@ -28,10 +29,10 @@ class AnalyticsController extends BaseController {
             const { period, eventId, startDate, endDate, forceRefresh } = req.query;
             const result = await this.analyticsService.getVotingAnalytics({ period, eventId, startDate, endDate, forceRefresh });
             if (!result.success) return this.handleError(res, result.error, 500);
-            return this.sendSuccess(res, result.data, 'Voting analytics retrieved successfully', { metadata: result.metadata, cached: result.cached });
+            return this.sendSuccess(res, result.data, 'Voting analytics retrieved successfully', 200);
         } catch (error) {
             console.error('Error in getVotingAnalytics:', error);
-            return this.handleError(res, 'Failed to retrieve voting analytics', 500);
+            return this.handleError(res, new Error('Failed to retrieve voting analytics'), 500);
         }
     }
 
@@ -40,10 +41,10 @@ class AnalyticsController extends BaseController {
             const { period, startDate, endDate, forceRefresh } = req.query;
             const result = await this.analyticsService.getPaymentAnalytics({ period, startDate, endDate, forceRefresh });
             if (!result.success) return this.handleError(res, result.error, 500);
-            return this.sendSuccess(res, result.data, 'Payment analytics retrieved successfully', { metadata: result.metadata, cached: result.cached });
+            return this.sendSuccess(res, result.data, 'Payment analytics retrieved successfully', 200);
         } catch (error) {
             console.error('Error in getPaymentAnalytics:', error);
-            return this.handleError(res, 'Failed to retrieve payment analytics', 500);
+            return this.handleError(res, new Error('Failed to retrieve payment analytics'), 500);
         }
     }
 
@@ -52,10 +53,10 @@ class AnalyticsController extends BaseController {
             const { period, startDate, endDate } = req.query;
             const result = await this.analyticsService.getAnomalyAnalytics({ period, startDate, endDate });
             if (!result.success) return this.handleError(res, result.error, 500);
-            return this.sendSuccess(res, result.data, 'Anomaly analytics retrieved successfully', { metadata: result.metadata, cached: result.cached });
+            return this.sendSuccess(res, result.data, 'Anomaly analytics retrieved successfully', 200);
         } catch (error) {
             console.error('Error in getAnomalyAnalytics:', error);
-            return this.handleError(res, 'Failed to retrieve anomaly analytics', 500);
+            return this.handleError(res, new Error('Failed to retrieve anomaly analytics'), 500);
         }
     }
 
@@ -64,10 +65,10 @@ class AnalyticsController extends BaseController {
             const { period, startDate, endDate } = req.query;
             const result = await this.analyticsService.getForecasts({ period, startDate, endDate });
             if (!result.success) return this.handleError(res, result.error, 500);
-            return this.sendSuccess(res, result.data, 'Forecasts retrieved successfully', { metadata: result.metadata, cached: result.cached });
+            return this.sendSuccess(res, result.data, 'Forecasts retrieved successfully', 200);
         } catch (error) {
             console.error('Error in getForecasts:', error);
-            return this.handleError(res, 'Failed to retrieve forecasts', 500);
+            return this.handleError(res, new Error('Failed to retrieve forecasts'), 500);
         }
     }
 }

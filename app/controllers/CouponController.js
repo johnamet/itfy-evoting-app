@@ -32,7 +32,7 @@ export default class CouponController extends BaseController {
             }
 
             // Only admins can create coupons
-            if (req.user?.role !== 'admin') {
+            if (req.user?.role.level < 3) {
                 return this.sendError(res, 'Insufficient permissions', 403);
             }
 
@@ -54,10 +54,10 @@ export default class CouponController extends BaseController {
         try {
             const query = req.query;
             
-            // Only admins can view all coupons
-            if (req.user?.role !== 'admin') {
-                return this.sendError(res, 'Insufficient permissions', 403);
-            }
+            // // Only admins can view all coupons
+            // if (req.user?.role.level < 1) {
+            //     return this.sendError(res, 'Insufficient permissions', 403);
+            // }
 
             const coupons = await this.couponService.getCoupons(query);
             return this.sendSuccess(res, coupons, 'Coupons retrieved successfully');
@@ -228,7 +228,7 @@ export default class CouponController extends BaseController {
             const query = req.query;
 
             // Only admins can view usage history
-            if (req.user?.role !== 'admin') {
+            if (req.user?.role.level < 1) {
                 return this.sendError(res, 'Insufficient permissions', 403);
             }
 
@@ -248,7 +248,7 @@ export default class CouponController extends BaseController {
             const createdBy = req.user?.id;
 
             // Only admins can generate bulk coupons
-            if (req.user?.role !== 'admin') {
+            if (req.user?.role.level < 1) {
                 return this.sendError(res, 'Insufficient permissions', 403);
             }
 
@@ -273,7 +273,7 @@ export default class CouponController extends BaseController {
             const updatedBy = req.user?.id;
 
             // Only admins can update coupon status
-            if (req.user?.role !== 'admin') {
+            if (req.user?.role.level < 1) {
                 return this.sendError(res, 'Insufficient permissions', 403);
             }
 
@@ -302,7 +302,7 @@ export default class CouponController extends BaseController {
             const { format = 'json' } = query;
 
             // Only admins can export coupon data
-            if (req.user?.role !== 'admin') {
+            if (req.user?.role.level < 1) {
                 return this.sendError(res, 'Insufficient permissions', 403);
             }
 

@@ -258,7 +258,7 @@ class VotingService extends BaseService {
 
             // Update payment
             await this.paymentRepository.updatePaymentStatus(payment.reference, 
-                {status: 'success',});
+                {status: 'success', expiresAt: null, 'metadata.webhook_verified': true});
             // await this.paymentRepository.updateByReference(payment.reference, {
             //     votesCast: 
             // });

@@ -462,6 +462,40 @@ class FormsRepository extends BaseRepository {
             throw this._handleError(error, 'createSubmission');
         }
     }
+
+    /**
+     * Update submission status
+     * @param {String} formId - Form ID
+     * @param {String} submissionId - Submission ID
+     * @param {String} status - New status
+     * @param {String} updatedBy - User ID who is updating
+     * @returns {Promise<Object|null>} Updated submission
+     */
+    async updateSubmissionStatus(formId, submissionId, status, updatedBy) {
+        try {
+            const form = await this.findById(formId);
+            if (!form) {
+                throw new Error('Form not found');
+            }
+
+            const submission = form.submissions.id(submissionId);
+            if (!submission) {
+                throw new Error('Submission not found');
+            }
+
+            submission.status = status;
+            submission.updatedBy = updatedBy;
+            submission.updatedAt = new Date();
+
+            await form.save();
+            return submission;
+        } catch (error) {
+            throw this._handleError(error, 'updateSubmissionStatus');
+        }
+    }
+
+   
+    
 }
 
 export default FormsRepository;

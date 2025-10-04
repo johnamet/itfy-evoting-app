@@ -517,7 +517,7 @@ class CouponService extends BaseService {
             // Format coupons with additional information
             const formattedCoupons = await Promise.all(
                 coupons.map(async (coupon) => {
-                    const usageCount = await this.couponUsageRepository.countByCoupon(coupon._id);
+                    const usageCount = await this.couponUsageRepository.countDocuments({ couponId: coupon._id });
                     return {
                         id: coupon._id,
                         code: coupon.code,

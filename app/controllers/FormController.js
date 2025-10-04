@@ -335,6 +335,32 @@ class FormController extends BaseController {
             return this.handleServiceError(res, error, 'update form status');
         }
     }
+
+    /**
+     * Update submission status
+     * PATCH /api/forms/:formId/submissions/:submissionId/status
+     */
+    async updateSubmissionStatus(req, res) {
+        try {
+            const { id, submissionId } = req.params;
+            const { status } = req.body;
+            const userId = this.getUserId(req);
+            
+            if (!userId) {
+                return this.sendError(res, 'Authentication required', 401);
+            }
+
+            if (!status) {
+                return this.sendError(res, 'Status is required', 400);
+            }
+
+            const result = await this.formService.updateSubmissionStatus(id, submissionId, status, userId);
+            return this.sendSuccess(res, result.submission, 'Submission status updated successfully');
+
+        } catch (error) {
+            return this.handleServiceError(res, error, 'update submission status');
+        }
+    }
 }
 
 export default FormController;

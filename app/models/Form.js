@@ -33,8 +33,20 @@ class Form extends BaseModel {
             createdAt: {
             type: Date,
             default: Date.now
+            },
+            status: {
+            type: String,
+            default: "pending",
+            enum: ["pending", "approved", "rejected"]
+            },
+            updatedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+            },
+            updatedAt: {
+            type: Date
             }
-        }, { _id: false });
+        });
 
         const schemaDefinition = {
             title: {

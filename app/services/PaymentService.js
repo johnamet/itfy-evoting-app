@@ -715,6 +715,7 @@ class PaymentService extends BaseService {
                 status: 'success',
                 paidAt: new Date(data.paid_at),
                 expiresAt: null,
+                verified: true,
                 paystackData: {
                     transaction_id: data.id,
                     gateway_response: data.gateway_response,

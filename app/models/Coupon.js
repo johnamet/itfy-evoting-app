@@ -11,6 +11,11 @@ class Coupon extends BaseModel {
     constructor() {
 
         const schemaDefinition = {
+            name: {
+                type: String,
+                required: true,
+                trim: true
+            },
             code: {
                 type: String,
                 required: true,
@@ -80,6 +85,20 @@ class Coupon extends BaseModel {
                         return v >= 0
                     }
                 }
+            },
+            isPublic: {
+                type: Boolean,
+                default: false
+            },
+            createdBy: {
+                type: String,
+                required: false,
+                trim: true
+            },
+            updatedBy: {
+                type: String,
+                required: false,
+                trim: true
             }
         };
 

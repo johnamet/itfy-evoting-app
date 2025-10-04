@@ -96,12 +96,12 @@ class Candidate extends BaseModel {
             },
             title: {
                 type: String,
-                required: true,
+                required: false,
                 trim: true
             },
             location: {
                 type: String,
-                required: true,
+                required: false,
                 trim: true
             },
             cId: {

@@ -69,7 +69,7 @@ class AnalyticsService extends BaseService {
     async updateIncrementalAnalytics(collection, doc) {
         // Ensure change streams are set up
         await this.setupChangeStreams();
-        
+
         const now = new Date();
         const period = 'hourly';
         const references = collection === 'votes' ? { event: doc.event } : {};
@@ -104,30 +104,29 @@ class AnalyticsService extends BaseService {
             'anomaly': 'computeAnomalyAnalytics',
             'forecasts': 'computeForecasts'
         };
-        
+
         const method = methodMap[analytics.type];
         if (!method || !this.repository[method]) {
             throw new Error(`Analytics method for type '${analytics.type}' not found`);
         }
-        
+
         const data = await this.repository[method](startDate, endDate, analytics.references.event);
         Object.assign(analytics, data);
-        await analytics.markCompleted(data.metadata.computationTime);
+        // await analytics.markCompleted(data.metadata.computationTime);
         CacheService.set(`${this.cachePrefix}${analytics.type}:${analytics.period}`, analytics.data[analytics.type], this.defaultCacheTTL);
     }
 
-    async getDashboardOverview() {
+    async getDashboardOverview(options = {}) {
         try {
+            const { period = 'daily' } = options;
             // Initialize change streams if not already done
             await this.setupChangeStreams();
-            
+
             const cacheKey = `${this.cachePrefix}dashboard:overview`;
             let overview = CacheService.get(cacheKey);
             if (overview) return { success: true, data: overview, cached: true };
-
-            const now = new Date();
-            const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-            overview = await this.repository.computeOverviewAnalytics(start, now);
+            const {start, end} = this.getDateRange(period)
+            overview = await this.repository.computeOverviewAnalytics(start, end);
             CacheService.set(cacheKey, overview.data.overview, this.defaultCacheTTL);
             return { success: true, data: overview.data.overview, cached: false };
         } catch (error) {
@@ -141,7 +140,7 @@ class AnalyticsService extends BaseService {
             const { period = 'daily', eventId = null, startDate = null, endDate = null, forceRefresh = false } = options;
             const cacheKey = `${this.cachePrefix}voting:${period}:${eventId || 'all'}`;
             if (!forceRefresh) {
-                const cached = CacheService.get(cacheKey);
+                const cached = await CacheService.get(cacheKey);
                 if (cached) return { success: true, data: cached, cached: true };
             }
 
@@ -183,7 +182,7 @@ class AnalyticsService extends BaseService {
         try {
             const { period = 'daily', startDate = null, endDate = null } = options;
             const cacheKey = `${this.cachePrefix}anomalies:${period}`;
-            let cached = CacheService.get(cacheKey);
+            let cached = await CacheService.get(cacheKey);
             if (cached) return { success: true, data: cached, cached: true };
 
             const { start, end } = this.getDateRange(period, startDate, endDate);

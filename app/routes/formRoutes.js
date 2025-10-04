@@ -29,6 +29,7 @@ router.get('/model/:model/:modelId', optionalAuth, (req, res) => formController.
 
 router.use(authenticate)
 router.put('/:id', requireLevel(2), (req, res) => formController.updateForm(req, res));
+router.put('/:id/submissions/:submissionId/status', requireLevel(2), (req, res) => formController.updateSubmissionStatus(req, res));
 router.delete('/:id', requireLevel(4), (req, res) => formController.deleteForm(req, res));
 router.post('/', requireLevel(3), (req, res) => formController.createForm(req, res));
 router.get('/:id/submissions', requireLevel(1), (req, res) => formController.getFormSubmissions(req, res));
