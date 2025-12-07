@@ -15,60 +15,55 @@ class AnalyticsController extends BaseController {
     async getDashboardOverview(req, res) {
         const { period } = req.query
         try {
-            const result = await this.analyticsService.getDashboardOverview({ period });
-            if (!result.success) return this.handleError(res, new Error(result.error), 500);
-            return this.sendSuccess(res, { ...result.data, cached: result.cached }, 'Dashboard overview retrieved successfully');
+            const data = await this.analyticsService.getDashboardOverview({ period });
+            return this.sendSuccess(res, data, 'Dashboard overview retrieved successfully');
         } catch (error) {
             console.error('Error in getDashboardOverview:', error);
-            return this.handleError(res, new Error('Failed to retrieve dashboard overview'), 500);
+            return this.handleError(res, error, 'Failed to retrieve dashboard overview');
         }
     }
 
     async getVotingAnalytics(req, res) {
         try {
             const { period, eventId, startDate, endDate, forceRefresh } = req.query;
-            const result = await this.analyticsService.getVotingAnalytics({ period, eventId, startDate, endDate, forceRefresh });
-            if (!result.success) return this.handleError(res, result.error, 500);
-            return this.sendSuccess(res, result.data, 'Voting analytics retrieved successfully', 200);
+            const data = await this.analyticsService.getVotingAnalytics({ period, eventId, startDate, endDate, forceRefresh });
+            return this.sendSuccess(res, data, 'Voting analytics retrieved successfully', 200);
         } catch (error) {
             console.error('Error in getVotingAnalytics:', error);
-            return this.handleError(res, new Error('Failed to retrieve voting analytics'), 500);
+            return this.handleError(res, error, 'Failed to retrieve voting analytics');
         }
     }
 
     async getPaymentAnalytics(req, res) {
         try {
             const { period, startDate, endDate, forceRefresh } = req.query;
-            const result = await this.analyticsService.getPaymentAnalytics({ period, startDate, endDate, forceRefresh });
-            if (!result.success) return this.handleError(res, result.error, 500);
-            return this.sendSuccess(res, result.data, 'Payment analytics retrieved successfully', 200);
+            const data = await this.analyticsService.getPaymentAnalytics({ period, startDate, endDate, forceRefresh });
+            return this.sendSuccess(res, data, 'Payment analytics retrieved successfully', 200);
         } catch (error) {
             console.error('Error in getPaymentAnalytics:', error);
-            return this.handleError(res, new Error('Failed to retrieve payment analytics'), 500);
+            return this.handleError(res, error, 'Failed to retrieve payment analytics');
         }
     }
 
     async getAnomalyAnalytics(req, res) {
         try {
             const { period, startDate, endDate } = req.query;
-            const result = await this.analyticsService.getAnomalyAnalytics({ period, startDate, endDate });
-            if (!result.success) return this.handleError(res, result.error, 500);
-            return this.sendSuccess(res, result.data, 'Anomaly analytics retrieved successfully', 200);
+            const data = await this.analyticsService.getAnomalyAnalytics({ period, startDate, endDate });
+            return this.sendSuccess(res, data, 'Anomaly analytics retrieved successfully', 200);
         } catch (error) {
             console.error('Error in getAnomalyAnalytics:', error);
-            return this.handleError(res, new Error('Failed to retrieve anomaly analytics'), 500);
+            return this.handleError(res, error, 'Failed to retrieve anomaly analytics');
         }
     }
 
     async getForecasts(req, res) {
         try {
             const { period, startDate, endDate } = req.query;
-            const result = await this.analyticsService.getForecasts({ period, startDate, endDate });
-            if (!result.success) return this.handleError(res, result.error, 500);
-            return this.sendSuccess(res, result.data, 'Forecasts retrieved successfully', 200);
+            const data = await this.analyticsService.getForecasts({ period, startDate, endDate });
+            return this.sendSuccess(res, data, 'Forecasts retrieved successfully', 200);
         } catch (error) {
             console.error('Error in getForecasts:', error);
-            return this.handleError(res, new Error('Failed to retrieve forecasts'), 500);
+            return this.handleError(res, error, 'Failed to retrieve forecasts');
         }
     }
 }

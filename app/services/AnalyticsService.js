@@ -124,14 +124,14 @@ class AnalyticsService extends BaseService {
 
             const cacheKey = `${this.cachePrefix}dashboard:overview`;
             let overview = CacheService.get(cacheKey);
-            if (overview) return { success: true, data: overview, cached: true };
+            if (overview) return overview;
             const {start, end} = this.getDateRange(period)
             overview = await this.repository.computeOverviewAnalytics(start, end);
             CacheService.set(cacheKey, overview.data.overview, this.defaultCacheTTL);
-            return { success: true, data: overview.data.overview, cached: false };
+            return overview.data.overview;
         } catch (error) {
             console.error('Error getting dashboard overview:', error);
-            return { success: false, error: error.message };
+            throw error;
         }
     }
 
@@ -141,7 +141,7 @@ class AnalyticsService extends BaseService {
             const cacheKey = `${this.cachePrefix}voting:${period}:${eventId || 'all'}`;
             if (!forceRefresh) {
                 const cached = await CacheService.get(cacheKey);
-                if (cached) return { success: true, data: cached, cached: true };
+                if (cached) return cached;
             }
 
             const references = eventId ? { event: eventId } : {};
@@ -150,10 +150,10 @@ class AnalyticsService extends BaseService {
                 const { start, end } = this.getDateRange(period, startDate, endDate);
                 await this.computeAndUpdate(analytics, start, end);
             }
-            return { success: true, data: analytics.data.voting, metadata: analytics.metadata, cached: false };
+            return analytics.data.voting;
         } catch (error) {
             console.error('Error getting voting analytics:', error);
-            return { success: false, error: error.message };
+            throw error;
         }
     }
 
@@ -163,7 +163,7 @@ class AnalyticsService extends BaseService {
             const cacheKey = `${this.cachePrefix}payments:${period}`;
             if (!forceRefresh) {
                 const cached = CacheService.get(cacheKey);
-                if (cached) return { success: true, data: cached, cached: true };
+                if (cached) return cached;
             }
 
             let analytics = await this.repository.findFreshOrCreate('payments', period);
@@ -171,10 +171,10 @@ class AnalyticsService extends BaseService {
                 const { start, end } = this.getDateRange(period, startDate, endDate);
                 await this.computeAndUpdate(analytics, start, end);
             }
-            return { success: true, data: analytics.data.payments, metadata: analytics.metadata, cached: false };
+            return analytics.data.payments;
         } catch (error) {
             console.error('Error getting payments analytics:', error);
-            return { success: false, error: error.message };
+            throw error;
         }
     }
 
@@ -183,15 +183,15 @@ class AnalyticsService extends BaseService {
             const { period = 'daily', startDate = null, endDate = null } = options;
             const cacheKey = `${this.cachePrefix}anomalies:${period}`;
             let cached = await CacheService.get(cacheKey);
-            if (cached) return { success: true, data: cached, cached: true };
+            if (cached) return cached;
 
             const { start, end } = this.getDateRange(period, startDate, endDate);
             const analytics = await this.repository.computeAnomalyAnalytics(start, end);
             CacheService.set(cacheKey, analytics.data.anomalies, this.defaultCacheTTL);
-            return { success: true, data: analytics.data.anomalies, metadata: analytics.metadata, cached: false };
+            return analytics.data.anomalies;
         } catch (error) {
             console.error('Error getting anomaly analytics:', error);
-            return { success: false, error: error.message };
+            throw error;
         }
     }
 
@@ -200,15 +200,15 @@ class AnalyticsService extends BaseService {
             const { period = 'monthly', startDate = null, endDate = null } = options;
             const cacheKey = `${this.cachePrefix}forecasts:${period}`;
             let cached = CacheService.get(cacheKey);
-            if (cached) return { success: true, data: cached, cached: true };
+            if (cached) return cached;
 
             const { start, end } = this.getDateRange(period, startDate, endDate);
             const analytics = await this.repository.computeForecasts(start, end);
             CacheService.set(cacheKey, analytics.data.forecasts, this.defaultCacheTTL);
-            return { success: true, data: analytics.data.forecasts, metadata: analytics.metadata, cached: false };
+            return analytics.data.forecasts;
         } catch (error) {
             console.error('Error getting forecasts:', error);
-            return { success: false, error: error.message };
+            throw error;
         }
     }
 

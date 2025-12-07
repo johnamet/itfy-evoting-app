@@ -119,15 +119,12 @@ class VotingService extends BaseService {
                 }, { session });
 
                 return {
-                    success: true,
-                    data: {
-                        voteId: vote._id,
-                        candidateId: voteData.candidateId,
-                        eventId: voteData.eventId,
-                        categoryId: voteData.categoryId,
-                        voteCount: voteData.voteCount || 1,
-                        votedAt: vote.votedAt
-                    }
+                    voteId: vote._id,
+                    candidateId: voteData.candidateId,
+                    eventId: voteData.eventId,
+                    categoryId: voteData.categoryId,
+                    voteCount: voteData.voteCount || 1,
+                    votedAt: vote.votedAt
                 };
 
             } catch (error) {
@@ -204,11 +201,8 @@ class VotingService extends BaseService {
                 }, { session });
 
                 return {
-                    success: true,
-                    data: {
-                        ...paymentResult.data,
-                        voteIntent
-                    }
+                    ...paymentResult.data,
+                    voteIntent
                 };
 
             } catch (error) {

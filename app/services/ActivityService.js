@@ -236,10 +236,8 @@ class ActivityService extends BaseService {
                 timestamp: activity.timestamp
             }));
 
-            return {
-                success: true,
-                data: this._formatPaginationResponse(formattedActivities, total, page, limit)
-            };
+            return this._formatPaginationResponse(formattedActivities, total, page, limit)
+            
         } catch (error) {
             throw this._handleError(error, 'get_activities', { query });
         }

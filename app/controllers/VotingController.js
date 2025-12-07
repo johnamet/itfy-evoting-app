@@ -46,13 +46,9 @@ export default class VotingController extends BaseController {
                 return this.sendError(res, 'Invalid ID format provided', 400);
             }
 
-            const result = await this.votingService.castVote(voteData);
+            const voteResult = await this.votingService.castVote(voteData);
 
-            if (!result.success) {
-                return this.sendError(res, result.error || 'Failed to cast vote', 400);
-            }
-
-            return this.sendSuccess(res, result.data, 'Vote cast successfully', 201);
+            return this.sendSuccess(res, voteResult, 'Vote cast successfully', 201);
 
         } catch (error) {
             return this.handleError(res, error, 'Failed to cast vote');
@@ -80,8 +76,8 @@ export default class VotingController extends BaseController {
                 return this.sendError(res, 'Missing required fields: email, bundles, eventId, categoryId, candidateId', 400);
             }
 
-            const result = await this.votingService.initiateVote(voteData);
-            return this.sendSuccess(res, result.data, 'Vote initiation and payment initialized successfully', 201);
+            const paymentData = await this.votingService.initiateVote(voteData);
+            return this.sendSuccess(res, paymentData, 'Vote initiation and payment initialized successfully', 201);
 
         } catch (error) {
             return this.handleError(res, error, 'Failed to initiate vote');

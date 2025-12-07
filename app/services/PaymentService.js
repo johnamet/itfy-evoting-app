@@ -364,11 +364,7 @@ class PaymentService extends BaseService {
                 throw new Error('Payment not found');
             }
 
-            return {
-                success: true,
-                data: payment,
-                message: 'Payment details retrieved successfully'
-            };
+            return payment;
 
         } catch (error) {
             throw this._handleError(error, 'get_payment_details', { reference });
@@ -386,10 +382,7 @@ class PaymentService extends BaseService {
 
             const stats = await this.paymentRepository.getPaymentStatistics(filters);
 
-            return {
-                success: true,
-                data: stats
-            };
+            return stats;
         } catch (error) {
             throw this._handleError(error, 'get_payment_statistics', { filters });
         }
@@ -415,10 +408,7 @@ class PaymentService extends BaseService {
 
             const total = await this.paymentRepository.countPayments(filters);
 
-            return {
-                success: true,
-                data: this._formatPaginationResponse(payments, total, paginationPage, paginationLimit)
-            };
+            return this._formatPaginationResponse(payments, total, paginationPage, paginationLimit);
         } catch (error) {
             throw this._handleError(error, 'get_payments', { filters, options });
         }
@@ -440,10 +430,7 @@ class PaymentService extends BaseService {
             const payments = await this.paymentRepository.getPaymentsByEvent(eventId, { page, limit });
             const total = await this.paymentRepository.countPayments({ eventId });
 
-            return {
-                success: true,
-                data: this._formatPaginationResponse(payments, total, page, limit)
-            };
+            return this._formatPaginationResponse(payments, total, page, limit);
         } catch (error) {
             throw this._handleError(error, 'get_payments_by_event', { eventId });
         }
@@ -465,10 +452,7 @@ class PaymentService extends BaseService {
             const payments = await this.paymentRepository.getPaymentsByCategory(categoryId, { page, limit });
             const total = await this.paymentRepository.countPayments({ categoryId });
 
-            return {
-                success: true,
-                data: this._formatPaginationResponse(payments, total, page, limit)
-            };
+            return this._formatPaginationResponse(payments, total, page, limit);
         } catch (error) {
             throw this._handleError(error, 'get_payments_by_category', { categoryId });
         }
@@ -484,10 +468,7 @@ class PaymentService extends BaseService {
             this._log('get_payment_summary', { filters });
 
             const summary = await this.paymentRepository.getPaymentSummary(filters);
-            return {
-                success: true,
-                data: summary
-            };
+            return summary;
         } catch (error) {
             throw this._handleError(error, 'get_payment_summary', { filters });
         }

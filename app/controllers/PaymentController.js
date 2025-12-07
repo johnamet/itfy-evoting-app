@@ -289,8 +289,8 @@ export default class PaymentController extends BaseController {
                 return this.sendError(res, 'Payment reference is required', 400);
             }
 
-            const result = await this.paymentService.getPaymentDetails(reference);
-            return this.sendSuccess(res, result.data, 'Payment details retrieved successfully');
+            const payment = await this.paymentService.getPaymentDetails(reference);
+            return this.sendSuccess(res, payment, 'Payment details retrieved successfully');
 
         } catch (error) {
             return this.handleError(res, error, 'Failed to get payment details');
@@ -380,8 +380,8 @@ export default class PaymentController extends BaseController {
                 endDate
             };
 
-            const result = await this.paymentService.getPaymentStatistics(filters);
-            return this.sendSuccess(res, result.data, 'Payment statistics retrieved successfully');
+            const stats = await this.paymentService.getPaymentStatistics(filters);
+            return this.sendSuccess(res, stats, 'Payment statistics retrieved successfully');
 
         } catch (error) {
             return this.handleError(res, error, 'Failed to get payment statistics');
@@ -514,8 +514,8 @@ export default class PaymentController extends BaseController {
                 limit: parseInt(limit)
             };
 
-            const result = await this.paymentService.getPayments(filters, options);
-            return this.sendSuccess(res, result.data, 'Payments retrieved successfully');
+            const payments = await this.paymentService.getPayments(filters, options);
+            return this.sendSuccess(res, payments, 'Payments retrieved successfully');
 
         } catch (error) {
             return this.handleError(res, error, 'Failed to list payments');
@@ -605,8 +605,8 @@ export default class PaymentController extends BaseController {
             const { eventId } = req.params;
             const { page = 1, limit = 20 } = req.query;
 
-            const result = await this.paymentService.getPaymentsByEvent(eventId, { page, limit });
-            return this.sendSuccess(res, result.data, 'Event payments retrieved successfully');
+            const payments = await this.paymentService.getPaymentsByEvent(eventId, { page, limit });
+            return this.sendSuccess(res, payments, 'Event payments retrieved successfully');
 
         } catch (error) {
             return this.handleError(res, error, 'Failed to get event payments');
@@ -696,8 +696,8 @@ export default class PaymentController extends BaseController {
             const { categoryId } = req.params;
             const { page = 1, limit = 20 } = req.query;
 
-            const result = await this.paymentService.getPaymentsByCategory(categoryId, { page, limit });
-            return this.sendSuccess(res, result.data, 'Category payments retrieved successfully');
+            const payments = await this.paymentService.getPaymentsByCategory(categoryId, { page, limit });
+            return this.sendSuccess(res, payments, 'Category payments retrieved successfully');
 
         } catch (error) {
             return this.handleError(res, error, 'Failed to get category payments');
@@ -781,8 +781,8 @@ export default class PaymentController extends BaseController {
                 endDate
             };
 
-            const result = await this.paymentService.getPaymentSummary(filters);
-            return this.sendSuccess(res, result.data, 'Payment summary retrieved successfully');
+            const summary = await this.paymentService.getPaymentSummary(filters);
+            return this.sendSuccess(res, summary, 'Payment summary retrieved successfully');
 
         } catch (error) {
             return this.handleError(res, error, 'Failed to get payment summary');
