@@ -1,570 +1,495 @@
-#!/usr/bin/env node
 /**
- * User Service
+ * UserService
  * 
- * Handles user management operations including profile management,
- * user creation, updates, and user-related business logic.
+ * Handles user profile management, permissions, roles, and account operations.
+ * Manages user lifecycle including creation, updates, status changes, and deletions.
+ * 
+ * @extends BaseService
+ * @module services/UserService
+ * @version 2.0.0
  */
 
 import BaseService from './BaseService.js';
-import UserRepository from '../repositories/UserRepository.js';
-import RoleRepository from '../repositories/RoleRepository.js';
-import ActivityRepository from '../repositories/ActivityRepository.js';
-import EmailService from './EmailService.js';
-import { populate } from 'dotenv';
-import mongoose from 'mongoose';
+import bcrypt from 'bcrypt';
 
-class UserService extends BaseService {
-    constructor() {
-        super();
-        this.userRepository = new UserRepository();
-        this.roleRepository = new RoleRepository();
-        this.activityRepository = new ActivityRepository();
-        this.emailService = new EmailService();
+export default class UserService extends BaseService {
+    constructor(repositories) {
+        super(repositories, {
+            serviceName: 'UserService',
+            primaryRepository: 'user',
+        });
     }
 
     /**
-     * Create a new user
-     * @param {Object} userData - User data
-     * @param {String} createdBy - ID of user creating this user
-     * @returns {Promise<Object>} Created user
+     * Get user profile by ID with related data
      */
-    async createUser(userData, createdBy = null) {
-        try {
-            this._log('create_user', { email: userData.email, createdBy });
-
-            // Validate required fields
-            this._validateRequiredFields(userData, ['name', 'email', 'password', 'role']);
-            this._validateEmail(userData.email);
-
-            // Check if email already exists
-            const existingUser = await this.userRepository.findByEmail(userData.email);
-            if (existingUser) {
-                throw new Error('Email already exists');
-            }
-
-            // Validate role exists
-            this._validateObjectId(userData.role, 'Role ID');
-            const role = await this.roleRepository.findById(userData.role);
-            if (!role) {
-                throw new Error('Role not found');
-            }
-
-            // Create user
-            const userToCreate = {
-                ...this._sanitizeData(userData),
-                isActive: userData.isActive !== undefined ? userData.isActive : true,
-                emailVerified: false,
-                createdAt: new Date()
-            };
-
-            const user = await this.userRepository.create(userToCreate);
-
-            // Log activity
-            if (createdBy) {
-                await this.activityRepository.logActivity({
-                    user: createdBy,
-                    action: 'create',
-                    targetType: 'user',
-                    targetId: user._id,
-                    metadata: { userEmail: user.email, roleName: role.name }
-                });
-            }
-
-            // Send welcome email
-            try {
-                await this.emailService.sendWelcomeEmail({
-                    name: user.name,
-                    email: user.email,
-                    role: role.name,
-                    createdAt: user.createdAt
-                });
-                this._log('welcome_email_sent', { userId: user._id, email: user.email });
-            } catch (emailError) {
-                this._handleError('welcome_email_failed', emailError, { userId: user._id, email: user.email });
-                // Don't throw error - user creation should succeed even if email fails
-            }
-
-            this._log('create_user_success', { userId: user._id, email: user.email });
-
-            return {
-                success: true,
-                user: {
-                    id: user._id,
-                    name: user.name,
-                    email: user.email,
-                    role: {
-                        id: role._id,
-                        name: role.name,
-                        level: role.level
-                    },
-                    isActive: user.isActive,
-                    createdAt: user.createdAt
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'create_user', { email: userData.email });
-        }
-    }
-
-
-    /**
-     * Get user by ID
-     * @param {String} userId - User ID
-     * @param {Boolean} includeRole - Whether to include role information
-     * @returns {Promise<Object>} User data
-     */
-    async getUserById(userId, includeRole = true) {
-        try {
-            this._log('get_user_by_id', { userId });
-
-            this._validateObjectId(userId, 'User ID');
-
-            const user = await this.userRepository.findById(userId);
+    async getUserProfile(userId) {
+        return this.runInContext('getUserProfile', async () => {
+            const user = await this.repo('user').findById(userId);
+            
             if (!user) {
                 throw new Error('User not found');
             }
 
-            let roleInfo = null;
-            if (includeRole) {
-                const role = await this.roleRepository.findById(user.role);
-                if (role) {
-                    roleInfo = {
-                        id: role._id,
-                        name: role.name,
-                        level: role.level
-                    };
-                }
+            // Get user activity summary
+            const activityCount = await this.repo('activity')
+                .count({ userId, resourceType: { $in: ['vote', 'event', 'payment'] } });
+
+            // Get user votes count
+            const votesCount = await this.repo('vote').count({ voterId: userId });
+
+            // Get user events (if organizer)
+            let eventsOrganized = 0;
+            if (user.level >= 2) {
+                eventsOrganized = await this.repo('event').count({ createdBy: userId });
             }
 
-            return {
-                success: true,
-                user: {
-                    id: user._id,
-                    name: user.name,
-                    email: user.email,
-                    role: roleInfo,
-                    isActive: user.isActive,
-                    emailVerified: user.emailVerified,
-                    lastLogin: user.lastLogin,
-                    createdAt: user.createdAt,
-                    updatedAt: user.updatedAt
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'get_user_by_id', { userId });
-        }
+            return this.handleSuccess({
+                user: this._sanitizeUser(user),
+                stats: {
+                    activitiesCount: activityCount,
+                    votesCount,
+                    eventsOrganized,
+                },
+            }, 'Profile retrieved successfully');
+        });
     }
 
     /**
      * Update user profile
-     * @param {String} userId - User ID
-     * @param {Object} updateData - Data to update
-     * @param {String} updatedBy - ID of user making the update
-     * @returns {Promise<Object>} Updated user
      */
-    async updateUser(userId, updateData, updatedBy = null) {
-        try {
-            this._log('update_user', { userId, updatedBy });
+    async updateProfile(userId, updates) {
+        return this.runInContext('updateProfile', async () => {
+            // Prevent updating sensitive fields directly
+            const allowedFields = ['firstName', 'lastName', 'phone', 'dateOfBirth', 'gender', 'address', 'bio'];
+            const sanitizedUpdates = {};
 
-            this._validateObjectId(userId, 'User ID');
-
-            // Get current user
-            const currentUser = await this.userRepository.findById(userId);
-            if (!currentUser) {
-                throw new Error('User not found');
+            for (const field of allowedFields) {
+                if (updates[field] !== undefined) {
+                    sanitizedUpdates[field] = updates[field];
+                }
             }
 
             // Validate email if being updated
-            if (updateData.email) {
-                this._validateEmail(updateData.email);
+            if (updates.email) {
+                this.validateEmail(updates.email);
                 
-                // Check if new email already exists (excluding current user)
-                const existingUser = await this.userRepository.findByEmail(updateData.email);
-                if (existingUser && existingUser._id.toString() !== userId) {
-                    throw new Error('Email already exists');
-                }
-            }
-
-            // Validate role if being updated
-            if (updateData.role) {
-                this._validateObjectId(updateData.role, 'Role ID');
-                const role = await this.roleRepository.findById(updateData.role);
-                if (!role) {
-                    throw new Error('Role not found');
-                }
-            }
-
-            // Sanitize and prepare update data
-            const sanitizedData = this._sanitizeData(updateData);
-            
-            // Remove fields that shouldn't be updated directly
-            delete sanitizedData.password; // Use changePassword method
-            delete sanitizedData._id;
-            delete sanitizedData.createdAt;
-
-            sanitizedData.updatedAt = new Date();
-
-            // Update user
-            const updatedUser = await this.userRepository.updateById(userId, sanitizedData);
-
-            // Log activity
-            if (updatedBy) {
-                await this.activityRepository.logActivity({
-                    user: updatedBy,
-                    action: 'update',
-                    targetType: 'user',
-                    targetId: userId,
-                    metadata: { 
-                        updatedFields: Object.keys(sanitizedData),
-                        targetEmail: updatedUser.email 
-                    }
+                // Check if email is already taken
+                const existingUser = await this.repo('user').findOne({ 
+                    email: updates.email, 
+                    _id: { $ne: userId } 
                 });
-            }
 
-            this._log('update_user_success', { userId });
-
-            return {
-                success: true,
-                user: {
-                    id: updatedUser._id,
-                    name: updatedUser.name,
-                    email: updatedUser.email,
-                    isActive: updatedUser.isActive,
-                    updatedAt: updatedUser.updatedAt
+                if (existingUser) {
+                    throw new Error('Email already in use');
                 }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'update_user', { userId });
-        }
-    }
 
-    /**
-     * Deactivate user account
-     * @param {String} userId - User ID
-     * @param {String} deactivatedBy - ID of user performing deactivation
-     * @returns {Promise<Object>} Deactivation result
-     */
-    async deactivateUser(userId, deactivatedBy) {
-        try {
-            this._log('deactivate_user', { userId, deactivatedBy });
-
-            this._validateObjectId(userId, 'User ID');
-            this._validateObjectId(deactivatedBy, 'Deactivated By User ID');
-
-            const user = await this.userRepository.findById(userId);
-            if (!user) {
-                throw new Error('User not found');
+                sanitizedUpdates.email = updates.email;
+                sanitizedUpdates.emailVerified = false; // Require re-verification
             }
 
-            if (!user.isActive) {
-                throw new Error('User is already deactivated');
-            }
+            const updatedUser = await this.repo('user').update(userId, sanitizedUpdates);
 
-            // Deactivate user
-            const updatedUser = await this.userRepository.updateById(userId, {
-                isActive: false,
-                deactivatedAt: new Date(),
-                deactivatedBy
+            await this.logActivity(userId, 'update', 'user', {
+                fields: Object.keys(sanitizedUpdates),
+                requiresVerification: !!updates.email,
             });
 
-            // Log activity
-            await this.activityRepository.logActivity({
-                user: deactivatedBy,
-                action: 'user_deactivate',
-                targetType: 'user',
-                targetId: userId,
-                metadata: { targetEmail: user.email }
-            });
-
-            this._log('deactivate_user_success', { userId });
-
-            return {
-                success: true,
-                message: 'User deactivated successfully'
-            };
-        } catch (error) {
-            throw this._handleError(error, 'deactivate_user', { userId });
-        }
-    }
-
-    /**
-     * Reactivate user account
-     * @param {String} userId - User ID
-     * @param {String} reactivatedBy - ID of user performing reactivation
-     * @returns {Promise<Object>} Reactivation result
-     */
-    async reactivateUser(userId, reactivatedBy) {
-        try {
-            this._log('reactivate_user', { userId, reactivatedBy });
-
-            this._validateObjectId(userId, 'User ID');
-            this._validateObjectId(reactivatedBy, 'Reactivated By User ID');
-
-            const user = await this.userRepository.findById(userId);
-            if (!user) {
-                throw new Error('User not found');
-            }
-
-            if (user.isActive) {
-                throw new Error('User is already active');
-            }
-
-            // Reactivate user
-            await this.userRepository.updateById(userId, {
-                isActive: true,
-                reactivatedAt: new Date(),
-                reactivatedBy,
-                deactivatedAt: null,
-                deactivatedBy: null
-            });
-
-            // Log activity
-            await this.activityRepository.logActivity({
-                user: reactivatedBy,
-                action: 'user_reactivate',
-                targetType: 'user',
-                targetId: userId,
-                metadata: { targetEmail: user.email }
-            });
-
-            this._log('reactivate_user_success', { userId });
-
-            return {
-                success: true,
-                message: 'User reactivated successfully'
-            };
-        } catch (error) {
-            throw this._handleError(error, 'reactivate_user', { userId });
-        }
-    }
-
-    /**
-     * Get users with pagination and filtering
-     * @param {Object} query - Query parameters
-     * @returns {Promise<Object>} Paginated users
-     */
-    async getUsers(query = {}) {
-        try {
-            this._log('get_users', { query });
-
-            const { page, limit } = this._generatePaginationOptions(
-                query.page, 
-                query.limit, 
-                100
+            return this.handleSuccess(
+                { user: this._sanitizeUser(updatedUser) },
+                'Profile updated successfully'
             );
-
-            // Create search filter
-            const filter = this._createSearchFilter(query, ['name', 'email', 'status']);
-
-            // Add role filter if specified
-            if (query.role) {
-                this._validateObjectId(query.role, 'Role ID');
-                filter.role = new mongoose.Types.ObjectId(query.role);
-            }
-
-            // Get users with pagination
-            const users = await this.userRepository.find(filter, {
-                skip: (page - 1) * limit,
-                limit,
-                populate: 'role',
-                select: '-password -__v',
-            });
-
-            const totalItems = await this.userRepository.countDocuments(filter);
-
-            console.log(users);
-
-            return {
-                success: true,
-                data: this._formatPaginationResponse(users, totalItems, page, limit)
-            };
-        } catch (error) {
-            throw this._handleError(error, 'get_users', { query });
-        }
+        });
     }
 
     /**
-     * Get detailed stats for a user
-     * @param {String} userId - User ID
-     * @returns {Promise<Object>} User stats
+     * Update user password
      */
-    async getUserStats(userId) {
-        try {
-            this._log('get_user_stats', { userId });
+    async updatePassword(userId, currentPassword, newPassword) {
+        return this.runInContext('updatePassword', async () => {
+            const user = await this.repo('user').findById(userId);
+            
+            if (!user) {
+                throw new Error('User not found');
+            }
 
-            this._validateObjectId(userId, 'User ID');
+            // Verify current password
+            const isMatch = await bcrypt.compare(currentPassword, user.password);
+            if (!isMatch) {
+                throw new Error('Current password is incorrect');
+            }
 
-            // Events created by user
-            const events = await this.activityRepository.find({
-                user: userId,
-                action: 'create',
-                targetType: 'event'
+            // Validate new password
+            this.validatePassword(newPassword);
+
+            // Hash new password
+            const saltRounds = this.getSetting('security.bcryptRounds', 10);
+            const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+            await this.repo('user').update(userId, { password: hashedPassword });
+
+            await this.logActivity(userId, 'update', 'user', {
+                action: 'password_change',
             });
 
-            // Categories created by user
-            const categories = await this.activityRepository.find({
-                user: userId,
-                action: 'create',
-                targetType: 'category'
+            return this.handleSuccess(null, 'Password updated successfully');
+        });
+    }
+
+    /**
+     * Update user photo
+     */
+    async updatePhoto(userId, photoPath) {
+        return this.runInContext('updatePhoto', async () => {
+            const user = await this.repo('user').findById(userId);
+            
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            const updatedUser = await this.repo('user').update(userId, { photo: photoPath });
+
+            await this.logActivity(userId, 'update', 'user', {
+                action: 'photo_update',
+                photoPath,
             });
 
-            // VoteBundles created by user
-            const voteBundles = await this.activityRepository.find({
-                user: userId,
-                action: 'create',
-                targetType: 'votebundle'
-            });
+            return this.handleSuccess(
+                { user: this._sanitizeUser(updatedUser) },
+                'Photo updated successfully'
+            );
+        });
+    }
 
-            // Coupons created by user
-            const coupons = await this.activityRepository.find({
-                user: userId,
-                action: 'create',
-                targetType: 'coupon'
-            });
+    /**
+     * List users with filters and pagination
+     */
+    async listUsers(filters = {}, pagination = {}) {
+        return this.runInContext('listUsers', async () => {
+            const { page, limit, skip } = this.parsePagination(pagination);
 
-            // Updates made by user
-            const updates = await this.activityRepository.find({
-                user: userId,
-                action: 'update'
-            });
+            const query = {};
 
-            // Logins made by user
-            const logins = await this.activityRepository.find({
-                user: userId,
-                action: 'login'
-            });
+            // Filter by role
+            if (filters.role) {
+                query.role = filters.role;
+            }
 
-            const recentActivity = await this.activityRepository.find({
-                user: userId,
-                createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } // Last 7 days
-            });
+            // Filter by level
+            if (filters.level) {
+                query.level = parseInt(filters.level);
+            }
 
-            return {
-                success: true,
-                data: {
-                    eventsCreated: events.length,
-                    categoriesCreated: categories.length,
-                    voteBundlesCreated: voteBundles.length,
-                    couponsCreated: coupons.length,
-                    updatesMade: updates.length,
-                    recentActivity,
-                    totalLogins: logins.length,
-                    events,
-                    categories,
-                    voteBundles,
-                    coupons,
-                    updates,
-                    lastLogin: logins[0]?.createdAt || null
+            // Filter by verification status
+            if (filters.emailVerified !== undefined) {
+                query.emailVerified = filters.emailVerified === 'true';
+            }
+
+            // Filter by status
+            if (filters.status) {
+                query.status = filters.status;
+            }
+
+            // Search by name or email
+            if (filters.search) {
+                query.$or = [
+                    { firstName: { $regex: filters.search, $options: 'i' } },
+                    { lastName: { $regex: filters.search, $options: 'i' } },
+                    { email: { $regex: filters.search, $options: 'i' } },
+                ];
+            }
+
+            // Date range filter
+            if (filters.startDate || filters.endDate) {
+                query.createdAt = {};
+                if (filters.startDate) {
+                    query.createdAt.$gte = new Date(filters.startDate);
                 }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'get_user_stats', { userId });
-        }
+                if (filters.endDate) {
+                    query.createdAt.$lte = new Date(filters.endDate);
+                }
+            }
+
+            const users = await this.repo('user').findWithPagination(query, {
+                page,
+                limit,
+                sort: filters.sort || { createdAt: -1 },
+            });
+
+            const sanitizedUsers = users.docs.map(user => this._sanitizeUser(user));
+
+            return this.handleSuccess(
+                this.createPaginatedResponse(sanitizedUsers, users.total, page, limit),
+                'Users retrieved successfully'
+            );
+        });
+    }
+
+    /**
+     * Search users by text
+     */
+    async searchUsers(searchTerm, pagination = {}) {
+        return this.runInContext('searchUsers', async () => {
+            const { page, limit } = this.parsePagination(pagination);
+
+            const results = await this.repo('user').textSearch(searchTerm, {
+                page,
+                limit,
+            });
+
+            const sanitizedUsers = results.docs.map(user => this._sanitizeUser(user));
+
+            return this.handleSuccess(
+                this.createPaginatedResponse(sanitizedUsers, results.total, page, limit),
+                'Search completed successfully'
+            );
+        });
+    }
+
+    /**
+     * Update user role and level
+     */
+    async updateUserRole(userId, adminId, newRole, newLevel) {
+        return this.runInContext('updateUserRole', async () => {
+            const user = await this.repo('user').findById(userId);
+            
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            // Validate role
+            const validRoles = ['voter', 'organizer', 'admin', 'super-admin'];
+            if (!validRoles.includes(newRole)) {
+                throw new Error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+            }
+
+            // Validate level (1-4)
+            if (newLevel < 1 || newLevel > 4) {
+                throw new Error('Level must be between 1 and 4');
+            }
+
+            const updates = { role: newRole, level: newLevel };
+            const updatedUser = await this.repo('user').update(userId, updates);
+
+            await this.logActivity(adminId, 'update', 'user', {
+                userId,
+                previousRole: user.role,
+                newRole,
+                previousLevel: user.level,
+                newLevel,
+            });
+
+            return this.handleSuccess(
+                { user: this._sanitizeUser(updatedUser) },
+                'User role updated successfully'
+            );
+        });
+    }
+
+    /**
+     * Update user status (active, suspended, banned)
+     */
+    async updateUserStatus(userId, adminId, newStatus, reason = '') {
+        return this.runInContext('updateUserStatus', async () => {
+            const user = await this.repo('user').findById(userId);
+            
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            const validStatuses = ['active', 'suspended', 'banned', 'inactive'];
+            if (!validStatuses.includes(newStatus)) {
+                throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+            }
+
+            const updatedUser = await this.repo('user').update(userId, { status: newStatus });
+
+            await this.logActivity(adminId, 'update', 'user', {
+                userId,
+                action: 'status_change',
+                previousStatus: user.status,
+                newStatus,
+                reason,
+            });
+
+            return this.handleSuccess(
+                { user: this._sanitizeUser(updatedUser) },
+                `User status updated to ${newStatus}`
+            );
+        });
+    }
+
+    /**
+     * Delete user account (soft delete by setting status)
+     */
+    async deleteUser(userId, adminId, reason = '') {
+        return this.runInContext('deleteUser', async () => {
+            const user = await this.repo('user').findById(userId);
+            
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            // Soft delete by updating status
+            await this.repo('user').update(userId, { 
+                status: 'deleted',
+                deletedAt: new Date(),
+                deletedBy: adminId,
+            });
+
+            await this.logActivity(adminId, 'delete', 'user', {
+                userId,
+                email: user.email,
+                reason,
+            });
+
+            return this.handleSuccess(null, 'User deleted successfully');
+        });
     }
 
     /**
      * Get user statistics
-     * @returns {Promise<Object>} User statistics
      */
-    async getUserStatistics() {
-        try {
-            this._log('get_user_statistics');
+    async getUserStatistics(userId) {
+        return this.runInContext('getUserStatistics', async () => {
+            const user = await this.repo('user').findById(userId);
+            
+            if (!user) {
+                throw new Error('User not found');
+            }
 
-            const stats = await this.userRepository.getUserStats();
+            // Votes statistics
+            const totalVotes = await this.repo('vote').count({ voterId: userId });
+            const votesByEvent = await this.repo('vote').aggregate([
+                { $match: { voterId: userId } },
+                { $group: { _id: '$eventId', count: { $sum: 1 } } },
+            ]);
 
-            return {
-                success: true,
-                data: {
-                    ...stats,
-                    generatedAt: new Date()
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'get_user_statistics');
-        }
-    }
+            // Events statistics (if organizer)
+            let eventsStats = null;
+            if (user.level >= 2) {
+                const totalEvents = await this.repo('event').count({ createdBy: userId });
+                const eventsByStatus = await this.repo('event').aggregate([
+                    { $match: { createdBy: userId } },
+                    { $group: { _id: '$status', count: { $sum: 1 } } },
+                ]);
 
-    /**
-     * Search users by criteria
-     * @param {String} searchTerm - Search term
-     * @param {Object} options - Search options
-     * @returns {Promise<Object>} Search results
-     */
-    async searchUsers(searchTerm, options = {}) {
-        try {
-            this._log('search_users', { searchTerm, options });
-
-            if (!searchTerm || searchTerm.trim().length === 0) {
-                return {
-                    success: true,
-                    data: []
+                eventsStats = {
+                    total: totalEvents,
+                    byStatus: eventsByStatus,
                 };
             }
 
-            const searchCriteria = {
-                $or: [
-                    { name: { $regex: searchTerm, $options: 'i' } },
-                    { email: { $regex: searchTerm, $options: 'i' } }
-                ]
-            };
+            // Payments statistics
+            const totalPayments = await this.repo('payment').count({ userId });
+            const totalSpent = await this.repo('payment').aggregate([
+                { $match: { userId, status: 'successful' } },
+                { $group: { _id: null, total: { $sum: '$amount' } } },
+            ]);
 
-            // Add additional filters
-            if (options.isActive !== undefined) {
-                searchCriteria.isActive = options.isActive;
-            }
-
-            if (options.role) {
-                this._validateObjectId(options.role, 'Role ID');
-                searchCriteria.role = options.role;
-            }
-
-            const users = await this.userRepository.search(searchCriteria);
-
-            // Format results
-            const formattedUsers = await Promise.all(
-                users.map(async (user) => {
-                    const role = await this.roleRepository.findById(user.role);
-                    return {
-                        id: user._id,
-                        name: user.name,
-                        email: user.email,
-                        role: role ? {
-                            id: role._id,
-                            name: role.name,
-                            level: role.level
-                        } : null,
-                        isActive: user.isActive
-                    };
-                })
+            // Activity statistics
+            const recentActivities = await this.repo('activity').find(
+                { userId },
+                { limit: 10, sort: { createdAt: -1 } }
             );
 
-            return {
-                success: true,
-                data: formattedUsers
-            };
-        } catch (error) {
-            throw this._handleError(error, 'search_users', { searchTerm });
-        }
+            return this.handleSuccess({
+                user: this._sanitizeUser(user),
+                statistics: {
+                    votes: {
+                        total: totalVotes,
+                        byEvent: votesByEvent,
+                    },
+                    events: eventsStats,
+                    payments: {
+                        total: totalPayments,
+                        totalSpent: totalSpent[0]?.total || 0,
+                    },
+                    recentActivities,
+                },
+            }, 'Statistics retrieved successfully');
+        });
     }
 
     /**
-     * Get roles
+     * Get users by role
      */
-    async getRoles() {
-        try {
-            this._log('get_roles');
+    async getUsersByRole(role, pagination = {}) {
+        return this.runInContext('getUsersByRole', async () => {
+            const { page, limit } = this.parsePagination(pagination);
 
-            const roles = await this.roleRepository.find();
+            const users = await this.repo('user').findWithPagination(
+                { role },
+                { page, limit, sort: { createdAt: -1 } }
+            );
 
-            return {
-                success: true,
-                data: roles
-            };
-        } catch (error) {
-            throw this._handleError(error, 'get_roles');
-        }
+            const sanitizedUsers = users.docs.map(user => this._sanitizeUser(user));
+
+            return this.handleSuccess(
+                this.createPaginatedResponse(sanitizedUsers, users.total, page, limit),
+                'Users retrieved successfully'
+            );
+        });
+    }
+
+    /**
+     * Bulk update users
+     */
+    async bulkUpdateUsers(userIds, updates, adminId) {
+        return this.runInContext('bulkUpdateUsers', async () => {
+            const allowedFields = ['status', 'role', 'level'];
+            const sanitizedUpdates = {};
+
+            for (const field of allowedFields) {
+                if (updates[field] !== undefined) {
+                    sanitizedUpdates[field] = updates[field];
+                }
+            }
+
+            if (Object.keys(sanitizedUpdates).length === 0) {
+                throw new Error('No valid updates provided');
+            }
+
+            const results = await this.processBatch(
+                userIds,
+                async (userId) => {
+                    try {
+                        await this.repo('user').update(userId, sanitizedUpdates);
+                        return { userId, success: true };
+                    } catch (error) {
+                        return { userId, success: false, error: error.message };
+                    }
+                },
+                10
+            );
+
+            await this.logActivity(adminId, 'bulk_update', 'user', {
+                userIds,
+                updates: sanitizedUpdates,
+                results,
+            });
+
+            const successCount = results.filter(r => r.success).length;
+
+            return this.handleSuccess({
+                total: userIds.length,
+                successful: successCount,
+                failed: userIds.length - successCount,
+                results,
+            }, `Bulk update completed: ${successCount}/${userIds.length} successful`);
+        });
+    }
+
+    /**
+     * Sanitize user object (remove sensitive fields)
+     */
+    _sanitizeUser(user) {
+        if (!user) return null;
+
+        const sanitized = user.toObject ? user.toObject() : { ...user };
+        delete sanitized.password;
+        delete sanitized.__v;
+
+        return sanitized;
     }
 }
-
-export default UserService;

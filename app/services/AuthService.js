@@ -2,811 +2,912 @@
 /**
  * Authentication Service
  * 
- * Handles user authentication, authorization, and session management.
- * Includes login, logout, token management, and permission checks.
+ * Handles user and candidate authentication with:
+ * - Registration and login for both users and candidates
+ * - Email verification with 3-day reminder system
+ * - Password reset flows
+ * - Token management (access & refresh tokens)
+ * - Account locking after failed attempts
+ * - Multi-device tracking
+ * 
+ * @module services/AuthService
+ * @version 2.0.0
  */
 
-import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
 import BaseService from './BaseService.js';
-import UserRepository from '../repositories/UserRepository.js';
-import RoleRepository from '../repositories/RoleRepository.js';
-import EmailService from './EmailService.js';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import config from '../config/ConfigManager.js';
-import ActivityService from './ActivityService.js';
-import CandidateRepository from '../repositories/CandidateRepository.js';
+import emailService from './EmailService.js';
+import { emailQueue } from '../config/queue.js';
 
 class AuthService extends BaseService {
-    constructor() {
-        super();
-        this.userRepository = new UserRepository();
-        this.candidateRepository = new CandidateRepository()
-        this.roleRepository = new RoleRepository();
-        this.emailService = new EmailService();
-        this.activityService = new ActivityService()
-        this.jwtSecret = config.get('jwt.secret');
-        this.jwtExpiresIn = config.get('jwt.expiresIn') || '24h';
-        this.refreshTokenExpiresIn = config.get('jwt.refreshExpiresIn') || '7d';
-        this.jwtAlgorithm = config.get('jwt.algorithm') || 'HS256';
-        this.jwtIssuer = config.get('jwt.issuer') || 'e-voting-app';
-        this.jwtAudience = config.get('jwt.audience') || 'e-voting-app-users';
+    constructor(repositories) {
+        super(repositories);
+        
+        this.JWT_SECRET = config.get('jwt.secret');
+        this.JWT_EXPIRES_IN = config.get('jwt.expiresIn') || '24h';
+        this.JWT_REFRESH_EXPIRES_IN = config.get('jwt.refreshExpiresIn') || '7d';
+        this.JWT_ISSUER = config.get('jwt.issuer') || 'itfy-evoting';
+        this.JWT_AUDIENCE = config.get('jwt.audience') || 'itfy-evoting-users';
+        
+        this.MAX_LOGIN_ATTEMPTS = 5;
+        this.ACCOUNT_LOCK_DURATION = 15; // minutes
+        this.EMAIL_VERIFICATION_DAYS = 3;
     }
 
-    /**
-     * Authenticate user with email and password
-     * @param {String} email - User email
-     * @param {String} password - User password
-     * @returns {Promise<Object>} Authentication result with tokens and user info
-     */
-    async login(email, password, options = {}) {
-        try {
-            this._log('login', { email, options: options });
-
-            // Validate required fields
-            this._validateRequiredFields({ email, password }, ['email', 'password']);
-            this._validateEmail(email);
-
-            // Find user and verify password
-            const user = await this.userRepository.authenticate(email, password);
-            if (!user) {
-                throw new Error('Invalid email or password');
-            }
-
-            // Check if user is active
-            if (!user.isActive) {
-                throw new Error('Account is deactivated');
-            }
-
-            // Generate tokens
-            const tokens = await this._generateTokens(user);
-
-            // Update last login
-            await this.userRepository.updateById(user._id, {
-                lastLogin: new Date(),
-                lastLoginIP: options.ipAddress || 'Unknown',
-                lastLoginLocation: options.location ? `${options.location.country}, ${options.location.city}` : 'Unknown'
-            });
-
-
-            const role = user.role
-            this._log('login_success', { userId: user._id, email, role: user.role.level });
-
-            //log activity
-            this.activityService.logActivity({
-                user: user._id,
-                action: "login",
-                userModel: "User",
-                targetType: "user",
-                targetId: user._id,
-                ipAddress: options.ipAddress || "Unknown",
-                userAgent: options.userAgent || "Unknown",
-                timestamp: new Date()
-            })
-            return {
-                success: true,
-                user: {
-                    id: user._id,
-                    name: user.name,
-                    email: user.email,
-                    image: user.image,
-                    bio: user.bio,
-                    location: user.location,
-                    phone: user.phone,
-                    role: {
-                        id: role._id,
-                        name: role.name,
-                        level: role.level
-                    },
-                    lastLogin: new Date()
-                },
-                tokens: {
-                    accessToken: tokens.accessToken,
-                    refreshToken: tokens.refreshToken,
-                    expiresIn: this.jwtExpiresIn
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'login', { email });
-        }
-    }
-
-    /**
-     * Authenticate a candidate's email and password
-     * @param {string} email - The email of the candidate
-     * @param {string} password - The password of the candidate
-     */
-    async loginAsCandidateByEmail(email, password, options={}) {
-        try {
-            this._log('login_as_candidate', { email, password })
-
-            // Validate required fields
-            this._validateRequiredFields({ email, password }, ['email', 'password']);
-            this._validateEmail(email);
-
-            //Find the candidate and verify the password
-            const candidate = await this.candidateRepository.authenticateEmail(email, password);
-            if (!candidate) {
-                throw new Error('Invalid email or password');
-            }
-
-            //Check if candidate is active
-            if (!candidate.isActive) {
-                throw new Error('Candidate account is deactivated');
-            }
-
-            //Generate tokens
-            const tokens = await this._generateTokens(candidate, true);
-
-            this._log('login_as_candidate_success', { candidateId: candidate._id, email })
-
-            //log activity
-            this.activityService.logActivity({
-                user: candidate._id,
-                action: "login",
-                targetType: "candidate",
-                targetId: candidate._id,
-                userModel: 'Candidate',
-                ipAddress: options.ipAddress || "Unknown",
-                userAgent: options.userAgent || "Unknown",
-                timestamp: new Date()
-            })
-
-            return {
-                success: true,
-                candidate: {
-                    id: candidate._id,
-                    name: candidate.name,
-                    email: candidate.email,
-                    image: candidate.image,
-                    bio: candidate.bio,
-                    location: candidate.location,
-                    phone: candidate.phone,
-                    cId: candidate.cId,
-                    lastLogin: new Date()
-                },
-                tokens: {
-                    accessToken: tokens.accessToken,
-                    refreshToken: tokens.refreshToken,
-                    expiresIn: this.jwtExpiresIn
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'login_as_candidate');
-        }
-    }
-
-      /**
-     * Authenticate a candidate's cId and password
-     * @param {string} email - The email of the candidate
-     * @param {string} password - The password of the candidate
-     */
-    async loginAsCandidateByCId(cId, password, options={}) {
-        try {
-            this._log('login_as_candidate', { cId, password })
-
-            // Validate required fields
-            this._validateRequiredFields({ cId, password }, ['cId', 'password']);
-
-            //Find the candidate and verify the password
-            const candidate = await this.candidateRepository.authenticateCId(cId, password);
-            if (!candidate) {
-                throw new Error('Invalid email or password');
-            }
-
-            //Check if candidate is active
-            if (!candidate.isActive) {
-                throw new Error('Candidate account is deactivated');
-            }
-
-            //Generate tokens
-            const tokens = await this._generateTokens(candidate, true);
-
-            this._log('login_as_candidate_success', { candidateId: candidate._id, cId })
-
-            //log activity
-            this.activityService.logActivity({
-                user: candidate._id,
-                action: "login",
-                targetType: "candidate",
-                targetId: candidate._id,
-                userModel: 'Candidate',
-                ipAddress: options.ipAddress || "Unknown",
-                userAgent: options.userAgent || "Unknown",
-                timestamp: new Date()
-            })
-            return {
-                success: true,
-                candidate: {
-                    id: candidate._id,
-                    name: candidate.name,
-                    email: candidate.email,
-                    image: candidate.image,
-                    bio: candidate.bio,
-                    location: candidate.location,
-                    phone: candidate.phone,
-                    cId: candidate.cId,
-                    lastLogin: new Date()
-                },
-                tokens: {
-                    accessToken: tokens.accessToken,
-                    refreshToken: tokens.refreshToken,
-                    expiresIn: this.jwtExpiresIn
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'login_as_candidate');
-        }
-    }
-
-    /**
-     * Refresh access token using refresh token
-     * @param {String} refreshToken - Refresh token
-     * @returns {Promise<Object>} New access token
-     */
-    async refreshToken(refreshToken) {
-        try {
-            this._log('refresh_token');
-
-            if (!refreshToken) {
-                throw new Error('Refresh token is required');
-            }
-
-            // Verify refresh token
-            const decoded = jwt.verify(refreshToken, this.jwtSecret);
-
-            // Find user
-            const user = await this.userRepository.findById(decoded.userId);
-            if (!user || !user.isActive) {
-                throw new Error('Invalid refresh token');
-            }
-
-            // Generate new access token
-            const accessToken = this._generateAccessToken(user);
-
-            this._log('refresh_token_success', { userId: user._id });
-
-            return {
-                success: true,
-                accessToken,
-                expiresIn: this.jwtExpiresIn
-            };
-        } catch (error) {
-            throw this._handleError(error, 'refresh_token');
-        }
-    }
-
-    /**
-     * Logout user (invalidate tokens)
-     * @param {String} userId - User ID
-     * @returns {Promise<Object>} Logout result
-     */
-    async logout(userId) {
-        try {
-            this._log('logout', { userId });
-
-            this._validateObjectId(userId, 'User ID');
-
-            // Update user's last logout time
-            await this.userRepository.updateById(userId, {
-                lastLogout: new Date()
-            });
-
-            this._log('logout_success', { userId });
-
-            return {
-                success: true,
-                message: 'Logged out successfully'
-            };
-        } catch (error) {
-            throw this._handleError(error, 'logout', { userId });
-        }
-    }
+    // ================================
+    // USER AUTHENTICATION
+    // ================================
 
     /**
      * Register new user
-     * @param {Object} userData - User registration data
-     * @returns {Promise<Object>} Registration result
+     * @param {Object} userData - { email, password, level, firstName, lastName }
+     * @param {Object} [metadata={}] - { ip, userAgent }
+     * @returns {Promise<Object>}
      */
-    async register(userData) {
-        try {
-            this._log('register', { email: userData.email });
+    async registerUser(userData, metadata = {}) {
+        return this.runInContext({ action: 'registerUser' }, async () => {
+            try {
+                this.validateRequiredFields(userData, ['email', 'password']);
 
-            // Validate required fields
-            this._validateRequiredFields(userData, ['name', 'email', 'password']);
-            this._validateEmail(userData.email);
+                // Validate email format
+                if (!this.validateEmail(userData.email)) {
+                    throw new Error('Invalid email format');
+                }
 
-            // Validate password strength
-            this._validatePassword(userData.password);
+                // Validate password strength
+                const passwordValidation = this.validatePassword(userData.password);
+                if (!passwordValidation.valid) {
+                    throw new Error(passwordValidation.errors.join(', '));
+                }
 
-            // Check if email already exists
-            const existingUser = await this.userRepository.findByEmail(userData.email);
-            if (existingUser) {
-                throw new Error('Email already registered');
-            }
+                // Check for existing user
+                const existingUser = await this.repo('user').findByEmail(userData.email);
+                if (existingUser) {
+                    throw new Error('Email already registered');
+                }
 
-            // Get default role (lowest level)
-            const defaultRole = await this.roleRepository.getLowestLevelRole();
-            if (!defaultRole) {
-                throw new Error('Default role not found');
-            }
+                // Hash password
+                const hashedPassword = await bcrypt.hash(
+                    userData.password,
+                    await this.getSetting('security.bcrypt.rounds', 10)
+                );
 
-            // Create user with default role
-            const userToCreate = {
-                ...userData,
-                role: defaultRole._id,
-                isActive: true,
-                emailVerified: false
-            };
+                // Create user
+                const user = await this.repo('user').createUser({
+                    email: userData.email,
+                    password: hashedPassword,
+                    level: userData.level || 1,
+                    firstName: userData.firstName,
+                    lastName: userData.lastName,
+                    emailVerified: false,
+                    active: true
+                });
 
-            const user = await this.userRepository.create(userToCreate);
+                // Generate verification token
+                const verificationToken = this.generateToken(user._id, user.email, 'email-verification', '7d');
+                const verificationUrl = `${config.get('app.url')}/verify-email?token=${verificationToken}`;
 
-            this._log('register_success', { userId: user._id, email: user.email });
-
-            return {
-                success: true,
-                user: {
-                    id: user._id,
-                    name: user.name,
+                // Queue welcome + verification email
+                await emailQueue.add('send-welcome-email', {
                     email: user.email,
-                    role: {
-                        id: defaultRole._id,
-                        name: defaultRole.name,
-                        level: defaultRole.level
-                    }
+                    name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
+                    verificationUrl
+                });
+
+                // Schedule 3-day reminder if not verified
+                await this.scheduleVerificationReminder(user._id, user.email, verificationToken);
+
+                // Generate tokens
+                const { accessToken, refreshToken } = this.generateAuthTokens(user);
+
+                // Log activity
+                await this.logActivity(user._id, 'user_registered', 'User', metadata);
+
+                return this.handleSuccess({
+                    user: this.sanitizeUser(user),
+                    accessToken,
+                    refreshToken,
+                    message: 'Registration successful. Please verify your email.'
+                });
+            } catch (error) {
+                return this.handleError(error, 'User registration failed');
+            }
+        });
+    }
+
+    /**
+     * Login user
+     * @param {Object} credentials - { email, password }
+     * @param {Object} [metadata={}] - { ip, userAgent }
+     * @returns {Promise<Object>}
+     */
+    async loginUser(credentials, metadata = {}) {
+        return this.runInContext({ action: 'loginUser' }, async () => {
+            try {
+                this.validateRequiredFields(credentials, ['email', 'password']);
+
+                // Rate limiting check
+                await this.checkLoginRateLimit(credentials.email, metadata.ip);
+
+                const user = await this.repo('user').findByEmailWithPassword(credentials.email, { skipCache: true });
+
+                // Constant-time comparison to prevent timing attacks
+                const passwordHash = user?.password || '$2b$10$X/invalid/hash/that/will/never/match';
+                const isValid = await bcrypt.compare(credentials.password, passwordHash);
+
+                if (!user) {
+                    await this.incrementLoginAttempts(credentials.email, metadata.ip);
+                    throw new Error('Invalid email or password');
+                }
+
+                // Check account lock
+                if (user.lockedUntil && user.lockedUntil > new Date()) {
+                    const minutesLeft = Math.ceil((user.lockedUntil - new Date()) / 60000);
+                    throw new Error(`Account locked. Try again in ${minutesLeft} minutes.`);
+                }
+
+                if (!isValid) {
+                    await this.handleFailedLogin(user._id);
+                    await this.incrementLoginAttempts(credentials.email, metadata.ip);
+                    throw new Error('Invalid email or password');
+                }
+
+                // Check if account is active
+                if (!user.active) {
+                    throw new Error('Account is disabled');
+                }
+
+                // Reset failed attempts
+                if (user.loginAttempts > 0) {
+                    await this.repo('user').updateById(user._id, {
+                        loginAttempts: 0,
+                        lockedUntil: null
+                    });
+                }
+
+                // Update last login
+                await this.repo('user').updateById(user._id, {
+                    lastLogin: new Date()
+                });
+
+                // Generate tokens
+                const { accessToken, refreshToken } = this.generateAuthTokens(user);
+
+                // Log activity
+                await this.logActivity(user._id, 'user_login', 'User', metadata);
+
+                // Send warning if email not verified
+                const message = !user.emailVerified 
+                    ? 'Login successful. Please verify your email to access all features.'
+                    : 'Login successful';
+
+                return this.handleSuccess({
+                    user: this.sanitizeUser(user),
+                    accessToken,
+                    refreshToken,
+                    message
+                });
+            } catch (error) {
+                return this.handleError(error, 'Login failed');
+            }
+        });
+    }
+
+    // ================================
+    // CANDIDATE AUTHENTICATION
+    // ================================
+
+    /**
+     * Register candidate (typically done by event manager)
+     * @param {Object} candidateData - Candidate information
+     * @returns {Promise<Object>}
+     */
+    async registerCandidate(candidateData) {
+        return this.runInContext({ action: 'registerCandidate' }, async () => {
+            try {
+                this.validateRequiredFields(candidateData, ['name', 'email', 'event']);
+
+                // Check for existing candidate
+                const existing = await this.repo('candidate').findOne({
+                    email: candidateData.email,
+                    event: candidateData.event
+                });
+
+                if (existing) {
+                    throw new Error('Candidate already registered for this event');
+                }
+
+                // Generate temporary password
+                const tempPassword = this.generateTempPassword();
+                const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+                // Create candidate
+                const candidate = await this.repo('candidate').create({
+                    ...candidateData,
+                    password: hashedPassword,
+                    status: 'pending',
+                    emailVerified: false
+                });
+
+                return this.handleSuccess({
+                    candidate: this.sanitizeCandidate(candidate),
+                    tempPassword, // Send this securely to the candidate
+                    message: 'Candidate registered. Awaiting approval.'
+                });
+            } catch (error) {
+                return this.handleError(error, 'Candidate registration failed');
+            }
+        });
+    }
+
+    /**
+     * Approve candidate and send verification email
+     * @param {string} candidateId - Candidate ID
+     * @returns {Promise<Object>}
+     */
+    async approveCandidate(candidateId) {
+        return this.runInContext({ action: 'approveCandidate' }, async () => {
+            try {
+                const candidate = await this.repo('candidate').findById(candidateId);
+                if (!candidate) {
+                    throw new Error('Candidate not found');
+                }
+
+                const event = await this.repo('event').findById(candidate.event);
+                if (!event) {
+                    throw new Error('Event not found');
+                }
+
+                // Update status
+                await this.repo('candidate').updateById(candidateId, {
+                    status: 'approved',
+                    approvedAt: new Date()
+                });
+
+                // Generate verification token
+                const verificationToken = this.generateToken(candidate._id, candidate.email, 'candidate-email-verification', '7d');
+                const verificationUrl = `${config.get('app.url')}/candidate/verify-email?token=${verificationToken}`;
+
+                // Send approval email with verification link
+                await emailService.sendCandidateApprovedEmail({
+                    email: candidate.email,
+                    name: candidate.name,
+                    eventName: event.title,
+                    verificationUrl
+                });
+
+                // Schedule 3-day verification reminder
+                await this.scheduleVerificationReminder(candidateId, candidate.email, verificationToken, 'candidate');
+
+                return this.handleSuccess({
+                    message: 'Candidate approved and verification email sent'
+                });
+            } catch (error) {
+                return this.handleError(error, 'Candidate approval failed');
+            }
+        });
+    }
+
+    /**
+     * Login candidate
+     * @param {Object} credentials - { email, password, eventId }
+     * @param {Object} [metadata={}] - { ip, userAgent }
+     * @returns {Promise<Object>}
+     */
+    async loginCandidate(credentials, metadata = {}) {
+        return this.runInContext({ action: 'loginCandidate' }, async () => {
+            try {
+                this.validateRequiredFields(credentials, ['email', 'password']);
+
+                const candidate = await this.repo('candidate').findOne({
+                    email: credentials.email,
+                    ...(credentials.eventId && { event: credentials.eventId })
+                }, { skipCache: true });
+
+                if (!candidate) {
+                    throw new Error('Invalid credentials');
+                }
+
+                const isValid = await bcrypt.compare(credentials.password, candidate.password);
+                if (!isValid) {
+                    throw new Error('Invalid credentials');
+                }
+
+                // Check if approved
+                if (candidate.status !== 'approved') {
+                    throw new Error('Candidate not approved yet');
+                }
+
+                // Update last login
+                await this.repo('candidate').updateById(candidate._id, {
+                    lastLogin: new Date()
+                });
+
+                // Generate tokens (with cId claim for candidates)
+                const { accessToken, refreshToken } = this.generateCandidateTokens(candidate);
+
+                const message = !candidate.emailVerified
+                    ? 'Login successful. Please verify your email.'
+                    : 'Login successful';
+
+                return this.handleSuccess({
+                    candidate: this.sanitizeCandidate(candidate),
+                    accessToken,
+                    refreshToken,
+                    message
+                });
+            } catch (error) {
+                return this.handleError(error, 'Candidate login failed');
+            }
+        });
+    }
+
+    // ================================
+    // EMAIL VERIFICATION
+    // ================================
+
+    /**
+     * Verify user email
+     * @param {string} token - Verification token
+     * @returns {Promise<Object>}
+     */
+    async verifyUserEmail(token) {
+        return this.runInContext({ action: 'verifyUserEmail' }, async () => {
+            try {
+                const payload = this.verifyToken(token);
+                
+                if (payload.type !== 'email-verification') {
+                    throw new Error('Invalid verification token');
+                }
+
+                const user = await this.repo('user').findById(payload.sub);
+                if (!user) {
+                    throw new Error('User not found');
+                }
+
+                if (user.emailVerified) {
+                    return this.handleSuccess({ message: 'Email already verified' });
+                }
+
+                await this.repo('user').updateById(user._id, {
+                    emailVerified: true,
+                    emailVerifiedAt: new Date()
+                });
+
+                // Cancel scheduled reminder
+                await this.cancelVerificationReminder(user._id);
+
+                return this.handleSuccess({ message: 'Email verified successfully' });
+            } catch (error) {
+                return this.handleError(error, 'Email verification failed');
+            }
+        });
+    }
+
+    /**
+     * Verify candidate email
+     * @param {string} token - Verification token
+     * @returns {Promise<Object>}
+     */
+    async verifyCandidateEmail(token) {
+        return this.runInContext({ action: 'verifyCandidateEmail' }, async () => {
+            try {
+                const payload = this.verifyToken(token);
+                
+                if (payload.type !== 'candidate-email-verification') {
+                    throw new Error('Invalid verification token');
+                }
+
+                const candidate = await this.repo('candidate').findById(payload.sub);
+                if (!candidate) {
+                    throw new Error('Candidate not found');
+                }
+
+                if (candidate.emailVerified) {
+                    return this.handleSuccess({ message: 'Email already verified' });
+                }
+
+                await this.repo('candidate').updateById(candidate._id, {
+                    emailVerified: true,
+                    emailVerifiedAt: new Date()
+                });
+
+                // Cancel scheduled reminder
+                await this.cancelVerificationReminder(candidate._id, 'candidate');
+
+                return this.handleSuccess({ message: 'Email verified successfully' });
+            } catch (error) {
+                return this.handleError(error, 'Email verification failed');
+            }
+        });
+    }
+
+    /**
+     * Resend verification email
+     * @param {string} email - User email
+     * @param {string} [type='user'] - 'user' or 'candidate'
+     * @returns {Promise<Object>}
+     */
+    async resendVerification(email, type = 'user') {
+        return this.runInContext({ action: 'resendVerification' }, async () => {
+            try {
+                const repo = type === 'user' ? this.repo('user') : this.repo('candidate');
+                const entity = await repo.findOne({ email }, { skipCache: true });
+
+                if (!entity) {
+                    // Return success to prevent email enumeration
+                    return this.handleSuccess({ message: 'If an account exists, verification email sent' });
+                }
+
+                if (entity.emailVerified) {
+                    return this.handleSuccess({ message: 'Email already verified' });
+                }
+
+                const tokenType = type === 'user' ? 'email-verification' : 'candidate-email-verification';
+                const verificationToken = this.generateToken(entity._id, entity.email, tokenType, '7d');
+                const verificationUrl = `${config.get('app.url')}/${type}/verify-email?token=${verificationToken}`;
+
+                await emailService.sendVerificationEmail({
+                    email: entity.email,
+                    name: entity.name || `${entity.firstName || ''} ${entity.lastName || ''}`.trim(),
+                    verificationUrl
+                });
+
+                return this.handleSuccess({ message: 'If an account exists, verification email sent' });
+            } catch (error) {
+                return this.handleError(error, 'Resend verification failed');
+            }
+        });
+    }
+
+    /**
+     * Schedule 3-day verification reminder
+     * @private
+     */
+    async scheduleVerificationReminder(entityId, email, verificationToken, type = 'user') {
+        try {
+            const delay = this.EMAIL_VERIFICATION_DAYS * 24 * 60 * 60 * 1000; // 3 days in ms
+            
+            await emailQueue.add(
+                'send-verification-reminder',
+                {
+                    entityId,
+                    email,
+                    verificationToken,
+                    type,
+                    daysRemaining: 0
                 },
-                message: 'Registration successful'
-            };
-        } catch (error) {
-            throw this._handleError(error, 'register', { email: userData.email });
-        }
-    }
+                {
+                    delay,
+                    jobId: `verification-reminder-${type}-${entityId}`
+                }
+            );
 
-    /**
-     * Change user password
-     * @param {String} userId - User ID
-     * @param {String} currentPassword - Current password
-     * @param {String} newPassword - New password
-     * @returns {Promise<Object>} Password change result
-     */
-    async changePassword(userId, currentPassword, newPassword) {
-        try {
-            this._log('change_password', { userId });
-
-            this._validateObjectId(userId, 'User ID');
-            this._validateRequiredFields({ currentPassword, newPassword }, ['currentPassword', 'newPassword']);
-            this._validatePassword(newPassword);
-
-            // Find user
-            const user = await this.userRepository.findById(userId);
-            if (!user) {
-                throw new Error('User not found');
-            }
-
-            // Verify current password
-            const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
-            if (!isCurrentPasswordValid) {
-                throw new Error('Current password is incorrect');
-            }
-
-            // Hash new password
-            const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-            // Update password
-            await this.userRepository.updateById(userId, {
-                password: hashedPassword,
-                passwordChangedAt: new Date()
-            });
-
-            this._log('change_password_success', { userId });
-
-            return {
-                success: true,
-                message: 'Password changed successfully'
-            };
-        } catch (error) {
-            throw this._handleError(error, 'change_password', { userId });
-        }
-    }
-
-    /**
-     * Verify user token and get user information
-     * @param {String} token - JWT token
-     * @returns {Promise<Object>} User information
-     */
-    async verifyToken(token) {
-        try {
-            if (!token) {
-                throw new Error('Token is required');
-            }
-
-            // Verify token
-            const decoded = jwt.verify(token, this.jwtSecret);
-
-            // Find user
-            const user = await this.userRepository.findById(decoded.userId);
-            if (!user || !user.isActive) {
-                throw new Error('Invalid token');
-            }
-
-            // Get user role
-            const role = await this.roleRepository.findById(user.role);
-
-            return {
-                success: true,
-                user: {
-                    id: user._id,
-                    name: user.name,
-                    email: user.email,
-                    role: {
-                        id: role._id,
-                        name: role.name,
-                        level: role.level
+            // Schedule status revert for candidates (set back to pending if not verified)
+            if (type === 'candidate') {
+                await emailQueue.add(
+                    'revert-candidate-status',
+                    { candidateId: entityId },
+                    {
+                        delay,
+                        jobId: `revert-status-${entityId}`
                     }
-                }
-            };
+                );
+            }
         } catch (error) {
-            throw this._handleError(error, 'verify_token');
+            this.log('error', `Failed to schedule verification reminder: ${error.message}`);
         }
     }
 
     /**
-     * Check if user has required permission level
-     * @param {String} userId - User ID
-     * @param {Number} requiredLevel - Required permission level
-     * @returns {Promise<Boolean>} Permission check result
+     * Cancel verification reminder
+     * @private
      */
-    async hasPermission(userId, requiredLevel) {
+    async cancelVerificationReminder(entityId, type = 'user') {
         try {
-            this._validateObjectId(userId, 'User ID');
-
-            const user = await this.userRepository.findById(userId);
-            if (!user) {
-                return false;
+            const job = await emailQueue.getJob(`verification-reminder-${type}-${entityId}`);
+            if (job) {
+                await job.remove();
             }
 
-            const role = await this.roleRepository.findById(user.role);
-            if (!role) {
-                return false;
+            if (type === 'candidate') {
+                const revertJob = await emailQueue.getJob(`revert-status-${entityId}`);
+                if (revertJob) {
+                    await revertJob.remove();
+                }
             }
-
-            return role.level >= requiredLevel;
         } catch (error) {
-            this._log('permission_check_error', { userId, requiredLevel, error: error.message }, 'error');
-            return false;
+            this.log('error', `Failed to cancel verification reminder: ${error.message}`);
         }
     }
 
-    /**
-     * Generate access and refresh tokens
-     * @param {Object} user - User object
-     * @param {Boolean} isCandidate - Whether the user is a candidate
-     * @returns {Object} Generated tokens
-     * @private
-     */
-    async _generateTokens(user, isCandidate = false) {
-        const accessToken = this._generateAccessToken(user, isCandidate);
-        const refreshToken = this._generateRefreshToken(user);
-
-        return {
-            accessToken,
-            refreshToken
-        };
-    }
-
-    /**
-     * Login as a candidate
-     * @param {password} - Candidate password
-     * @returns {Promise<Object>} Authentication result with tokens and candidate info
-     */
-
-    async candidateLogin(email, password) {
-        try {
-
-            // Generate tokens
-            const tokens = await this._generateTokens({
-                _id: user._id,
-                email: user.email,
-                role: {
-                    id: role._id,
-                    name: role.name,
-                    level: role.level
-                }
-            });
-
-            return {
-                success: true,
-                message: 'Login successful',
-                tokens,
-                user: {
-                    id: user._id,
-                    name: user.name,
-                    email: user.email,
-                    role: {
-                        id: role._id,
-                        name: role.name,
-                        level: role.level
-                    }
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'candidate_login');
-        }
-    }
-
-    /**
-     * Generate access token
-     * @param {Object} user - User object
-     * @param {Boolean} isCandidate - Whether the user is a candidate
-     * @returns {String} Access token
-     * @private
-     */
-    _generateAccessToken(user, isCandidate = false) {
-        return isCandidate === false ? jwt.sign(
-            {
-                userId: user._id,
-                email: user.email,
-                role: user.role
-            },
-            this.jwtSecret,
-            {
-                expiresIn: this.jwtExpiresIn,
-                algorithm: this.jwtAlgorithm,
-                issuer: this.jwtIssuer,
-                audience: this.jwtAudience
-            }
-        ) : jwt.sign({
-            candidateId: user._id,
-            email: user.email,
-            cId: user.cId
-        }, this.jwtSecret,
-            {
-                expiresIn: this.jwtExpiresIn,
-                algorithm: this.jwtAlgorithm,
-                issuer: this.jwtIssuer,
-                audience: this.jwtAudience
-            });
-    }
-
-    /**
-     * Generate refresh token
-     * @param {Object} user - User object
-     * @returns {String} Refresh token
-     * @private
-     */
-    _generateRefreshToken(user) {
-        return jwt.sign(
-            {
-                userId: user._id,
-                type: 'refresh'
-            },
-            this.jwtSecret,
-            {
-                expiresIn: this.refreshTokenExpiresIn,
-                algorithm: this.jwtAlgorithm,
-                issuer: this.jwtIssuer,
-                audience: this.jwtAudience
-            }
-        );
-    }
+    // ================================
+    // PASSWORD MANAGEMENT
+    // ================================
 
     /**
      * Request password reset
-     * @param {String} email - User email
-     * @param {String} ipAddress - Request IP address for security
-     * @returns {Promise<Object>} Password reset result
+     * @param {string} email - User email
+     * @param {string} [type='user'] - 'user' or 'candidate'
+     * @returns {Promise<Object>}
      */
-    async requestPasswordReset(email, ipAddress = 'Unknown') {
-        try {
-            this._log('password_reset_request', { email, ipAddress });
-
-            // Validate email
-            this._validateEmail(email);
-
-            // Find user
-            const user = await this.userRepository.findByEmail(email);
-            if (!user) {
-                // Don't reveal if email exists or not for security
-                return {
-                    success: true,
-                    message: 'If this email exists in our system, you will receive a password reset link'
-                };
-            }
-
-            // Generate reset token
-            const resetToken = this._generateSecureToken();
-            const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
-
-            // Store reset token (you might want to add a password reset table/field)
-            await this.userRepository.updateUser(user._id, {
-                passwordResetToken: resetToken,
-                passwordResetExpires: expiresAt
-            });
-
-            // Send password reset email
+    async requestPasswordReset(email, type = 'user') {
+        return this.runInContext({ action: 'requestPasswordReset' }, async () => {
             try {
-                await this.emailService.sendPasswordResetEmail({
-                    name: user.name,
-                    email: user.email,
-                    ipAddress
-                }, resetToken, 30);
+                const repo = type === 'user' ? this.repo('user') : this.repo('candidate');
+                const entity = await repo.findOne({ email });
 
-                this._log('password_reset_email_sent', { userId: user._id, email });
-            } catch (emailError) {
-                this._logError('password_reset_email_failed', emailError, { userId: user._id, email });
-                // Continue - don't fail the request if email fails
+                if (!entity) {
+                    // Return success to prevent email enumeration
+                    return this.handleSuccess({ message: 'If an account exists, reset email sent' });
+                }
+
+                const resetToken = this.generateToken(entity._id, entity.email, 'password-reset', '1h');
+                const resetUrl = `${config.get('app.url')}/${type}/reset-password?token=${resetToken}`;
+
+                await emailService.sendPasswordResetEmail({
+                    email: entity.email,
+                    name: entity.name || `${entity.firstName || ''} ${entity.lastName || ''}`.trim(),
+                    resetUrl
+                });
+
+                return this.handleSuccess({ message: 'If an account exists, reset email sent' });
+            } catch (error) {
+                return this.handleError(error, 'Password reset request failed');
             }
-
-            return {
-                success: true,
-                message: 'If this email exists in our system, you will receive a password reset link'
-            };
-        } catch (error) {
-            throw this._handleError(error, 'password_reset_request', { email });
-        }
+        });
     }
 
     /**
-     * Request password reset (alias for forgotPassword)
-     * @param {String} email - User email
-     * @param {String} ipAddress - Request IP address for security
-     * @returns {Promise<Object>} Password reset result
+     * Reset password
+     * @param {string} token - Reset token
+     * @param {string} newPassword - New password
+     * @param {string} [type='user'] - 'user' or 'candidate'
+     * @returns {Promise<Object>}
      */
-    async forgotPassword(email, ipAddress = 'Unknown') {
-        return this.requestPasswordReset(email, ipAddress);
+    async resetPassword(token, newPassword, type = 'user') {
+        return this.runInContext({ action: 'resetPassword' }, async () => {
+            try {
+                const payload = this.verifyToken(token);
+                
+                if (payload.type !== 'password-reset') {
+                    throw new Error('Invalid reset token');
+                }
+
+                // Validate new password
+                const passwordValidation = this.validatePassword(newPassword);
+                if (!passwordValidation.valid) {
+                    throw new Error(passwordValidation.errors.join(', '));
+                }
+
+                const repo = type === 'user' ? this.repo('user') : this.repo('candidate');
+                const entity = await repo.findById(payload.sub);
+                
+                if (!entity) {
+                    throw new Error('Account not found');
+                }
+
+                // Hash new password
+                const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+                await repo.updateById(entity._id, {
+                    password: hashedPassword,
+                    loginAttempts: 0,
+                    lockedUntil: null
+                });
+
+                // Send confirmation email
+                await emailService.sendPasswordChangedEmail({
+                    email: entity.email,
+                    name: entity.name || `${entity.firstName || ''} ${entity.lastName || ''}`.trim()
+                });
+
+                return this.handleSuccess({ message: 'Password reset successful' });
+            } catch (error) {
+                return this.handleError(error, 'Password reset failed');
+            }
+        });
     }
 
     /**
-     * Reset password using token (overloaded method to support both signatures)
-     * @param {String} token - Reset token
-     * @param {String} newPasswordOrEmail - New password (if 2 params) or email (if 3 params)
-     * @param {String} newPassword - New password (only if 3 params)
-     * @returns {Promise<Object>} Password reset result
+     * Change password (for authenticated users)
+     * @param {string} userId - User ID
+     * @param {string} currentPassword - Current password
+     * @param {string} newPassword - New password
+     * @param {string} [type='user'] - 'user' or 'candidate'
+     * @returns {Promise<Object>}
      */
-    async resetPassword(token, newPasswordOrEmail, newPassword) {
-        // Handle both signatures: (token, newPassword) and (token, email, newPassword)
-        if (arguments.length === 2) {
-            // Called with (token, newPassword) - need to find email from token
-            return this._resetPasswordByToken(token, newPasswordOrEmail);
-        } else {
-            // Called with (token, email, newPassword)
-            return this._resetPasswordByTokenAndEmail(token, newPasswordOrEmail, newPassword);
-        }
+    async changePassword(userId, currentPassword, newPassword, type = 'user') {
+        return this.runInContext({ action: 'changePassword' }, async () => {
+            try {
+                const repo = type === 'user' ? this.repo('user') : this.repo('candidate');
+                const entity = await repo.findById(userId, { skipCache: true });
+
+                if (!entity) {
+                    throw new Error('Account not found');
+                }
+
+                // Verify current password
+                const isValid = await bcrypt.compare(currentPassword, entity.password);
+                if (!isValid) {
+                    throw new Error('Current password is incorrect');
+                }
+
+                // Check if new password is different
+                const isSame = await bcrypt.compare(newPassword, entity.password);
+                if (isSame) {
+                    throw new Error('New password must be different from current password');
+                }
+
+                // Validate new password
+                const passwordValidation = this.validatePassword(newPassword);
+                if (!passwordValidation.valid) {
+                    throw new Error(passwordValidation.errors.join(', '));
+                }
+
+                // Hash and update
+                const hashedPassword = await bcrypt.hash(newPassword, 10);
+                await repo.updateById(userId, { password: hashedPassword });
+
+                return this.handleSuccess({ message: 'Password changed successfully' });
+            } catch (error) {
+                return this.handleError(error, 'Password change failed');
+            }
+        });
+    }
+
+    // ================================
+    // TOKEN MANAGEMENT
+    // ================================
+
+    /**
+     * Generate JWT token
+     * @param {string} id - User/Candidate ID
+     * @param {string} email - Email
+     * @param {string} [type='access'] - Token type
+     * @param {string} [expiresIn] - Expiration time
+     * @returns {string} JWT token
+     */
+    generateToken(id, email, type = 'access', expiresIn = null) {
+        const payload = {
+            sub: id,
+            email,
+            type,
+            iat: Math.floor(Date.now() / 1000)
+        };
+
+        return jwt.sign(payload, this.JWT_SECRET, {
+            expiresIn: expiresIn || this.JWT_EXPIRES_IN,
+            issuer: this.JWT_ISSUER,
+            audience: this.JWT_AUDIENCE
+        });
     }
 
     /**
-     * Reset password using only token (finds user by token)
-     * @param {String} token - Reset token
-     * @param {String} newPassword - New password
-     * @returns {Promise<Object>} Password reset result
-     * @private
+     * Generate auth tokens for user
+     * @param {Object} user - User object
+     * @returns {Object} { accessToken, refreshToken }
      */
-    async _resetPasswordByToken(token, newPassword) {
+    generateAuthTokens(user) {
+        const accessToken = jwt.sign(
+            {
+                sub: user._id.toString(),
+                userId: user._id.toString(),
+                email: user.email,
+                level: user.level,
+                role: user.role
+            },
+            this.JWT_SECRET,
+            {
+                expiresIn: this.JWT_EXPIRES_IN,
+                issuer: this.JWT_ISSUER,
+                audience: this.JWT_AUDIENCE
+            }
+        );
+
+        const refreshToken = jwt.sign(
+            {
+                sub: user._id.toString(),
+                userId: user._id.toString(),
+                type: 'refresh'
+            },
+            this.JWT_SECRET,
+            {
+                expiresIn: this.JWT_REFRESH_EXPIRES_IN,
+                issuer: this.JWT_ISSUER,
+                audience: this.JWT_AUDIENCE
+            }
+        );
+
+        return { accessToken, refreshToken };
+    }
+
+    /**
+     * Generate auth tokens for candidate
+     * @param {Object} candidate - Candidate object
+     * @returns {Object} { accessToken, refreshToken }
+     */
+    generateCandidateTokens(candidate) {
+        const accessToken = jwt.sign(
+            {
+                sub: candidate._id.toString(),
+                cId: candidate._id.toString(),
+                candidateId: candidate._id.toString(),
+                email: candidate.email,
+                eventId: candidate.event
+            },
+            this.JWT_SECRET,
+            {
+                expiresIn: this.JWT_EXPIRES_IN,
+                issuer: this.JWT_ISSUER,
+                audience: this.JWT_AUDIENCE
+            }
+        );
+
+        const refreshToken = jwt.sign(
+            {
+                sub: candidate._id.toString(),
+                cId: candidate._id.toString(),
+                type: 'refresh'
+            },
+            this.JWT_SECRET,
+            {
+                expiresIn: this.JWT_REFRESH_EXPIRES_IN,
+                issuer: this.JWT_ISSUER,
+                audience: this.JWT_AUDIENCE
+            }
+        );
+
+        return { accessToken, refreshToken };
+    }
+
+    /**
+     * Verify JWT token
+     * @param {string} token - JWT token
+     * @returns {Object} Decoded payload
+     */
+    verifyToken(token) {
         try {
-            this._log('password_reset_by_token', { token: token.substring(0, 8) + '...' });
-
-            // Validate inputs
-            this._validateRequiredFields({ token, newPassword }, ['token', 'newPassword']);
-            this._validatePassword(newPassword);
-
-            // Find user with valid reset token
-            const user = await this.userRepository.findOne({
-                passwordResetToken: token,
-                passwordResetExpires: { $gt: new Date() }
+            return jwt.verify(token, this.JWT_SECRET, {
+                issuer: this.JWT_ISSUER,
+                audience: this.JWT_AUDIENCE
             });
-
-            if (!user) {
-                throw new Error('Invalid or expired reset token');
-            }
-
-            // Hash new password
-            const saltRounds = 12;
-            const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-            // Update password and clear reset token
-            await this.userRepository.updateUser(user._id, {
-                password: hashedPassword,
-                passwordResetToken: null,
-                passwordResetExpires: null,
-                updatedAt: new Date()
-            });
-
-            this._log('password_reset_success', { userId: user._id, email: user.email });
-
-            return {
-                success: true,
-                message: 'Password reset successfully'
-            };
         } catch (error) {
-            throw this._handleError(error, 'password_reset_by_token');
+            throw new Error('Invalid or expired token');
         }
     }
 
     /**
-     * Reset password using token and email
-     * @param {String} token - Reset token
-     * @param {String} email - User email
-     * @param {String} newPassword - New password
-     * @returns {Promise<Object>} Password reset result
-     * @private
+     * Refresh access token
+     * @param {string} refreshToken - Refresh token
+     * @returns {Promise<Object>}
      */
-    async _resetPasswordByTokenAndEmail(token, email, newPassword) {
-        try {
-            this._log('password_reset_by_token_and_email', { token: token.substring(0, 8) + '...', email });
+    async refreshAccessToken(refreshToken) {
+        return this.runInContext({ action: 'refreshAccessToken' }, async () => {
+            try {
+                const payload = this.verifyToken(refreshToken);
 
-            // Validate inputs
-            this._validateRequiredFields({ token, email, newPassword }, ['token', 'email', 'newPassword']);
-            this._validateEmail(email);
-            this._validatePassword(newPassword);
+                if (payload.type !== 'refresh') {
+                    throw new Error('Invalid refresh token');
+                }
 
-            // Find user with valid reset token and matching email
-            const user = await this.userRepository.findOne({
-                email,
-                passwordResetToken: token,
-                passwordResetExpires: { $gt: new Date() }
-            });
+                // Check if user/candidate exists and is active
+                const isCandidate = !!payload.cId;
+                const repo = isCandidate ? this.repo('candidate') : this.repo('user');
+                const entity = await repo.findById(payload.sub);
 
-            if (!user) {
-                throw new Error('Invalid or expired reset token');
+                if (!entity) {
+                    throw new Error('Account not found');
+                }
+
+                if (!isCandidate && !entity.active) {
+                    throw new Error('Account is disabled');
+                }
+
+                // Generate new tokens
+                const tokens = isCandidate 
+                    ? this.generateCandidateTokens(entity)
+                    : this.generateAuthTokens(entity);
+
+                return this.handleSuccess(tokens);
+            } catch (error) {
+                return this.handleError(error, 'Token refresh failed');
             }
+        });
+    }
 
-            // Hash new password
-            const saltRounds = 12;
-            const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+    // ================================
+    // SECURITY HELPERS
+    // ================================
 
-            // Update password and clear reset token
-            await this.userRepository.updateUser(user._id, {
-                password: hashedPassword,
-                passwordResetToken: null,
-                passwordResetExpires: null,
-                updatedAt: new Date()
+    /**
+     * Check login rate limit
+     * @private
+     */
+    async checkLoginRateLimit(email, ip) {
+        const key = `login_attempts:${ip}:${email}`;
+        
+        if (this.hasRepo('settings')) {
+            const attempts = await this.repo('settings').getValue(key);
+            if (attempts && parseInt(attempts) >= this.MAX_LOGIN_ATTEMPTS) {
+                throw new Error('Too many login attempts. Try again in 15 minutes.');
+            }
+        }
+    }
+
+    /**
+     * Increment login attempts
+     * @private
+     */
+    async incrementLoginAttempts(email, ip) {
+        const key = `login_attempts:${ip}:${email}`;
+        
+        if (this.hasRepo('settings')) {
+            const current = await this.repo('settings').getValue(key, 0);
+            await this.repo('settings').upsertSetting({
+                key,
+                value: parseInt(current) + 1,
+                category: 'security',
+                expiresAt: this.addDays(new Date(), 0.01) // 15 minutes
             });
-
-            this._log('password_reset_success', { userId: user._id, email });
-
-            return {
-                success: true,
-                message: 'Password reset successfully'
-            };
-        } catch (error) {
-            throw this._handleError(error, 'password_reset_by_token_and_email', { email });
         }
     }
 
     /**
-     * Generate secure random token
-     * @returns {String} Secure token
+     * Handle failed login
      * @private
      */
-    _generateSecureToken() {
-        return require('crypto').randomBytes(32).toString('hex');
+    async handleFailedLogin(userId) {
+        const user = await this.repo('user').findById(userId);
+        const attempts = (user.loginAttempts || 0) + 1;
+
+        const updates = { loginAttempts: attempts };
+
+        if (attempts >= this.MAX_LOGIN_ATTEMPTS) {
+            updates.lockedUntil = new Date(Date.now() + this.ACCOUNT_LOCK_DURATION * 60000);
+            
+            // Send account locked email
+            await emailService.sendAccountLockedEmail({
+                email: user.email,
+                name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+                duration: this.ACCOUNT_LOCK_DURATION
+            });
+        }
+
+        await this.repo('user').updateById(userId, updates);
     }
 
     /**
-     * Validate password strength
-     * @param {String} password - Password to validate
-     * @throws {Error} If password is weak
+     * Generate temporary password
      * @private
      */
-    _validatePassword(password) {
-        if (password.length < 8) {
-            throw new Error('Password must be at least 8 characters long');
+    generateTempPassword() {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+        let password = '';
+        for (let i = 0; i < 12; i++) {
+            password += chars.charAt(Math.floor(Math.random() * chars.length));
         }
+        return password;
+    }
 
-        if (!/(?=.*[a-z])/.test(password)) {
-            throw new Error('Password must contain at least one lowercase letter');
-        }
+    /**
+     * Sanitize user object (remove sensitive data)
+     * @private
+     */
+    sanitizeUser(user) {
+        const { password, loginAttempts, lockedUntil, ...safe } = user.toObject ? user.toObject() : user;
+        return safe;
+    }
 
-        if (!/(?=.*[A-Z])/.test(password)) {
-            throw new Error('Password must contain at least one uppercase letter');
-        }
-
-        if (!/(?=.*\d)/.test(password)) {
-            throw new Error('Password must contain at least one number');
-        }
-
-        if (!/(?=.*[@$!%*?&])/.test(password)) {
-            throw new Error('Password must contain at least one special character');
-        }
+    /**
+     * Sanitize candidate object
+     * @private
+     */
+    sanitizeCandidate(candidate) {
+        const { password, ...safe } = candidate.toObject ? candidate.toObject() : candidate;
+        return safe;
     }
 }
 

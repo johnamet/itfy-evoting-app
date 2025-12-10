@@ -1,522 +1,444 @@
-#!/usr/bin/env node
+import BaseRepository from '../BaseRepository.js';
+import Slide from '../../models/Slide.js';
+import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+
 /**
- * Slide Repository
+ * SlideRepository
  * 
- * Extends BaseRepository to provide Slide-specific database operations.
- * Includes slide management, search functionality, and image handling.
+ * Manages presentation slides with intelligent caching. Slides are cached with a 15-minute TTL
+ * since they are accessed frequently during events but don't change often.
+ * 
+ * Cache Strategy:
+ * - Read operations are cached automatically
+ * - Event-specific queries are cached
+ * - Position updates invalidate query caches
+ * - Active status changes invalidate caches
+ * 
+ * @extends BaseRepository
  */
-
-import BaseRepository from './BaseRepository.js';
-import Slide from '../models/Slide.js';
-import mongoose from 'mongoose';
-
 class SlideRepository extends BaseRepository {
-    
     constructor() {
-        // Get the Slide model
-        super(Slide);
+        super(Slide, {
+            enableCache: true,
+            cacheManager: mainCacheManager,
+            cacheTTL: 900 // 15 minutes
+        });
     }
 
     /**
      * Create a new slide
+     * 
      * @param {Object} slideData - Slide data
+     * @param {string} [slideData.event] - Event ID (if event-specific)
+     * @param {string} slideData.title - Slide title
+     * @param {string} [slideData.content] - Slide content
+     * @param {string} [slideData.type='info'] - Slide type (info, image, video, etc.)
+     * @param {number} [slideData.position] - Display position
+     * @param {number} [slideData.duration=5] - Display duration in seconds
+     * @param {Object} [options={}] - Repository options
      * @returns {Promise<Object>} Created slide
      */
-    async createSlide(slideData) {
-        try {
-            // Check if slide title already exists
-            const existingSlide = await this.findByTitle(slideData.title);
-            if (existingSlide) {
-                throw new Error(`Slide with title '${slideData.title}' already exists`);
-            }
+    async createSlide(slideData, options = {}) {
+        this._validateRequiredFields(slideData, ['title']);
 
-            return await this.create(slideData);
-        } catch (error) {
-            throw this._handleError(error, 'createSlide');
-        }
-    }
+        const slideToCreate = {
+            ...slideData,
+            type: slideData.type || 'info',
+            duration: slideData.duration || 5,
+            active: true
+        };
 
-    /**
-     * Find slide by title
-     * @param {String} title - Slide title
-     * @returns {Promise<Object|null>} Slide or null
-     */
-    async findByTitle(title) {
-        try {
-            return await this.findOne({ title: title.trim() });
-        } catch (error) {
-            throw this._handleError(error, 'findByTitle');
-        }
-    }
-
-    /**
-     * Find slides by subtitle
-     * @param {String} subtitle - Slide subtitle
-     * @returns {Promise<Array>} Slides with matching subtitle
-     */
-    async findBySubtitle(subtitle) {
-        try {
-            return await this.find({ subtitle: subtitle.trim() });
-        } catch (error) {
-            throw this._handleError(error, 'findBySubtitle');
-        }
-    }
-
-    /**
-     * Search slides by text (title and subtitle)
-     * @param {String} searchText - Text to search for
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Matching slides
-     */
-    async searchSlides(searchText, options = {}) {
-        try {
-            const searchRegex = new RegExp(searchText, 'i');
-            return await this.find({
-                $or: [
-                    { title: { $regex: searchRegex } },
-                    { subtitle: { $regex: searchRegex } }
-                ]
-            }, {
-                ...options,
-                sort: { title: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'searchSlides');
-        }
-    }
-
-    /**
-     * Full text search using MongoDB text index
-     * @param {String} searchText - Text to search for
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Matching slides with text scores
-     */
-    async fullTextSearch(searchText, options = {}) {
-        try {
-            return await this.find({
-                $text: { $search: searchText }
-            }, {
-                ...options,
-                projection: { score: { $meta: "textScore" } },
-                sort: { score: { $meta: "textScore" } }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'fullTextSearch');
-        }
-    }
-
-    /**
-     * Update slide by title
-     * @param {String} title - Slide title
-     * @param {Object} updateData - Data to update
-     * @returns {Promise<Object|null>} Updated slide
-     */
-    async updateSlideByTitle(title, updateData) {
-        try {
-            const slide = await this.findByTitle(title);
-            if (!slide) {
-                throw new Error(`Slide with title '${title}' not found`);
-            }
-
-            // If updating title, check for conflicts
-            if (updateData.title && updateData.title !== title) {
-                const existingSlide = await this.findByTitle(updateData.title);
-                if (existingSlide) {
-                    throw new Error(`Slide with title '${updateData.title}' already exists`);
-                }
-            }
-
-            return await this.updateById(slide._id, updateData);
-        } catch (error) {
-            throw this._handleError(error, 'updateSlideByTitle');
-        }
-    }
-
-    /**
-     * Delete slide by title
-     * @param {String} title - Slide title
-     * @returns {Promise<Object|null>} Deleted slide
-     */
-    async deleteSlideByTitle(title) {
-        try {
-            const slide = await this.findByTitle(title);
-            if (!slide) {
-                throw new Error(`Slide with title '${title}' not found`);
-            }
-
-            return await this.deleteById(slide._id);
-        } catch (error) {
-            throw this._handleError(error, 'deleteSlideByTitle');
-        }
-    }
-
-    /**
-     * Get slides with pagination
-     * @param {Number} page - Page number (1-based)
-     * @param {Number} limit - Items per page
-     * @param {Object} filter - Filter criteria
-     * @returns {Promise<Object>} Paginated slides
-     */
-    async getSlidesWithPagination(page = 1, limit = 10, filter = {}) {
-        try {
-            const skip = (page - 1) * limit;
+        // Set position if not provided
+        if (!slideToCreate.position) {
+            const query = slideData.event ? { event: slideData.event } : { event: { $exists: false } };
+            const maxPosition = await this.Model.findOne(query)
+                .sort({ position: -1 })
+                .select('position')
+                .lean();
             
-            const slides = await this.find(filter, {
-                skip,
-                limit,
-                sort: { title: 1 }
+            slideToCreate.position = maxPosition ? maxPosition.position + 1 : 1;
+        }
+
+        return await this.create(slideToCreate, options);
+    }
+
+    /**
+     * Find slides by event
+     * 
+     * @param {string} eventId - Event ID
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Event slides sorted by position
+     */
+    async findByEvent(eventId, options = {}) {
+        if (!eventId) {
+            throw new Error('Event ID is required');
+        }
+
+        return await this.find(
+            { event: eventId },
+            {
+                ...options,
+                sort: options.sort || { position: 1, createdAt: 1 }
+            }
+        );
+    }
+
+    /**
+     * Find active slides by event
+     * 
+     * @param {string} eventId - Event ID
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Active event slides
+     */
+    async findActiveByEvent(eventId, options = {}) {
+        if (!eventId) {
+            throw new Error('Event ID is required');
+        }
+
+        return await this.find(
+            { event: eventId, active: true },
+            {
+                ...options,
+                sort: options.sort || { position: 1, createdAt: 1 }
+            }
+        );
+    }
+
+    /**
+     * Find global slides (not event-specific)
+     * 
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Global slides
+     */
+    async findGlobalSlides(options = {}) {
+        return await this.find(
+            { event: { $exists: false } },
+            {
+                ...options,
+                sort: options.sort || { position: 1, createdAt: 1 }
+            }
+        );
+    }
+
+    /**
+     * Find active global slides
+     * 
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Active global slides
+     */
+    async findActiveGlobalSlides(options = {}) {
+        return await this.find(
+            {
+                event: { $exists: false },
+                active: true
+            },
+            {
+                ...options,
+                sort: options.sort || { position: 1, createdAt: 1 }
+            }
+        );
+    }
+
+    /**
+     * Update slide
+     * 
+     * @param {string} slideId - Slide ID
+     * @param {Object} updateData - Update data
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated slide
+     */
+    async updateSlide(slideId, updateData, options = {}) {
+        if (!slideId) {
+            throw new Error('Slide ID is required');
+        }
+
+        return await this.updateById(slideId, updateData, options);
+    }
+
+    /**
+     * Update slide position
+     * 
+     * @param {string} slideId - Slide ID
+     * @param {number} newPosition - New position
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated slide
+     */
+    async updatePosition(slideId, newPosition, options = {}) {
+        if (!slideId) {
+            throw new Error('Slide ID is required');
+        }
+
+        if (typeof newPosition !== 'number' || newPosition < 1) {
+            throw new Error('Position must be a positive number');
+        }
+
+        return await this.updateById(slideId, { position: newPosition }, options);
+    }
+
+    /**
+     * Reorder slides
+     * Updates positions for multiple slides
+     * 
+     * @param {Array<Object>} orderUpdates - Array of {slideId, position} objects
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Update result
+     */
+    async reorderSlides(orderUpdates, options = {}) {
+        if (!Array.isArray(orderUpdates) || orderUpdates.length === 0) {
+            throw new Error('Order updates array is required');
+        }
+
+        return await this.withTransaction(async (session) => {
+            const updates = orderUpdates.map(({ slideId, position }) => {
+                return this.updateById(
+                    slideId,
+                    { position },
+                    { ...options, session }
+                );
             });
 
-            const total = await this.countDocuments(filter);
-            const totalPages = Math.ceil(total / limit);
+            await Promise.all(updates);
 
             return {
-                slides,
-                pagination: {
-                    currentPage: page,
-                    totalPages,
-                    totalItems: total,
-                    itemsPerPage: limit,
-                    hasNextPage: page < totalPages,
-                    hasPrevPage: page > 1
-                }
+                success: true,
+                updatedCount: orderUpdates.length
             };
-        } catch (error) {
-            throw this._handleError(error, 'getSlidesWithPagination');
-        }
+        });
     }
 
     /**
-     * Get slides by image pattern
-     * @param {String} imagePattern - Image URL pattern to search for
-     * @returns {Promise<Array>} Slides with matching image URLs
+     * Activate slide
+     * 
+     * @param {string} slideId - Slide ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated slide
      */
-    async getSlidesByImagePattern(imagePattern) {
-        try {
-            const imageRegex = new RegExp(imagePattern, 'i');
-            return await this.find({
-                image: { $regex: imageRegex }
-            }, {
-                sort: { title: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getSlidesByImagePattern');
+    async activateSlide(slideId, options = {}) {
+        if (!slideId) {
+            throw new Error('Slide ID is required');
         }
+
+        return await this.updateById(slideId, { active: true }, options);
     }
 
     /**
-     * Get slides with missing images (empty or null image fields)
-     * @returns {Promise<Array>} Slides with missing images
+     * Deactivate slide
+     * 
+     * @param {string} slideId - Slide ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated slide
      */
-    async getSlidesWithMissingImages() {
-        try {
-            return await this.find({
-                $or: [
-                    { image: { $exists: false } },
-                    { image: null },
-                    { image: "" },
-                    { image: { $regex: /^\s*$/ } }
-                ]
-            }, {
-                sort: { title: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getSlidesWithMissingImages');
+    async deactivateSlide(slideId, options = {}) {
+        if (!slideId) {
+            throw new Error('Slide ID is required');
         }
+
+        return await this.updateById(slideId, { active: false }, options);
+    }
+
+    /**
+     * Delete slide
+     * 
+     * @param {string} slideId - Slide ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Deleted slide
+     */
+    async deleteSlide(slideId, options = {}) {
+        if (!slideId) {
+            throw new Error('Slide ID is required');
+        }
+
+        return await this.deleteById(slideId, options);
+    }
+
+    /**
+     * Delete all slides for an event
+     * 
+     * @param {string} eventId - Event ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Delete result
+     */
+    async deleteByEvent(eventId, options = {}) {
+        if (!eventId) {
+            throw new Error('Event ID is required');
+        }
+
+        return await this.deleteMany({ event: eventId }, options);
+    }
+
+    /**
+     * Count slides by event
+     * 
+     * @param {string} eventId - Event ID
+     * @param {boolean} [activeOnly=false] - Count only active slides
+     * @returns {Promise<number>} Slide count
+     */
+    async countByEvent(eventId, activeOnly = false) {
+        if (!eventId) {
+            throw new Error('Event ID is required');
+        }
+
+        const query = { event: eventId };
+        if (activeOnly) {
+            query.active = true;
+        }
+
+        return await this.count(query);
+    }
+
+    /**
+     * Find slides by type
+     * 
+     * @param {string} type - Slide type
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Slides of type
+     */
+    async findByType(type, options = {}) {
+        if (!type) {
+            throw new Error('Slide type is required');
+        }
+
+        return await this.find(
+            { type },
+            {
+                ...options,
+                sort: options.sort || { position: 1, createdAt: 1 }
+            }
+        );
+    }
+
+    /**
+     * Get total slide duration for an event
+     * 
+     * @param {string} eventId - Event ID
+     * @param {boolean} [activeOnly=true] - Count only active slides
+     * @returns {Promise<number>} Total duration in seconds
+     */
+    async getTotalDuration(eventId, activeOnly = true) {
+        if (!eventId) {
+            throw new Error('Event ID is required');
+        }
+
+        const query = { event: eventId };
+        if (activeOnly) {
+            query.active = true;
+        }
+
+        const result = await this.Model.aggregate([
+            { $match: query },
+            {
+                $group: {
+                    _id: null,
+                    totalDuration: { $sum: '$duration' }
+                }
+            }
+        ]);
+
+        return result[0]?.totalDuration || 0;
     }
 
     /**
      * Get slide statistics
+     * 
+     * @param {string} [eventId] - Optional event ID filter
      * @returns {Promise<Object>} Slide statistics
      */
-    async getSlideStatistics() {
-        try {
-            const totalSlides = await this.countDocuments({});
-            const slidesWithImages = await this.countDocuments({
-                image: { $exists: true, $ne: "", $ne: null }
-            });
-            const slidesWithoutImages = totalSlides - slidesWithImages;
+    async getSlideStats(eventId = null) {
+        const query = eventId ? { event: eventId } : {};
 
-            const pipeline = [
+        const [totalCount, activeCount, typeBreakdown] = await Promise.all([
+            this.count(query),
+            this.count({ ...query, active: true }),
+            this.Model.aggregate([
+                { $match: query },
                 {
                     $group: {
-                        _id: null,
-                        totalSlides: { $sum: 1 },
-                        avgTitleLength: { $avg: { $strLenCP: "$title" } },
-                        avgSubtitleLength: { $avg: { $strLenCP: "$subtitle" } },
-                        uniqueSubtitles: { $addToSet: "$subtitle" },
-                        slides: { $push: { title: "$title", subtitle: "$subtitle" } }
-                    }
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        totalSlides: 1,
-                        avgTitleLength: { $round: ["$avgTitleLength", 2] },
-                        avgSubtitleLength: { $round: ["$avgSubtitleLength", 2] },
-                        uniqueSubtitlesCount: { $size: "$uniqueSubtitles" },
-                        slides: 1
-                    }
-                }
-            ];
-
-            const [stats] = await this.aggregate(pipeline);
-            
-            return {
-                ...(stats || {
-                    totalSlides: 0,
-                    avgTitleLength: 0,
-                    avgSubtitleLength: 0,
-                    uniqueSubtitlesCount: 0,
-                    slides: []
-                }),
-                slidesWithImages,
-                slidesWithoutImages,
-                imageCompletionRate: totalSlides > 0 ? 
-                    Math.round((slidesWithImages / totalSlides) * 100) : 0
-            };
-        } catch (error) {
-            throw this._handleError(error, 'getSlideStatistics');
-        }
-    }
-
-    /**
-     * Validate slide data
-     * @param {Object} slideData - Slide data to validate
-     * @returns {Promise<Boolean>} True if valid
-     */
-    async validateSlideData(slideData) {
-        try {
-            const errors = [];
-
-            // Validate title
-            if (!slideData.title || typeof slideData.title !== 'string') {
-                errors.push('Slide title is required and must be a string');
-            } else if (slideData.title.trim().length < 2) {
-                errors.push('Slide title must be at least 2 characters long');
-            } else if (slideData.title.trim().length > 200) {
-                errors.push('Slide title must be less than 200 characters');
-            }
-
-            // Validate subtitle
-            if (!slideData.subtitle || typeof slideData.subtitle !== 'string') {
-                errors.push('Slide subtitle is required and must be a string');
-            } else if (slideData.subtitle.trim().length < 2) {
-                errors.push('Slide subtitle must be at least 2 characters long');
-            } else if (slideData.subtitle.trim().length > 500) {
-                errors.push('Slide subtitle must be less than 500 characters');
-            }
-
-            // Validate image
-            if (!slideData.image || typeof slideData.image !== 'string') {
-                errors.push('Slide image is required and must be a string');
-            } else if (slideData.image.trim().length < 5) {
-                errors.push('Slide image URL must be at least 5 characters long');
-            } else if (slideData.image.trim().length > 2000) {
-                errors.push('Slide image URL must be less than 2000 characters');
-            }
-
-            // Basic URL validation for image
-            if (slideData.image && typeof slideData.image === 'string') {
-                const urlPattern = /^(https?:\/\/|\/|\.\/|\.\.\/).+/i;
-                if (!urlPattern.test(slideData.image.trim())) {
-                    errors.push('Slide image must be a valid URL or relative path');
-                }
-            }
-
-            if (errors.length > 0) {
-                throw new Error(`Validation errors: ${errors.join(', ')}`);
-            }
-
-            return true;
-        } catch (error) {
-            throw this._handleError(error, 'validateSlideData');
-        }
-    }
-
-    /**
-     * Bulk create slides
-     * @param {Array} slidesData - Array of slide data
-     * @returns {Promise<Array>} Created slides
-     */
-    async bulkCreateSlides(slidesData) {
-        try {
-            const createdSlides = [];
-            const errors = [];
-
-            for (const slideData of slidesData) {
-                try {
-                    await this.validateSlideData(slideData);
-                    const slide = await this.createSlide(slideData);
-                    createdSlides.push(slide);
-                } catch (error) {
-                    errors.push({
-                        slideData,
-                        error: error.message
-                    });
-                }
-            }
-
-            return {
-                success: createdSlides,
-                errors: errors,
-                successCount: createdSlides.length,
-                errorCount: errors.length
-            };
-        } catch (error) {
-            throw this._handleError(error, 'bulkCreateSlides');
-        }
-    }
-
-    /**
-     * Get slides grouped by subtitle
-     * @returns {Promise<Array>} Slides grouped by subtitle
-     */
-    async getSlidesBySubtitleGroups() {
-        try {
-            const pipeline = [
-                {
-                    $group: {
-                        _id: "$subtitle",
-                        slides: {
-                            $push: {
-                                id: "$_id",
-                                title: "$title",
-                                image: "$image",
-                                createdAt: "$createdAt"
-                            }
-                        },
+                        _id: '$type',
                         count: { $sum: 1 }
                     }
-                },
-                {
-                    $sort: { "_id": 1 }
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        subtitle: "$_id",
-                        slides: 1,
-                        count: 1
-                    }
                 }
-            ];
+            ])
+        ]);
 
-            return await this.aggregate(pipeline);
-        } catch (error) {
-            throw this._handleError(error, 'getSlidesBySubtitleGroups');
-        }
+        const typeStats = typeBreakdown.reduce((acc, item) => {
+            acc[item._id] = item.count;
+            return acc;
+        }, {});
+
+        return {
+            totalSlides: totalCount,
+            activeSlides: activeCount,
+            inactiveSlides: totalCount - activeCount,
+            typeBreakdown: typeStats
+        };
     }
 
     /**
-     * Update slide images in bulk
-     * @param {Array} imageUpdates - Array of {title, newImageUrl} objects
-     * @returns {Promise<Object>} Update results
+     * Bulk activate slides
+     * 
+     * @param {Array<string>} slideIds - Array of slide IDs
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Update result
      */
-    async bulkUpdateSlideImages(imageUpdates) {
-        try {
-            const updateResults = [];
-            const errors = [];
-
-            for (const update of imageUpdates) {
-                try {
-                    const { title, newImageUrl } = update;
-                    
-                    if (!title || !newImageUrl) {
-                        throw new Error('Both title and newImageUrl are required');
-                    }
-
-                    const updatedSlide = await this.updateSlideByTitle(title, { image: newImageUrl });
-                    updateResults.push({
-                        title,
-                        newImageUrl,
-                        updated: !!updatedSlide
-                    });
-                } catch (error) {
-                    errors.push({
-                        update,
-                        error: error.message
-                    });
-                }
-            }
-
-            return {
-                success: updateResults,
-                errors: errors,
-                successCount: updateResults.length,
-                errorCount: errors.length
-            };
-        } catch (error) {
-            throw this._handleError(error, 'bulkUpdateSlideImages');
+    async bulkActivate(slideIds, options = {}) {
+        if (!Array.isArray(slideIds) || slideIds.length === 0) {
+            throw new Error('Slide IDs array is required');
         }
+
+        return await this.updateMany(
+            { _id: { $in: slideIds } },
+            { active: true },
+            options
+        );
     }
 
     /**
-     * Get recent slides
-     * @param {Number} limit - Number of recent slides to retrieve
-     * @returns {Promise<Array>} Recent slides
+     * Bulk deactivate slides
+     * 
+     * @param {Array<string>} slideIds - Array of slide IDs
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Update result
      */
-    async getRecentSlides(limit = 10) {
-        try {
-            return await this.find({}, {
-                limit,
-                sort: { createdAt: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getRecentSlides');
+    async bulkDeactivate(slideIds, options = {}) {
+        if (!Array.isArray(slideIds) || slideIds.length === 0) {
+            throw new Error('Slide IDs array is required');
         }
+
+        return await this.updateMany(
+            { _id: { $in: slideIds } },
+            { active: false },
+            options
+        );
     }
 
     /**
-     * Get slides count by subtitle
-     * @returns {Promise<Array>} Subtitle counts
+     * Clone slide to another event
+     * 
+     * @param {string} slideId - Source slide ID
+     * @param {string} [targetEventId] - Target event ID (null for global)
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Cloned slide
      */
-    async getSlideCountsBySubtitle() {
-        try {
-            const pipeline = [
-                {
-                    $group: {
-                        _id: "$subtitle",
-                        count: { $sum: 1 }
-                    }
-                },
-                {
-                    $sort: { count: -1 }
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        subtitle: "$_id",
-                        count: 1
-                    }
-                }
-            ];
-
-            return await this.aggregate(pipeline);
-        } catch (error) {
-            throw this._handleError(error, 'getSlideCountsBySubtitle');
+    async cloneSlide(slideId, targetEventId = null, options = {}) {
+        if (!slideId) {
+            throw new Error('Slide ID is required');
         }
-    }
 
-    /**
-     * Check if slide title is available
-     * @param {String} title - Title to check
-     * @param {String|ObjectId} excludeId - Slide ID to exclude from check (for updates)
-     * @returns {Promise<Boolean>} True if title is available
-     */
-    async isTitleAvailable(title, excludeId = null) {
-        try {
-            const criteria = { title: title.trim() };
-            
-            if (excludeId) {
-                criteria._id = { $ne: excludeId };
-            }
-
-            const existingSlide = await this.findOne(criteria);
-            return !existingSlide;
-        } catch (error) {
-            throw this._handleError(error, 'isTitleAvailable');
+        const sourceSlide = await this.findById(slideId);
+        
+        if (!sourceSlide) {
+            throw new Error('Source slide not found');
         }
+
+        const { _id, createdAt, updatedAt, ...slideData } = sourceSlide.toObject();
+
+        const clonedSlideData = {
+            ...slideData,
+            event: targetEventId || undefined,
+            position: undefined // Will be auto-assigned
+        };
+
+        return await this.createSlide(clonedSlideData, options);
     }
 }
 

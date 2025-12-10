@@ -1,364 +1,436 @@
-#!/usr/bin/env node
+import BaseRepository from '../BaseRepository.js';
+import Coupon from '../../models/Coupon.js';
+import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+
 /**
- * Coupon Repository
+ * CouponRepository
  * 
- * Extends BaseRepository to provide Coupon-specific database operations.
- * Includes coupon validation, usage tracking, and expiration management.
+ * Manages discount coupons with intelligent caching. Coupons are cached with a 30-minute TTL
+ * since they don't change frequently but need to be validated during payment processing.
+ * 
+ * Cache Strategy:
+ * - Read operations are cached automatically
+ * - Code lookups skip cache for accurate availability checks
+ * - Usage count updates invalidate entity caches
+ * - Status changes invalidate both entity and query caches
+ * 
+ * @extends BaseRepository
  */
-
-import BaseRepository from './BaseRepository.js';
-import Coupon from '../models/Coupon.js';
-
 class CouponRepository extends BaseRepository {
-    
     constructor() {
-        // Get the Coupon model - we need to handle this properly based on how models are exported
-        super(Coupon);
-    }
-
-    /**
-     * Find coupon by code
-     * @param {String} code - Coupon code
-     * @param {Object} options - Query options
-     * @returns {Promise<Object|null>} Found coupon or null
-     */
-    async findByCode(code, options = {}) {
-        try {
-            const criteria = { code: code.toUpperCase().trim() };
-            if (options.eventId) {
-                criteria.eventApplicable = options.eventId;
-            }
-            if (options.categoryId) {
-                criteria.categoriesApplicable = { $in: options.categoryId };
-            }
-            return await this.findOne(criteria, options);
-        } catch (error) {
-            throw this._handleError(error, 'findByCode');
-        }
-    }
-
-    /**
-     * Validate if coupon is usable
-     * @param {String} code - Coupon code
-     * @returns {Promise<Object>} Validation result with coupon data
-     */
-    async validateCoupon(code) {
-        try {
-            const coupon = await this.findByCode(code);
-            
-            if (!coupon) {
-                return {
-                    isValid: false,
-                    error: 'Coupon not found',
-                    coupon: null
-                };
-            }
-
-            // Check if coupon is active
-            if (!coupon.isActive) {
-                return {
-                    isValid: false,
-                    error: 'Coupon is not active',
-                    coupon
-                };
-            }
-
-            // Check expiration date
-            if (coupon.expiryDate && new Date() > coupon.expiryDate) {
-                return {
-                    isValid: false,
-                    error: 'Coupon has expired',
-                    coupon
-                };
-            }
-
-            // Check usage limit
-            if (coupon.maxUses && coupon.usedCount >= coupon.maxUses) {
-                return {
-                    isValid: false,
-                    error: 'Coupon usage limit reached',
-                    coupon
-                };
-            }
-
-            // // Check user-specific usage limit
-            // if (userId && coupon.maxUsesPerUser) {
-            //     const userUsageCount = await this._getUserUsageCount(coupon._id, userId);
-            //     if (userUsageCount >= coupon.maxUsesPerUser) {
-            //         return {
-            //             isValid: false,
-            //             error: 'User usage limit reached for this coupon',
-            //             coupon
-            //         };
-            //     }
-            // }
-
-            // Check minimum order amount
-            if (coupon.minOrderAmount && coupon.minOrderAmount > 0) {
-                return {
-                    isValid: true,
-                    coupon,
-                    requiresMinimumOrder: true,
-                    minOrderAmount: coupon.minOrderAmount
-                };
-            }
-
-            return {
-                isValid: true,
-                coupon
-            };
-        } catch (error) {
-            throw this._handleError(error, 'validateCoupon');
-        }
-    }
-
-    /**
-     * Apply coupon and track usage
-     * @param {String} code - Coupon code
-     * @param {Number} orderAmount - Order amount (optional)
-     * @returns {Promise<Object>} Application result
-     */
-    async applyCoupon(code, orderAmount = 0) {
-        try {
-            const validation = await this.validateCoupon(code);
-
-            if (!validation.isValid) {
-                return validation;
-            }
-
-            const coupon = validation.coupon;
-
-            // Check minimum order amount if required
-            if (validation.requiresMinimumOrder && orderAmount < coupon.minOrderAmount) {
-                return {
-                    isValid: false,
-                    error: `Minimum order amount of ${coupon.minOrderAmount} required`,
-                    coupon
-                };
-            }
-
-            // Calculate discount
-            let discountAmount = 0;
-            if (coupon.discountType === 'percentage') {
-                discountAmount = (orderAmount * coupon.discount) / 100;
-                if (coupon.maxDiscountAmount && discountAmount > coupon.maxDiscountAmount) {
-                    discountAmount = coupon.maxDiscountAmount;
-                }
-            } else if (coupon.discountType === 'fixed') {
-                discountAmount = Math.min(coupon.discount, orderAmount);
-            }
-
-            // Record usage
-            await this._recordUsage(coupon._id, userId);
-
-            return {
-                isValid: true,
-                coupon,
-                discountAmount: Math.round(discountAmount * 100) / 100, // Round to 2 decimal places
-                finalAmount: Math.max(0, orderAmount - discountAmount)
-            };
-        } catch (error) {
-            throw this._handleError(error, 'applyCoupon');
-        }
+        super(Coupon, {
+            enableCache: true,
+            cacheManager: mainCacheManager,
+            cacheTTL: 1800 // 30 minutes
+        });
     }
 
     /**
      * Create a new coupon
+     * 
      * @param {Object} couponData - Coupon data
+     * @param {string} couponData.code - Unique coupon code
+     * @param {string} couponData.type - Discount type (percentage, fixed)
+     * @param {number} couponData.value - Discount value
+     * @param {Date} [couponData.validFrom] - Valid from date
+     * @param {Date} couponData.validUntil - Expiry date
+     * @param {number} [couponData.maxUses] - Maximum usage limit
+     * @param {number} [couponData.minAmount] - Minimum purchase amount
+     * @param {Object} [options={}] - Repository options
      * @returns {Promise<Object>} Created coupon
      */
-    async createCoupon(couponData) {
-        try {
-            // Ensure code is uppercase
-            if (couponData.code) {
-                couponData.code = couponData.code.toUpperCase().trim();
-            }
+    async createCoupon(couponData, options = {}) {
+        this._validateRequiredFields(couponData, ['code', 'type', 'value', 'validUntil']);
 
-            // Check if code already exists
-            if (couponData.code) {
-                const existingCoupon = await this.findByCode(couponData.code);
-                if (existingCoupon) {
-                    throw new Error('Coupon code already exists');
-                }
-            }
-
-            return await this.create(couponData);
-        } catch (error) {
-            throw this._handleError(error, 'createCoupon');
+        // Validate discount type
+        if (!['percentage', 'fixed'].includes(couponData.type)) {
+            throw new Error('Coupon type must be either "percentage" or "fixed"');
         }
+
+        // Validate percentage value
+        if (couponData.type === 'percentage' && (couponData.value < 0 || couponData.value > 100)) {
+            throw new Error('Percentage discount must be between 0 and 100');
+        }
+
+        // Check if code already exists
+        const existingCoupon = await this.findByCode(couponData.code, { skipCache: true });
+        if (existingCoupon) {
+            throw new Error('Coupon code already exists');
+        }
+
+        const couponToCreate = {
+            ...couponData,
+            code: couponData.code.toUpperCase(), // Normalize code to uppercase
+            active: true,
+            usedCount: 0
+        };
+
+        return await this.create(couponToCreate, options);
     }
 
     /**
-     * Get active coupons
-     * @param {Object} options - Query options
+     * Find coupon by code
+     * Skip cache for accurate availability checks
+     * 
+     * @param {string} code - Coupon code
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Object|null>} Coupon or null
+     */
+    async findByCode(code, options = {}) {
+        if (!code) {
+            throw new Error('Coupon code is required');
+        }
+
+        return await this.findOne(
+            { code: code.toUpperCase() },
+            {
+                ...options,
+                skipCache: true // Always skip cache for coupon validation
+            }
+        );
+    }
+
+    /**
+     * Find active coupons
+     * 
+     * @param {Object} [options={}] - Query options
      * @returns {Promise<Array>} Active coupons
      */
-    async getActiveCoupons(options = {}) {
-        try {
-            const criteria = {
-                isActive: true,
+    async findActiveCoupons(options = {}) {
+        const now = new Date();
+
+        return await this.find(
+            {
+                active: true,
+                validUntil: { $gte: now },
                 $or: [
-                    { expiryDate: { $gt: new Date() } },
-                    { expiryDate: null }
+                    { validFrom: { $lte: now } },
+                    { validFrom: { $exists: false } }
                 ]
-            };
-
-            return await this.find(criteria, {
+            },
+            {
                 ...options,
-                sort: { createdAt: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getActiveCoupons');
-        }
+                sort: options.sort || { createdAt: -1 }
+            }
+        );
     }
 
     /**
-     * Get expired coupons
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Expired coupons
+     * Validate coupon for use
+     * Comprehensive validation including expiry, usage limits, and minimum amount
+     * 
+     * @param {string} code - Coupon code
+     * @param {number} amount - Purchase amount
+     * @returns {Promise<Object>} Validation result with coupon or error
      */
-    async getExpiredCoupons(options = {}) {
-        try {
-            const criteria = {
-                expiryDate: { $lt: new Date() }
+    async validateCoupon(code, amount) {
+        if (!code) {
+            return {
+                valid: false,
+                error: 'Coupon code is required'
             };
-
-            return await this.find(criteria, {
-                ...options,
-                sort: { expiryDate: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getExpiredCoupons');
         }
+
+        const coupon = await this.findByCode(code, { skipCache: true });
+
+        if (!coupon) {
+            return {
+                valid: false,
+                error: 'Invalid coupon code'
+            };
+        }
+
+        if (!coupon.active) {
+            return {
+                valid: false,
+                error: 'Coupon is no longer active'
+            };
+        }
+
+        const now = new Date();
+
+        // Check validity period
+        if (coupon.validFrom && new Date(coupon.validFrom) > now) {
+            return {
+                valid: false,
+                error: 'Coupon is not yet valid'
+            };
+        }
+
+        if (new Date(coupon.validUntil) < now) {
+            return {
+                valid: false,
+                error: 'Coupon has expired'
+            };
+        }
+
+        // Check usage limit
+        if (coupon.maxUses && coupon.usedCount >= coupon.maxUses) {
+            return {
+                valid: false,
+                error: 'Coupon usage limit reached'
+            };
+        }
+
+        // Check minimum amount
+        if (coupon.minAmount && amount < coupon.minAmount) {
+            return {
+                valid: false,
+                error: `Minimum purchase amount of ${coupon.minAmount} required`
+            };
+        }
+
+        return {
+            valid: true,
+            coupon
+        };
     }
 
     /**
-     * Get coupon usage statistics
-     * @param {String|ObjectId} couponId - Coupon ID
-     * @returns {Promise<Object>} Usage statistics
+     * Calculate discount amount
+     * 
+     * @param {Object} coupon - Coupon object
+     * @param {number} amount - Original amount
+     * @returns {Object} Discount calculation
+     */
+    calculateDiscount(coupon, amount) {
+        if (!coupon || !amount) {
+            return {
+                originalAmount: amount,
+                discountAmount: 0,
+                finalAmount: amount
+            };
+        }
+
+        let discountAmount = 0;
+
+        if (coupon.type === 'percentage') {
+            discountAmount = (amount * coupon.value) / 100;
+        } else if (coupon.type === 'fixed') {
+            discountAmount = Math.min(coupon.value, amount); // Cannot exceed amount
+        }
+
+        const finalAmount = Math.max(0, amount - discountAmount);
+
+        return {
+            originalAmount: amount,
+            discountAmount,
+            finalAmount,
+            discountType: coupon.type,
+            discountValue: coupon.value
+        };
+    }
+
+    /**
+     * Increment coupon usage count
+     * Invalidates coupon cache
+     * 
+     * @param {string} couponId - Coupon ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated coupon
+     */
+    async incrementUsage(couponId, options = {}) {
+        if (!couponId) {
+            throw new Error('Coupon ID is required');
+        }
+
+        const coupon = await this.Model.findByIdAndUpdate(
+            couponId,
+            { $inc: { usedCount: 1 } },
+            { new: true, session: options.session }
+        ).lean();
+
+        // Manually invalidate cache since we're using direct model operation
+        await this._invalidateCache('findById', couponId, { entity: coupon });
+
+        return coupon;
+    }
+
+    /**
+     * Activate a coupon
+     * 
+     * @param {string} couponId - Coupon ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated coupon
+     */
+    async activateCoupon(couponId, options = {}) {
+        if (!couponId) {
+            throw new Error('Coupon ID is required');
+        }
+
+        return await this.updateById(couponId, { active: true }, options);
+    }
+
+    /**
+     * Deactivate a coupon
+     * 
+     * @param {string} couponId - Coupon ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated coupon
+     */
+    async deactivateCoupon(couponId, options = {}) {
+        if (!couponId) {
+            throw new Error('Coupon ID is required');
+        }
+
+        return await this.updateById(couponId, { active: false }, options);
+    }
+
+    /**
+     * Update coupon details
+     * Prevents updating code and type after creation
+     * 
+     * @param {string} couponId - Coupon ID
+     * @param {Object} updateData - Update data
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated coupon
+     */
+    async updateCoupon(couponId, updateData, options = {}) {
+        if (!couponId) {
+            throw new Error('Coupon ID is required');
+        }
+
+        // Prevent updating code and type
+        const { code, type, usedCount, ...safeUpdateData } = updateData;
+
+        return await this.updateById(couponId, safeUpdateData, options);
+    }
+
+    /**
+     * Delete a coupon
+     * Should check if coupon has been used before deletion
+     * 
+     * @param {string} couponId - Coupon ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Deleted coupon
+     */
+    async deleteCoupon(couponId, options = {}) {
+        if (!couponId) {
+            throw new Error('Coupon ID is required');
+        }
+
+        return await this.deleteById(couponId, options);
+    }
+
+    /**
+     * Get coupon statistics
+     * 
+     * @param {string} couponId - Coupon ID
+     * @returns {Promise<Object>} Coupon statistics
      */
     async getCouponStats(couponId) {
-        try {
-            const coupon = await this.findById(couponId);
-            if (!coupon) {
-                throw new Error('Coupon not found');
-            }
-
-            return {
-                couponId,
-                code: coupon.code,
-                usedCount: coupon.usedCount || 0,
-                maxUses: coupon.maxUses,
-                remainingUses: coupon.maxUses ? coupon.maxUses - (coupon.usedCount || 0) : null,
-                isActive: coupon.isActive,
-                expiryDate: coupon.expiryDate,
-            };
-        } catch (error) {
-            throw this._handleError(error, 'getCouponStats');
+        if (!couponId) {
+            throw new Error('Coupon ID is required');
         }
+
+        const coupon = await this.findById(couponId);
+
+        if (!coupon) {
+            throw new Error('Coupon not found');
+        }
+
+        const usagePercentage = coupon.maxUses
+            ? ((coupon.usedCount / coupon.maxUses) * 100).toFixed(2)
+            : 'Unlimited';
+
+        const remainingUses = coupon.maxUses
+            ? Math.max(0, coupon.maxUses - coupon.usedCount)
+            : 'Unlimited';
+
+        return {
+            code: coupon.code,
+            type: coupon.type,
+            value: coupon.value,
+            usedCount: coupon.usedCount,
+            maxUses: coupon.maxUses || 'Unlimited',
+            remainingUses,
+            usagePercentage,
+            active: coupon.active,
+            validFrom: coupon.validFrom,
+            validUntil: coupon.validUntil,
+            isExpired: new Date(coupon.validUntil) < new Date()
+        };
     }
 
     /**
-     * Deactivate expired coupons
-     * @returns {Promise<Object>} Update result
+     * Expire old coupons
+     * Updates status of coupons past their validity period
+     * 
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Update result with modified count
      */
-    async deactivateExpiredCoupons() {
-        try {
-            const criteria = {
-                isActive: true,
-                expiryDate: { $lt: new Date() }
-            };
+    async expireOldCoupons(options = {}) {
+        const now = new Date();
 
-            return await this.updateMany(criteria, { isActive: false });
-        } catch (error) {
-            throw this._handleError(error, 'deactivateExpiredCoupons');
-        }
+        return await this.updateMany(
+            {
+                active: true,
+                validUntil: { $lt: now }
+            },
+            { active: false },
+            options
+        );
     }
 
     /**
-     * Generate unique coupon code
-     * @param {Number} length - Code length (default: 8)
-     * @param {String} prefix - Code prefix (optional)
-     * @returns {Promise<String>} Unique coupon code
+     * Find coupons expiring soon
+     * 
+     * @param {number} days - Number of days
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Expiring coupons
      */
-    async generateUniqueCode(length = 8, prefix = '') {
-        try {
-            const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-            let code;
-            let isUnique = false;
-            let attempts = 0;
-            const maxAttempts = 10;
+    async findExpiringSoon(days = 7, options = {}) {
+        const now = new Date();
+        const futureDate = new Date();
+        futureDate.setDate(futureDate.getDate() + days);
 
-            while (!isUnique && attempts < maxAttempts) {
-                let randomPart = '';
-                for (let i = 0; i < length; i++) {
-                    randomPart += characters.charAt(Math.floor(Math.random() * characters.length));
+        return await this.find(
+            {
+                active: true,
+                validUntil: {
+                    $gte: now,
+                    $lte: futureDate
                 }
-                
-                code = prefix + randomPart;
-                
-                const existingCoupon = await this.findByCode(code);
-                isUnique = !existingCoupon;
-                attempts++;
+            },
+            {
+                ...options,
+                sort: options.sort || { validUntil: 1 }
             }
-
-            if (!isUnique) {
-                throw new Error('Unable to generate unique coupon code');
-            }
-
-            return code;
-        } catch (error) {
-            throw this._handleError(error, 'generateUniqueCode');
-        }
+        );
     }
 
     /**
-     * Bulk create coupons
-     * @param {Array} couponsData - Array of coupon data
-     * @returns {Promise<Array>} Created coupons
+     * Get overall coupon statistics
+     * 
+     * @returns {Promise<Object>} Overall statistics
      */
-    async bulkCreateCoupons(couponsData) {
-        try {
-            // Validate and prepare codes
-            const processedCoupons = await Promise.all(
-                couponsData.map(async (couponData) => {
-                    if (couponData.code) {
-                        couponData.code = couponData.code.toUpperCase().trim();
-                        // Check for duplicates
-                        const existing = await this.findByCode(couponData.code);
-                        if (existing) {
-                            throw new Error(`Coupon code ${couponData.code} already exists`);
-                        }
-                    } else {
-                        // Generate unique code if not provided
-                        couponData.code = await this.generateUniqueCode();
+    async getOverallStats() {
+        const [totalCount, activeCount, expiredCount, stats] = await Promise.all([
+            this.count({}),
+            this.count({ active: true }),
+            this.count({
+                active: false,
+                validUntil: { $lt: new Date() }
+            }),
+            this.Model.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        totalUsed: { $sum: '$usedCount' },
+                        avgUsage: { $avg: '$usedCount' }
                     }
-                    return couponData;
-                })
-            );
+                }
+            ])
+        ]);
 
-            return await this.createMany(processedCoupons);
-        } catch (error) {
-            throw this._handleError(error, 'bulkCreateCoupons');
-        }
-    }
-
-    /**
-     * Record coupon usage (private method)
-     * @private
-     * @param {String|ObjectId} couponId - Coupon ID
-     * @param {String|ObjectId} userId - User ID
-     */
-    async _recordUsage(couponId, userId) {
-        try {
-            // Increment usage count
-            await this.updateById(couponId, { $inc: { usedCount: 1 } });
-            
-            // Here you could also create a record in a CouponUsage collection
-            // for detailed tracking if needed
-        } catch (error) {
-            throw this._handleError(error, '_recordUsage');
-        }
+        return {
+            totalCoupons: totalCount,
+            activeCoupons: activeCount,
+            expiredCoupons: expiredCount,
+            inactiveCoupons: totalCount - activeCount - expiredCount,
+            totalUsed: stats[0]?.totalUsed || 0,
+            avgUsagePerCoupon: stats[0]?.avgUsage?.toFixed(2) || '0.00'
+        };
     }
 }
 

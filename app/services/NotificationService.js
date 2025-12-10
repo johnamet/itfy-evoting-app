@@ -1,262 +1,436 @@
-#!/usr/bin/env node
-
 /**
- * Notification Service
+ * NotificationService
  * 
- * Business logic for Notification operations
+ * Handles notification creation, delivery, read status management,
+ * and delivery tracking across the platform.
+ * 
+ * @extends BaseService
+ * @module services/NotificationService
+ * @version 2.0.0
  */
 
 import BaseService from './BaseService.js';
-import NotificationRepository from '../repositories/NotificationRepository.js';
-import UserRepository from '../repositories/UserRepository.js';
-import EmailService from './EmailService.js';
 
-class NotificationService extends BaseService {
-    constructor() {
-        super();
-        this.userRepository = new UserRepository();
-        this.emailService = new EmailService();
-        this.repository = new NotificationRepository();
+export default class NotificationService extends BaseService {
+    constructor(repositories) {
+        super(repositories, {
+            serviceName: 'NotificationService',
+            primaryRepository: 'notification',
+        });
+
+        this.validTypes = [
+            'system',
+            'event',
+            'vote',
+            'payment',
+            'candidate',
+            'message',
+        ];
+
+        this.validPriorities = ['low', 'normal', 'high', 'urgent'];
     }
 
     /**
-     * Create a new notification
+     * Create a notification
      */
-    async createNotification(data, createdBy) {
-        try {
-            const notificationData = {
-                ...data,
-                createdBy,
-                createdAt: new Date(),
-                updatedAt: new Date()
-            };
+    async createNotification(notificationData, creatorId = null) {
+        return this.runInContext('createNotification', async () => {
+            // Validate required fields
+            this.validateRequiredFields(notificationData, [
+                'userId', 'type', 'title', 'message'
+            ]);
 
-            const notification = await this.repository.create(notificationData);
-
-            // Send email if enabled
-            if (data.sendEmail && notification.recipientUser) {
-                await this.sendEmailNotification(notification);
+            // Validate type
+            if (!this.validTypes.includes(notificationData.type)) {
+                throw new Error(`Invalid notification type. Must be one of: ${this.validTypes.join(', ')}`);
             }
 
-            // Send to all admins if it's a system notification
-            if (data.isGlobalNotification && data.notifyAdmins) {
-                await this.notifyAdmins(notification);
+            // Validate priority if provided
+            if (notificationData.priority && !this.validPriorities.includes(notificationData.priority)) {
+                throw new Error(`Invalid priority. Must be one of: ${this.validPriorities.join(', ')}`);
             }
 
-            return notification;
-        } catch (error) {
-            throw new Error(`Error creating notification: ${error.message}`);
-        }
+            // Create notification
+            const notification = await this.repo('notification').create({
+                ...notificationData,
+                priority: notificationData.priority || 'normal',
+                read: false,
+                delivered: false,
+                createdBy: creatorId,
+            });
+
+            // Emit real-time notification if Socket.IO is available
+            try {
+                const io = global.io;
+                if (io) {
+                    io.to(`user-${notificationData.userId}`)
+                        .emit('notification', {
+                            id: notification._id,
+                            type: notification.type,
+                            title: notification.title,
+                            message: notification.message,
+                            priority: notification.priority,
+                            createdAt: notification.createdAt,
+                        });
+                }
+            } catch (error) {
+                this.log('warn', 'Failed to emit real-time notification', { error: error.message });
+            }
+
+            return this.handleSuccess(
+                { notification },
+                'Notification created successfully'
+            );
+        });
     }
 
     /**
-     * Get unread notifications for a user
+     * Create bulk notifications
      */
-    async getUnreadForUser(userId, role = null) {
-        try {
-            return await this.repository.findUnreadForUser(userId, role);
-        } catch (error) {
-            throw new Error(`Error getting unread notifications: ${error.message}`);
-        }
-    }
+    async createBulkNotifications(userIds, notificationData, creatorId = null) {
+        return this.runInContext('createBulkNotifications', async () => {
+            // Validate required fields
+            this.validateRequiredFields(notificationData, [
+                'type', 'title', 'message'
+            ]);
 
-    /**
-     * Get notifications by category
-     */
-    async getByCategory(category, limit = 50, offset = 0) {
-        try {
-            return await this.repository.findByCategory(category, limit, offset);
-        } catch (error) {
-            throw new Error(`Error getting notifications by category: ${error.message}`);
-        }
+            const results = await this.processBatch(
+                userIds,
+                async (userId) => {
+                    try {
+                        await this.createNotification({
+                            ...notificationData,
+                            userId,
+                        }, creatorId);
+                        return { userId, success: true };
+                    } catch (error) {
+                        return { userId, success: false, error: error.message };
+                    }
+                },
+                20
+            );
+
+            const successCount = results.filter(r => r.success).length;
+
+            return this.handleSuccess({
+                total: userIds.length,
+                successful: successCount,
+                failed: userIds.length - successCount,
+                results,
+            }, `Bulk notifications sent: ${successCount}/${userIds.length} successful`);
+        });
     }
 
     /**
      * Mark notification as read
      */
     async markAsRead(notificationId, userId) {
-        try {
-            return await this.repository.markAsRead(notificationId, userId);
-        } catch (error) {
-            throw new Error(`Error marking notification as read: ${error.message}`);
-        }
+        return this.runInContext('markAsRead', async () => {
+            const notification = await this.repo('notification').findById(notificationId);
+
+            if (!notification) {
+                throw new Error('Notification not found');
+            }
+
+            // Verify ownership
+            if (notification.userId.toString() !== userId.toString()) {
+                throw new Error('Unauthorized to access this notification');
+            }
+
+            const updatedNotification = await this.repo('notification').update(notificationId, {
+                read: true,
+                readAt: new Date(),
+            });
+
+            return this.handleSuccess(
+                { notification: updatedNotification },
+                'Notification marked as read'
+            );
+        });
     }
 
     /**
      * Mark all notifications as read for a user
      */
     async markAllAsRead(userId) {
-        try {
-            return await this.repository.markAllAsRead(userId);
-        } catch (error) {
-            throw new Error(`Error marking all notifications as read: ${error.message}`);
-        }
+        return this.runInContext('markAllAsRead', async () => {
+            const result = await this.repo('notification').updateMany(
+                { userId, read: false },
+                { read: true, readAt: new Date() }
+            );
+
+            return this.handleSuccess({
+                modifiedCount: result.modifiedCount,
+            }, `${result.modifiedCount} notifications marked as read`);
+        });
     }
 
     /**
-     * Delete old notifications
+     * Get user notifications
      */
-    async deleteOldNotifications(daysOld = 30) {
-        try {
-            const cutoffDate = new Date();
-            cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+    async getUserNotifications(userId, filters = {}, pagination = {}) {
+        return this.runInContext('getUserNotifications', async () => {
+            const { page, limit } = this.parsePagination(pagination);
 
-            return await this.repository.deleteOld(cutoffDate);
-        } catch (error) {
-            throw new Error(`Error deleting old notifications: ${error.message}`);
-        }
-    }
+            const query = { userId };
 
-    /**
-     * Send email notification
-     */
-    async sendEmailNotification(notification) {
-        try {
-            if (!notification.recipientUser) return;
-
-            const user = await this.userRepository.findById(notification.recipientUser);
-            if (!user || !user.email) return;
-
-            const emailData = {
-                to: user.email,
-                subject: notification.title,
-                text: notification.message,
-                html: this.generateEmailHTML(notification)
-            };
-
-            await this.emailService.sendEmail(emailData);
-        } catch (error) {
-            console.error('Error sending email notification:', error);
-        }
-    }
-
-    /**
-     * Notify all admins
-     */
-    async notifyAdmins(notification) {
-        try {
-            const admins = await this.userRepository.findAdmins();
-            
-            for (const admin of admins) {
-                await this.createNotification({
-                    title: notification.title,
-                    message: notification.message,
-                    type: notification.type,
-                    category: notification.category,
-                    priority: notification.priority,
-                    recipientUser: admin._id,
-                    relatedModel: notification.relatedModel,
-                    relatedId: notification.relatedId,
-                    actionUrl: notification.actionUrl,
-                    sendEmail: false // Avoid infinite loop
-                }, notification.createdBy);
+            // Filter by type
+            if (filters.type) {
+                query.type = filters.type;
             }
-        } catch (error) {
-            console.error('Error notifying admins:', error);
-        }
+
+            // Filter by read status
+            if (filters.read !== undefined) {
+                query.read = filters.read === 'true';
+            }
+
+            // Filter by priority
+            if (filters.priority) {
+                query.priority = filters.priority;
+            }
+
+            // Filter by date range
+            if (filters.startDate || filters.endDate) {
+                query.createdAt = {};
+                if (filters.startDate) {
+                    query.createdAt.$gte = new Date(filters.startDate);
+                }
+                if (filters.endDate) {
+                    query.createdAt.$lte = new Date(filters.endDate);
+                }
+            }
+
+            const notifications = await this.repo('notification').findWithPagination(query, {
+                page,
+                limit,
+                sort: { createdAt: -1 },
+            });
+
+            return this.handleSuccess(
+                this.createPaginatedResponse(notifications.docs, notifications.total, page, limit),
+                'Notifications retrieved successfully'
+            );
+        });
     }
 
     /**
-     * Generate HTML for email notifications
+     * Get unread count for user
      */
-    generateEmailHTML(notification) {
-        return `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px;">
-                    <h2 style="color: #333; margin-bottom: 16px;">${notification.title}</h2>
-                    <p style="color: #666; line-height: 1.6; margin-bottom: 20px;">${notification.message}</p>
-                    
-                    ${notification.actionUrl ? `
-                        <a href="${notification.actionUrl}" 
-                           style="background-color: #007bff; color: white; padding: 12px 24px; 
-                                  text-decoration: none; border-radius: 4px; display: inline-block;">
-                            View Details
-                        </a>
-                    ` : ''}
-                    
-                    <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
-                        <p style="color: #999; font-size: 12px; margin: 0;">
-                            This is an automated notification from ITFY E-Voting System.
-                        </p>
-                    </div>
-                </div>
-            </div>
-        `;
+    async getUnreadCount(userId) {
+        return this.runInContext('getUnreadCount', async () => {
+            const count = await this.repo('notification').count({
+                userId,
+                read: false,
+            });
+
+            return this.handleSuccess({ count }, 'Unread count retrieved');
+        });
     }
 
     /**
-     * Create system notification
+     * Delete notification
      */
-    async createSystemNotification(title, message, type = 'info', category = 'system', priority = 'normal') {
-        try {
-            return await this.createNotification({
-                title,
-                message,
-                type,
-                category,
-                priority,
-                isGlobalNotification: true,
-                notifyAdmins: true,
-                sendEmail: false
-            }, null);
-        } catch (error) {
-            throw new Error(`Error creating system notification: ${error.message}`);
-        }
+    async deleteNotification(notificationId, userId) {
+        return this.runInContext('deleteNotification', async () => {
+            const notification = await this.repo('notification').findById(notificationId);
+
+            if (!notification) {
+                throw new Error('Notification not found');
+            }
+
+            // Verify ownership
+            if (notification.userId.toString() !== userId.toString()) {
+                throw new Error('Unauthorized to delete this notification');
+            }
+
+            await this.repo('notification').delete(notificationId);
+
+            return this.handleSuccess(null, 'Notification deleted successfully');
+        });
     }
 
     /**
-     * Create vote notification
+     * Delete all read notifications for user
      */
-    async createVoteNotification(userId, candidateName, eventName, createdBy) {
-        try {
-            return await this.createNotification({
-                title: 'Vote Cast Successfully',
-                message: `Your vote for ${candidateName} in ${eventName} has been recorded.`,
-                type: 'success',
-                category: 'vote',
+    async deleteAllRead(userId) {
+        return this.runInContext('deleteAllRead', async () => {
+            const result = await this.repo('notification').deleteMany({
+                userId,
+                read: true,
+            });
+
+            return this.handleSuccess({
+                deletedCount: result.deletedCount,
+            }, `${result.deletedCount} notifications deleted`);
+        });
+    }
+
+    /**
+     * Send event notification to all participants
+     */
+    async sendEventNotification(eventId, notificationData, creatorId) {
+        return this.runInContext('sendEventNotification', async () => {
+            const event = await this.repo('event').findById(eventId);
+
+            if (!event) {
+                throw new Error('Event not found');
+            }
+
+            // Get all users who voted in this event
+            const votes = await this.repo('vote').distinct('voterId', { eventId });
+
+            // Get event organizer
+            const organizerId = event.createdBy;
+
+            // Combine unique user IDs
+            const userIds = [...new Set([...votes, organizerId])];
+
+            return this.createBulkNotifications(
+                userIds,
+                {
+                    ...notificationData,
+                    type: 'event',
+                    data: { eventId, eventName: event.name },
+                },
+                creatorId
+            );
+        });
+    }
+
+    /**
+     * Send vote confirmation notification
+     */
+    async sendVoteConfirmation(voteId) {
+        return this.runInContext('sendVoteConfirmation', async () => {
+            const vote = await this.repo('vote').findById(voteId);
+
+            if (!vote) {
+                throw new Error('Vote not found');
+            }
+
+            const event = await this.repo('event').findById(vote.eventId);
+            const candidate = await this.repo('candidate').findById(vote.candidateId);
+
+            return this.createNotification({
+                userId: vote.voterId,
+                type: 'vote',
+                title: 'Vote Confirmed',
+                message: `Your vote for ${candidate?.name || 'candidate'} in ${event?.name || 'event'} has been recorded.`,
                 priority: 'normal',
-                recipientUser: userId,
-                sendEmail: true
-            }, createdBy);
-        } catch (error) {
-            throw new Error(`Error creating vote notification: ${error.message}`);
-        }
+                data: {
+                    voteId: vote._id,
+                    eventId: vote.eventId,
+                    candidateId: vote.candidateId,
+                },
+            });
+        });
     }
 
     /**
-     * Create payment notification
+     * Send payment confirmation notification
      */
-    async createPaymentNotification(userId, amount, status, reference, createdBy) {
-        try {
-            const title = status === 'success' ? 'Payment Successful' : 'Payment Failed';
-            const message = status === 'success' 
-                ? `Your payment of GHS ${amount} has been processed successfully. Reference: ${reference}`
-                : `Your payment of GHS ${amount} could not be processed. Reference: ${reference}`;
+    async sendPaymentConfirmation(paymentId) {
+        return this.runInContext('sendPaymentConfirmation', async () => {
+            const payment = await this.repo('payment').findById(paymentId);
 
-            return await this.createNotification({
-                title,
-                message,
-                type: status === 'success' ? 'success' : 'error',
-                category: 'payment',
-                priority: status === 'success' ? 'normal' : 'high',
-                recipientUser: userId,
-                sendEmail: true
-            }, createdBy);
-        } catch (error) {
-            throw new Error(`Error creating payment notification: ${error.message}`);
-        }
+            if (!payment) {
+                throw new Error('Payment not found');
+            }
+
+            const event = await this.repo('event').findById(payment.eventId);
+
+            return this.createNotification({
+                userId: payment.userId,
+                type: 'payment',
+                title: 'Payment Successful',
+                message: `Your payment of ₦${payment.amount} for ${event?.name || 'event'} was successful.`,
+                priority: 'high',
+                data: {
+                    paymentId: payment._id,
+                    eventId: payment.eventId,
+                    reference: payment.reference,
+                },
+            });
+        });
     }
 
     /**
      * Get notification statistics
      */
-    async getStatistics() {
-        try {
-            return await this.repository.getStatistics();
-        } catch (error) {
-            throw new Error(`Error getting notification statistics: ${error.message}`);
-        }
+    async getNotificationStatistics(filters = {}) {
+        return this.runInContext('getNotificationStatistics', async () => {
+            const query = {};
+
+            // Apply filters
+            if (filters.userId) {
+                query.userId = filters.userId;
+            }
+
+            if (filters.startDate || filters.endDate) {
+                query.createdAt = {};
+                if (filters.startDate) {
+                    query.createdAt.$gte = new Date(filters.startDate);
+                }
+                if (filters.endDate) {
+                    query.createdAt.$lte = new Date(filters.endDate);
+                }
+            }
+
+            // Total counts
+            const totalNotifications = await this.repo('notification').count(query);
+            const readNotifications = await this.repo('notification').count({ ...query, read: true });
+            const unreadNotifications = await this.repo('notification').count({ ...query, read: false });
+
+            // By type
+            const byType = await this.repo('notification').aggregate([
+                { $match: query },
+                {
+                    $group: {
+                        _id: '$type',
+                        count: { $sum: 1 },
+                    },
+                },
+                { $sort: { count: -1 } },
+            ]);
+
+            // By priority
+            const byPriority = await this.repo('notification').aggregate([
+                { $match: query },
+                {
+                    $group: {
+                        _id: '$priority',
+                        count: { $sum: 1 },
+                    },
+                },
+            ]);
+
+            // Over time
+            const overTime = await this.repo('notification').aggregate([
+                { $match: query },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%d',
+                                date: '$createdAt',
+                            },
+                        },
+                        count: { $sum: 1 },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ]);
+
+            return this.handleSuccess({
+                statistics: {
+                    total: totalNotifications,
+                    read: readNotifications,
+                    unread: unreadNotifications,
+                    byType,
+                    byPriority,
+                    overTime,
+                },
+            }, 'Statistics retrieved successfully');
+        });
     }
 }
-
-export default NotificationService;

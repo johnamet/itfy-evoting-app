@@ -1,477 +1,526 @@
 #!/usr/bin/env node
 /**
  * Email Service
+ * Handles email sending using Nodemailer with:
+ * - SMTP configuration (Gmail, SendGrid, AWS SES)
+ * - HTML email templates
+ * - Email queue support (via Bull)
+ * - Email verification, password reset, notifications
  * 
- * Handles email sending functionality for voters and users including:
- * - Payment confirmations
- * - Vote confirmations
- * - Event notifications
- * - Admin notifications
- * - Template-based emails
- * - User registration and authentication emails
+ * @module services/EmailService
+ * @version 2.0.0
  */
 
-import BaseService from './BaseService.js';
-import nodemailer from 'nodemailer';
-import handlebars from 'handlebars';
-import fs from 'fs/promises';
-import path from 'path';
+import nodemailer from "nodemailer";
+import path from "path";
+import fs from "fs/promises";
+import handlebars from "handlebars";
+import config from "../config/ConfigManager.js";
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-class EmailService extends BaseService {
+class EmailService {
     constructor() {
-        super();
-        
-        // Email configuration
-        this.emailConfig = {
-            host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-            port: process.env.EMAIL_PORT || 587,
-            secure: process.env.EMAIL_SECURE === 'true',
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASSWORD
-            }
-        };
+        this.transporter = null;
+        this.from = config.get('email.from') || "ITFY E-Voting <noreply@itfy-evoting.com>";
+        this.templatesDir = path.join(process.cwd(), "app", "templates", "emails");
+        this.isReady = false;
 
-        // Sender information
-        this.fromEmail = process.env.FROM_EMAIL || process.env.EMAIL_USER;
-        this.fromName = process.env.FROM_NAME || 'ITFY E-Voting System';
-        this.supportEmail = process.env.SUPPORT_EMAIL || this.fromEmail;
-        this.adminEmail = process.env.ADMIN_EMAIL || this.fromEmail;
-
-        // App information
-        this.appName = process.env.APP_NAME || 'ITFY E-Voting';
-        this.appUrl = process.env.APP_URL || 'https://voting.itfy.com';
-        this.logoUrl = process.env.LOGO_URL || `${this.appUrl}/assets/logo.png`;
-
-        // Template paths
-        this.templatesPath = path.join(path.dirname(__dirname), 'templates', 'emails');
+        // Register Handlebars helpers
+        this.registerHandlebarsHelpers();
 
         // Initialize transporter
-        this.transporter = null;
-        // this._initializeTransporter();
-
-        // Template cache
-        this.templateCache = new Map();
-        this.baseTemplate = null;
-
-        // Email sending queue and rate limiting
-        this.emailQueue = [];
-        this.isProcessingQueue = false;
-        this.rateLimitDelay = parseInt(process.env.EMAIL_RATE_LIMIT_MS) || 1000; // 1 second between emails
-        // this._initializeTransporter();
+        this.initialize();
     }
 
     /**
-     * Initialize nodemailer transporter
+     * Register custom Handlebars helpers
+     * @private
      */
-    async _initializeTransporter() {
-        try {
-            if (!this.emailConfig.auth.user || !this.emailConfig.auth.pass) {
-                console.warn('Email credentials not configured. Email service will be disabled.');
-                return;
-            }
-
-            this.transporter = nodemailer.createTransport(this.emailConfig);
-
-            // Verify connection
-            await this.transporter.verify();
-            this._log('email_service', 'Email service initialized successfully');
-
-            // Load base template
-            await this._loadBaseTemplate();
-        } catch (error) {
-            this._log('email_init_error', error);
-            console.error('Failed to initialize email service:', error.message);
-        }
-    }
-
-    /**
-     * Load base email template
-     */
-    async _loadBaseTemplate() {
-        try {
-            const baseTemplatePath = path.join(this.templatesPath, 'base.hbs');
-            const templateContent = await fs.readFile(baseTemplatePath, 'utf8');
-            this.baseTemplate = handlebars.compile(templateContent);
-            this._log('email_template', 'Base email template loaded successfully');
-        } catch (error) {
-            this._log('template_load_error', error);
-            console.error('Failed to load base email template:', error.message);
-        }
-    }
-
-    /**
-     * Load and compile email template
-     */
-    async _loadTemplate(templateName) {
-        try {
-            // Check cache first
-            if (this.templateCache.has(templateName)) {
-                return this.templateCache.get(templateName);
-            }
-
-            const templatePath = path.join(this.templatesPath, `${templateName}.hbs`);
-            const templateContent = await fs.readFile(templatePath, 'utf8');
-            const compiledTemplate = handlebars.compile(templateContent);
-            
-            // Cache the compiled template
-            this.templateCache.set(templateName, compiledTemplate);
-            
-            return compiledTemplate;
-        } catch (error) {
-            this._log('template_load_error', error);
-            throw new Error(`Failed to load email template: ${templateName}`);
-        }
-    }
-
-    /**
-     * Generate HTML email content using templates
-     */
-    async _generateEmailHTML(templateName, data) {
-        try {
-            const template = await this._loadTemplate(templateName);
-            const content = template(data);
-
-            // Use base template if available
-            if (this.baseTemplate) {
-                return this.baseTemplate({
-                    content,
-                    subject: data.subject,
-                    appName: this.appName,
-                    appUrl: this.appUrl,
-                    logoUrl: this.logoUrl,
-                    supportEmail: this.supportEmail,
-                    currentYear: new Date().getFullYear(),
-                    ...data
-                });
-            }
-
-            return content;
-        } catch (error) {
-            this._log('email_generation_error', error);
-            return `<p>Error generating email content: ${error.message}</p>`;
-        }
-    }
-
-    /**
-     * Send email using queue system
-     */
-    async _sendEmail(to, subject, html, attachments = []) {
-        const emailData = {
-            from: `${this.fromName} <${this.fromEmail}>`,
-            to,
-            subject,
-            html,
-            attachments
-        };
-
-        // Add to queue
-        return new Promise((resolve, reject) => {
-            this.emailQueue.push({
-                emailData,
-                resolve,
-                reject,
-                timestamp: Date.now()
-            });
-
-            // Start processing queue if not already running
-            if (!this.isProcessingQueue) {
-                this._processEmailQueue();
-            }
+    registerHandlebarsHelpers() {
+        handlebars.registerHelper('eq', (a, b) => a === b);
+        handlebars.registerHelper('ne', (a, b) => a !== b);
+        handlebars.registerHelper('gt', (a, b) => a > b);
+        handlebars.registerHelper('lt', (a, b) => a < b);
+        handlebars.registerHelper('or', function() {
+            return Array.prototype.slice.call(arguments, 0, -1).some(Boolean);
+        });
+        handlebars.registerHelper('and', function() {
+            return Array.prototype.slice.call(arguments, 0, -1).every(Boolean);
+        });
+        handlebars.registerHelper('formatDate', (date) => {
+            if (!date) return '';
+            return new Date(date).toLocaleDateString();
+        });
+        handlebars.registerHelper('capitalize', (str) => {
+            if (!str) return '';
+            return str.charAt(0).toUpperCase() + str.slice(1);
         });
     }
 
     /**
-     * Process email queue with rate limiting
+     * Initialize email transporter
+     * @private
      */
-    async _processEmailQueue() {
-        if (this.isProcessingQueue || this.emailQueue.length === 0) {
-            return;
+    async initialize() {
+        try {
+            const emailProvider = config.get('email.provider') || "gmail";
+
+            console.log(`[EmailService] Initializing with provider: ${emailProvider}`);
+
+            switch (emailProvider.toLowerCase()) {
+                case "gmail":
+                    this.transporter = this.createGmailTransporter();
+                    break;
+                case "sendgrid":
+                    this.transporter = this.createSendGridTransporter();
+                    break;
+                case "ses":
+                    this.transporter = this.createSESTransporter();
+                    break;
+                case "smtp":
+                default:
+                    this.transporter = this.createSMTPTransporter();
+            }
+
+            // Verify transporter configuration
+            await this.transporter.verify();
+            this.isReady = true;
+            console.log("[EmailService] ✓ Email service initialized successfully");
+        } catch (error) {
+            console.error("[EmailService] Initialization failed:", error.message);
+            this.isReady = false;
+
+            // Fallback to console logging in development
+            if (config.get('env') !== "production") {
+                console.warn("[EmailService] Using console email preview in development");
+                this.transporter = this.createTestTransporter();
+            }
         }
+    }
 
-        this.isProcessingQueue = true;
+    // ========================================
+    // TRANSPORTER CONFIGURATIONS
+    // ========================================
 
-        while (this.emailQueue.length > 0) {
-            const { emailData, resolve, reject } = this.emailQueue.shift();
+    createGmailTransporter() {
+        return nodemailer.createTransport({
+            service: "gmail",
+            auth: {
+                user: config.get('email.user'),
+                pass: config.get('email.password'),
+            },
+        });
+    }
 
-            try {
-                if (!this.transporter) {
-                    throw new Error('Email service not initialized');
+    createSendGridTransporter() {
+        return nodemailer.createTransport({
+            host: "smtp.sendgrid.net",
+            port: 587,
+            secure: false,
+            auth: {
+                user: "apikey",
+                pass: config.get('email.sendgridApiKey'),
+            },
+        });
+    }
+
+    createSESTransporter() {
+        return nodemailer.createTransport({
+            host: `email.${config.get('aws.sesRegion') || "us-east-1"}.amazonaws.com`,
+            port: 587,
+            secure: false,
+            auth: {
+                user: config.get('aws.accessKeyId'),
+                pass: config.get('aws.secretAccessKey'),
+            },
+        });
+    }
+
+    createSMTPTransporter() {
+        return nodemailer.createTransport({
+            host: config.get('smtp.host'),
+            port: parseInt(config.get('smtp.port'), 10) || 587,
+            secure: config.get('smtp.secure') === "true",
+            auth: {
+                user: config.get('smtp.user'),
+                pass: config.get('smtp.password'),
+            },
+        });
+    }
+
+    createTestTransporter() {
+        return {
+            sendMail: async (mailOptions) => {
+                console.log("\n===== EMAIL PREVIEW =====");
+                console.log("To:", mailOptions.to);
+                console.log("Subject:", mailOptions.subject);
+                console.log("Text:", mailOptions.text?.substring(0, 200));
+                console.log("========================\n");
+                return { messageId: "test-" + Date.now() };
+            },
+            verify: async () => true,
+        };
+    }
+
+    // ========================================
+    // CORE EMAIL SENDING
+    // ========================================
+
+    /**
+     * Send email
+     * @param {Object} options - { to, subject, text, html, attachments }
+     * @returns {Promise<Object>}
+     */
+    async sendEmail(options) {
+        try {
+            if (!this.isReady && config.get('env') === "production") {
+                throw new Error("Email service not ready");
+            }
+
+            const mailOptions = {
+                from: options.from || this.from,
+                to: options.to,
+                subject: options.subject,
+                text: options.text,
+                html: options.html,
+                attachments: options.attachments,
+            };
+
+            const info = await this.transporter.sendMail(mailOptions);
+
+            console.log(`[EmailService] ✓ Email sent: ${info.messageId} to ${options.to}`);
+            return {
+                success: true,
+                messageId: info.messageId,
+                response: info.response,
+            };
+        } catch (error) {
+            console.error("[EmailService] Email send failed:", error);
+            return {
+                success: false,
+                error: error.message,
+            };
+        }
+    }
+
+    /**
+     * Send email using template
+     * @param {Object} options - { to, subject, template, context }
+     * @returns {Promise<Object>}
+     */
+    async sendTemplateEmail(options) {
+        try {
+            const { to, subject, template, context } = options;
+
+            // Load and compile template
+            const html = await this.renderTemplate(template, context);
+            const text = this.htmlToText(html);
+
+            return await this.sendEmail({
+                to,
+                subject,
+                html,
+                text,
+            });
+        } catch (error) {
+            console.error("[EmailService] Template email send failed:", error);
+            return {
+                success: false,
+                error: error.message,
+            };
+        }
+    }
+
+    // ========================================
+    // EMAIL TEMPLATES
+    // ========================================
+
+    /**
+     * Load and render email template
+     * @param {string} templateName - Template file name (without .hbs)
+     * @param {Object} context - Template variables
+     * @returns {Promise<string>} - Rendered HTML
+     */
+    async renderTemplate(templateName, context = {}) {
+        try {
+            const templatePath = path.join(this.templatesDir, `${templateName}.hbs`);
+            const templateSource = await fs.readFile(templatePath, "utf-8");
+            const template = handlebars.compile(templateSource);
+
+            // Add common context variables
+            const fullContext = {
+                ...context,
+                appName: "ITFY E-Voting",
+                appUrl: config.get('app.url') || "http://localhost:3000",
+                currentYear: new Date().getFullYear(),
+                supportEmail: config.get('app.supportEmail') || "support@itfy-evoting.com",
+            };
+
+            return template(fullContext);
+        } catch (error) {
+            console.error(`[EmailService] Template render failed for ${templateName}:`, error);
+            return this.getFallbackTemplate(context);
+        }
+    }
+
+    getFallbackTemplate(context) {
+        return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>ITFY E-Voting</title>
+            </head>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2>ITFY E-Voting</h2>
+                    <div style="margin: 20px 0;">
+                        ${context.message || ""}
+                    </div>
+                    <hr style="border: 1px solid #eee; margin: 20px 0;">
+                    <p style="color: #666; font-size: 12px;">
+                        © ${new Date().getFullYear()} ITFY E-Voting. All rights reserved.
+                    </p>
+                </div>
+            </body>
+            </html>
+        `;
+    }
+
+    htmlToText(html) {
+        return html
+            .replace(/<[^>]*>/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    // ========================================
+    // PRE-BUILT EMAIL METHODS
+    // ========================================
+
+    async sendWelcomeEmail(data) {
+        return await this.sendTemplateEmail({
+            to: data.email,
+            subject: "Welcome to ITFY E-Voting! 🎉",
+            template: "welcome",
+            context: {
+                name: data.name,
+                email: data.email,
+                role: data.role,
+                verificationUrl: data.verificationUrl,
+            },
+        });
+    }
+
+    async sendVerificationEmail(data) {
+        return await this.sendTemplateEmail({
+            to: data.email,
+            subject: "Verify Your Email Address",
+            template: "email-verification",
+            context: {
+                name: data.name,
+                verificationUrl: data.verificationUrl,
+            },
+        });
+    }
+
+    async sendPasswordResetEmail(data) {
+        return await this.sendTemplateEmail({
+            to: data.email,
+            subject: "Reset Your Password",
+            template: "password-reset",
+            context: {
+                name: data.name,
+                resetUrl: data.resetUrl,
+            },
+        });
+    }
+
+    async sendPasswordChangedEmail(data) {
+        return await this.sendTemplateEmail({
+            to: data.email,
+            subject: "Your Password Has Been Changed",
+            template: "password-changed",
+            context: {
+                name: data.name,
+                changeDate: new Date().toLocaleString(),
+            },
+        });
+    }
+
+    async sendAccountLockedEmail(data) {
+        return await this.sendTemplateEmail({
+            to: data.email,
+            subject: "Your Account Has Been Temporarily Locked",
+            template: "account-locked",
+            context: {
+                name: data.name,
+                duration: data.duration || "15",
+            },
+        });
+    }
+
+    async sendCandidateApprovedEmail(data) {
+        return await this.sendTemplateEmail({
+            to: data.email,
+            subject: "Your Candidacy Has Been Approved! 🎉",
+            template: "candidate-approved",
+            context: {
+                name: data.name,
+                eventName: data.eventName,
+                verificationUrl: data.verificationUrl,
+                loginUrl: `${config.get('app.url')}/candidate/login`,
+            },
+        });
+    }
+
+    async sendCandidateRejectedEmail(data) {
+        return await this.sendTemplateEmail({
+            to: data.email,
+            subject: "Candidacy Application Update",
+            template: "candidate-rejected",
+            context: {
+                name: data.name,
+                eventName: data.eventName,
+                reason: data.reason || "Your application did not meet the requirements",
+            },
+        });
+    }
+
+    async sendVerificationReminderEmail(data) {
+        return await this.sendTemplateEmail({
+            to: data.email,
+            subject: "Reminder: Verify Your Email Address",
+            template: "verification-reminder",
+            context: {
+                name: data.name,
+                verificationUrl: data.verificationUrl,
+                daysRemaining: data.daysRemaining || 0,
+            },
+        });
+    }
+
+    async sendVoteCastConfirmationEmail(data) {
+        return await this.sendTemplateEmail({
+            to: data.email,
+            subject: "Vote Cast Confirmation",
+            template: "vote-confirmation",
+            context: {
+                name: data.name,
+                eventName: data.eventName,
+                candidateName: data.candidateName,
+                timestamp: new Date().toLocaleString(),
+            },
+        });
+    }
+
+    async sendEventResultsEmail(data) {
+        return await this.sendTemplateEmail({
+            to: data.email,
+            subject: `${data.eventName} - Results Available`,
+            template: "event-results",
+            context: {
+                name: data.name,
+                eventName: data.eventName,
+                resultsUrl: data.resultsUrl,
+            },
+        });
+    }
+
+    // ========================================
+    // BULK EMAIL SENDING
+    // ========================================
+
+    async sendBulkEmail(recipients, options) {
+        try {
+            const results = {
+                sent: [],
+                failed: [],
+            };
+
+            for (const recipient of recipients) {
+                const result = await this.sendTemplateEmail({
+                    to: recipient,
+                    ...options,
+                });
+
+                if (result.success) {
+                    results.sent.push(recipient);
+                } else {
+                    results.failed.push({ email: recipient, error: result.error });
                 }
 
-                const result = await this.transporter.sendMail(emailData);
-                this._log('email_sent', `Email sent to ${emailData.to}: ${emailData.subject}`);
-                resolve(result);
-            } catch (error) {
-                this._log('email_send_error', error);
-                reject(error);
+                // Add small delay to avoid rate limiting
+                await new Promise((resolve) => setTimeout(resolve, 100));
             }
 
-            // Rate limiting - wait before sending next email
-            if (this.emailQueue.length > 0) {
-                await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
-            }
-        }
-
-        this.isProcessingQueue = false;
-    }
-
-    /**
-     * Send payment confirmation email to voter
-     */
-    async sendPaymentConfirmation(voterData, paymentData, eventData) {
-        try {
-            const templateData = {
-                subject: 'Payment Confirmation - Voting Access Approved',
-                voterName: voterData.name || voterData.fullName,
-                paymentId: paymentData.id || paymentData._id,
-                amount: paymentData.amount,
-                currency: paymentData.currency || 'GHS',
-                eventName: eventData.name || eventData.title,
-                paymentDate: new Date(paymentData.createdAt).toLocaleString(),
-                transactionReference: paymentData.reference || paymentData.transactionId,
-                votingStartDate: new Date(eventData.votingStartDate).toLocaleString(),
-                votingEndDate: new Date(eventData.votingEndDate).toLocaleString(),
-                votingUrl: `${this.appUrl}/events/${eventData.id || eventData._id}/vote`
-            };
-
-            const html = await this._generateEmailHTML('payment-confirmation', templateData);
+            console.log(`[EmailService] Bulk email sent: ${results.sent.length} success, ${results.failed.length} failed`);
             
-            return await this._sendEmail(
-                voterData.email,
-                templateData.subject,
-                html
-            );
-        } catch (error) {
-            this._log('payment_confirmation_error', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Send vote confirmation email to voter
-     */
-    async sendVoteConfirmation(voterData, voteData, eventData) {
-        try {
-            const templateData = {
-                subject: 'Vote Confirmation - Your Voice Has Been Heard',
-                voterName: voterData.name || voterData.fullName,
-                voteId: voteData.id || voteData._id,
-                eventName: eventData.name || eventData.title,
-                categoriesCount: voteData.categories?.length || voteData.votes?.length || 1,
-                voteDate: new Date(voteData.createdAt).toLocaleString(),
-                verificationHash: voteData.hash || voteData.verificationHash,
-                hasReceipt: !!voteData.receiptUrl,
-                receiptUrl: voteData.receiptUrl
+            return {
+                success: true,
+                sent: results.sent.length,
+                failed: results.failed.length,
+                details: results,
             };
-
-            const html = await this._generateEmailHTML('vote-confirmation', templateData);
-            
-            return await this._sendEmail(
-                voterData.email,
-                templateData.subject,
-                html
-            );
         } catch (error) {
-            this._log('vote_confirmation_error', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Send event notification email
-     */
-    async sendEventNotification(recipientData, eventData) {
-        try {
-            const templateData = {
-                subject: `New Voting Event: ${eventData.name || eventData.title}`,
-                recipientName: recipientData.name || recipientData.fullName,
-                eventName: eventData.name || eventData.title,
-                eventDescription: eventData.description,
-                registrationStart: new Date(eventData.registrationStartDate).toLocaleString(),
-                registrationEnd: new Date(eventData.registrationEndDate).toLocaleString(),
-                votingStart: new Date(eventData.votingStartDate).toLocaleString(),
-                votingEnd: new Date(eventData.votingEndDate).toLocaleString(),
-                entryFee: eventData.entryFee || 0,
-                currency: eventData.currency || 'GHS',
-                categoriesCount: eventData.categories?.length || 0,
-                paymentDeadline: new Date(eventData.paymentDeadline || eventData.registrationEndDate).toLocaleString(),
-                registrationUrl: `${this.appUrl}/events/${eventData.id || eventData._id}/register`,
-                eventDetails: eventData.details
+            console.error("[EmailService] Bulk email failed:", error);
+            return {
+                success: false,
+                error: error.message,
             };
-
-            const html = await this._generateEmailHTML('event-notification', templateData);
-            
-            return await this._sendEmail(
-                recipientData.email,
-                templateData.subject,
-                html
-            );
-        } catch (error) {
-            this._log('event_notification_error', error);
-            throw error;
         }
     }
 
-    /**
-     * Send admin notification email
-     */
-    async sendAdminNotification(alertType, message, additionalData = {}) {
+    // ========================================
+    // UTILITY METHODS
+    // ========================================
+
+    async verify() {
         try {
-            const templateData = {
-                subject: `Admin Alert: ${alertType}`,
-                alertType,
-                severity: additionalData.severity || 'Medium',
-                timestamp: new Date().toLocaleString(),
-                source: additionalData.source || 'System',
-                message,
-                affectedUser: additionalData.affectedUser,
-                eventId: additionalData.eventId,
-                additionalInfo: additionalData.additionalInfo,
-                actionRequired: additionalData.actionRequired,
-                adminUrl: `${this.appUrl}/admin`
-            };
-
-            const html = await this._generateEmailHTML('admin-notification', templateData);
-            
-            return await this._sendEmail(
-                this.adminEmail,
-                templateData.subject,
-                html
-            );
+            await this.transporter.verify();
+            return true;
         } catch (error) {
-            this._log('admin_notification_error', error);
-            throw error;
+            console.error("[EmailService] Email verification failed:", error);
+            return false;
         }
     }
 
-    /**
-     * Send welcome email to new user
-     */
-    async sendWelcomeEmail(userData) {
+    async healthCheck() {
         try {
-            const templateData = {
-                subject: `Welcome to ${this.appName}!`,
-                userName: userData.name || userData.fullName,
-                userEmail: userData.email,
-                accountType: userData.role || 'Voter',
-                registrationDate: new Date(userData.createdAt).toLocaleString(),
-                loginUrl: `${this.appUrl}/login`
+            const isVerified = await this.verify();
+            return {
+                status: isVerified ? "healthy" : "unhealthy",
+                provider: config.get('email.provider') || "smtp",
+                isReady: this.isReady,
+                from: this.from,
             };
-
-            const html = await this._generateEmailHTML('welcome', templateData);
-            
-            return await this._sendEmail(
-                userData.email,
-                templateData.subject,
-                html
-            );
         } catch (error) {
-            this._log('welcome_email_error', error);
-            throw error;
+            return {
+                status: "unhealthy",
+                error: error.message,
+            };
         }
     }
 
-    /**
-     * Send password reset email
-     */
-    async sendPasswordResetEmail(userData, resetToken, expiresInMinutes = 30) {
-        try {
-            const templateData = {
-                subject: 'Password Reset Request',
-                userName: userData.name || userData.fullName,
-                userEmail: userData.email,
-                requestTime: new Date().toLocaleString(),
-                ipAddress: userData.ipAddress || 'Unknown',
-                expiresIn: expiresInMinutes,
-                resetUrl: `${this.appUrl}/reset-password?token=${resetToken}&email=${encodeURIComponent(userData.email)}`
-            };
-
-            const html = await this._generateEmailHTML('password-reset', templateData);
-            
-            return await this._sendEmail(
-                userData.email,
-                templateData.subject,
-                html
-            );
-        } catch (error) {
-            this._log('password_reset_error', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Send bulk notifications to multiple recipients
-     */
-    async sendBulkNotifications(recipients, templateName, baseData) {
-        const promises = recipients.map(recipient => {
-            const templateData = { ...baseData, ...recipient };
-            return this._generateEmailHTML(templateName, templateData).then(html => {
-                return this._sendEmail(recipient.email, templateData.subject, html);
-            });
+    async sendTestEmail(to) {
+        return await this.sendEmail({
+            to,
+            subject: "Test Email from ITFY E-Voting",
+            html: this.getFallbackTemplate({
+                message: `
+                    <h3>Test Email</h3>
+                    <p>This is a test email from the ITFY E-Voting platform.</p>
+                    <p>If you received this, the email service is working correctly! ✓</p>
+                    <p>Time: ${new Date().toLocaleString()}</p>
+                `,
+            }),
         });
-
-        try {
-            const results = await Promise.allSettled(promises);
-            const successful = results.filter(r => r.status === 'fulfilled').length;
-            const failed = results.filter(r => r.status === 'rejected').length;
-            
-            this._log('bulk_email', `Bulk email results: ${successful} successful, ${failed} failed`);
-            
-            return { successful, failed, results };
-        } catch (error) {
-            this._log('bulk_email_error', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Send custom email with HTML content
-     */
-    async sendCustomEmail(to, subject, htmlContent, attachments = []) {
-        try {
-            return await this._sendEmail(to, subject, htmlContent, attachments);
-        } catch (error) {
-            this._log('custom_email_error', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Get email service status
-     */
-    getServiceStatus() {
-        return {
-            isInitialized: !!this.transporter,
-            queueLength: this.emailQueue.length,
-            isProcessingQueue: this.isProcessingQueue,
-            templatesLoaded: this.templateCache.size,
-            hasBaseTemplate: !!this.baseTemplate,
-            rateLimitDelay: this.rateLimitDelay
-        };
-    }
-
-    /**
-     * Clear template cache (useful for development)
-     */
-    clearTemplateCache() {
-        this.templateCache.clear();
-        this.baseTemplate = null;
-        this._log('email_service', 'Template cache cleared');
-    }
-
-    /**
-     * Reload templates (useful for development)
-     */
-    async reloadTemplates() {
-        this.clearTemplateCache();
-        await this._loadBaseTemplate();
-        this._log('email_service', 'Templates reloaded');
     }
 }
 
-export default EmailService;
+// Export singleton instance
+export const emailService = new EmailService();
+export default emailService;

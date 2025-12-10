@@ -1,76 +1,51 @@
 #!/usr/bin/env node
 /**
- * The CouponUsage model for tracking coupon usage
- * 
- * This model tracks when and by whom coupons are used,
- * providing detailed analytics and usage history.
+ * CouponUsage Model for tracking coupon usage
+ *
+ * @module CouponUsage
+ * @version 2.0.0
  */
-import BaseModel from "./BaseModel.js";
+
 import mongoose from "mongoose";
+import BaseModel from "./BaseModel.js";
 
-class CouponUsage extends BaseModel {
+const CouponUsageSchema = {
+  coupon: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Coupon",
+    required: true,
+  },
 
-    constructor() {
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
 
-        const schemaDefinition = {
-            coupon: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'Coupon',
-                required: true
-            },
-            orderAmount: {
-                type: Number,
-                required: true,
-                min: 0
-            },
-            discountAmount: {
-                type: Number,
-                required: true,
-                min: 0
-            },
-            finalAmount: {
-                type: Number,
-                required: true,
-                min: 0
-            },
-            usageDate: {
-                type: Date,
-                default: Date.now,
-                required: true
-            },
-            event: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'Event',
-                required: false
-            },
-            categories: [{
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'Category'
-            }],
-            metadata: {
-                type: mongoose.Schema.Types.Mixed,
-                default: {}
-            }
-        };
+  order: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Payment",
+  },
 
-        super(schemaDefinition, {collection: "couponUsages"});
-    }
+  discountAmount: {
+    type: Number,
+    required: true,
+  },
 
-    getSchema(){
-        const schema = super.getSchema();
-        
-        // Indexes for efficient querying
-        schema.index({ coupon: 1});
-        schema.index({ coupon: 1, usageDate: -1 });
-        schema.index({ usageDate: -1 });
-        schema.index({ event: 1 });
-        schema.index({ categories: 1 });
-        
-        // Compound index for coupon stats
-        schema.index({ coupon: 1, discountAmount: 1 });
+  usedAt: {
+    type: Date,
+    default: Date.now,
+  },
+};
 
-        return schema;
-    }
-}
+const couponUsageModel = new BaseModel(CouponUsageSchema, {
+  collection: "couponusages",
+  timestamps: true,
+});
 
-export default mongoose.model('CouponUsage', new CouponUsage().getSchema());
+// Add Indexes
+couponUsageModel.addCompoundIndex([{ coupon: 1 }, { user: 1 }]);
+couponUsageModel.addIndex({ usedAt: -1 });
+
+const CouponUsage = couponUsageModel.getModel("CouponUsage");
+
+export default CouponUsage;

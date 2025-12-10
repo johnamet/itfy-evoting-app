@@ -1,145 +1,140 @@
 #!/usr/bin/env node
 /**
- * Base Service Class
+ * BaseService
  * 
- * Provides common functionality for all services including:
- * - Error handling
+ * Foundation for all service classes with:
+ * - Repository injection pattern
+ * - Settings-aware operations
+ * - Comprehensive error handling
+ * - Transaction support
+ * - Logging and audit trail
  * - Validation utilities
- * - Transaction management
- * - Logging
+ * 
+ * @module services/BaseService
+ * @version 2.0.0
  */
 
-import mongoose from 'mongoose';
+import config from '../config/ConfigManager.js';
 
 class BaseService {
-    constructor() {
-        this.logger = console; // Can be replaced with proper logger
+    /**
+     * @param {Object} repositories - Injected repositories { user: userRepository, event: eventRepository, ... }
+     * @param {Object} [options={}] - Service configuration
+     */
+    constructor(repositories = {}, options = {}) {
+        this.repositories = repositories;
+        this.options = options;
+        this.serviceName = this.constructor.name;
+        this._settingsCache = new Map();
+        this._settingsCacheTTL = 60000; // 1 minute
     }
 
+    // ================================
+    // REPOSITORY ACCESS
+    // ================================
+
     /**
-     * Handle and format errors consistently
-     * @param {Error} error - The error to handle
-     * @param {String} operation - The operation that failed
-     * @param {Object} context - Additional context for the error
-     * @param {Boolean} useCleanMessage - If true, uses the original error message without prefix
-     * @returns {Error} Formatted error
+     * Get repository by name
+     * @param {string} name - Repository name
+     * @returns {Object} Repository instance
      */
-    _handleError(error, operation, context = {}, useCleanMessage = false) {
-        const errorMessage = useCleanMessage ? error.message : `${operation} failed: ${error.message}`;
-        const serviceError = new Error(errorMessage);
-
-        // Preserve original error properties
-        serviceError.originalError = error;
-        serviceError.operation = operation;
-        serviceError.context = context;
-        serviceError.stack = error.stack;
-
-        // Add service-specific error codes
-        if (error.name === 'ValidationError') {
-            serviceError.code = 'VALIDATION_ERROR';
-            serviceError.statusCode = 400;
-        } else if (error.name === 'CastError') {
-            serviceError.code = 'INVALID_ID';
-            serviceError.statusCode = 400;
-        } else if (error.code === 11000) {
-            serviceError.code = 'DUPLICATE_ERROR';
-            serviceError.statusCode = 409;
-        } else {
-            serviceError.code = 'INTERNAL_ERROR';
-            serviceError.statusCode = 500;
+    repo(name) {
+        const repository = this.repositories[name];
+        if (!repository) {
+            throw new Error(`Repository '${name}' not found in ${this.serviceName}`);
         }
-
-        this.logger.error(`Service Error - ${operation}:`, {
-            message: error.message,
-            code: serviceError.code,
-            context,
-            stack: error.stack
-        });
-
-        return serviceError;
+        return repository;
     }
 
     /**
-     * Throw an error with clean message (for validation errors expected by tests)
-     * @param {String} message - Error message
-     * @param {String} operation - Operation context
-     * @param {Object} context - Additional context
-     * @throws {Error} Clean error message
+     * Check if repository exists
+     * @param {string} name - Repository name
+     * @returns {boolean}
      */
-    _throwCleanError(message, operation, context = {}) {
-        const error = new Error(message);
-        throw this._handleError(error, operation, context, true);
+    hasRepo(name) {
+        return !!this.repositories[name];
     }
 
-    /**
-     * Validate required fields in data object
-     * @param {Object} data - Data to validate
-     * @param {Array} requiredFields - Array of required field names
-     * @throws {Error} If validation fails
-     */
-    _validateRequiredFields(data, requiredFields) {
-        const missingFields = [];
-
-        for (const field of requiredFields) {
-            if (data[field] === undefined || data[field] === null || data[field] === '') {
-                missingFields.push(field);
-            }
-        }
-
-        if (missingFields.length > 0) {
-            throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
-        }
-    }
+    // ================================
+    // SETTINGS MANAGEMENT
+    // ================================
 
     /**
-     * Validate ObjectId format
-     * @param {String} id - ID to validate
-     * @param {String} fieldName - Name of the field for error message
-     * @throws {Error} If ID is invalid
+     * Get setting value with caching
+     * @param {string} key - Setting key
+     * @param {*} [defaultValue] - Default value if not found
+     * @returns {Promise<*>} Setting value
      */
-    _validateObjectId(id, fieldName = 'ID') {
-        if (!mongoose.Types.ObjectId.isValid(id)) {
-            throw new Error(`Invalid ${fieldName} format`);
-        }
-    }
-
-    /**
-     * Validate email format
-     * @param {String} email - Email to validate
-     * @throws {Error} If email is invalid
-     */
-    _validateEmail(email) {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            throw new Error('Invalid email format');
-        }
-    }
-
-    /**
-     * Validate date range
-     * @param {Date} startDate - Start date
-     * @param {Date} endDate - End date
-     * @throws {Error} If date range is invalid
-     */
-    _validateDateRange(startDate, endDate) {
-        if (startDate && endDate && new Date(startDate) >= new Date(endDate)) {
-            throw new Error('Start date must be before end date');
-        }
-    }
-
-    /**
-     * Execute operation within a database transaction
-     * @param {Function} operation - Operation to execute
-     * @param {Object} options - Transaction options
-     * @returns {Promise} Result of the operation
-     */
-    async _withTransaction(operation, options = {}) {
-        const session = await mongoose.startSession();
-
+    async getSetting(key, defaultValue = null) {
         try {
-            session.startTransaction(options);
-            const result = await operation(session);
+            // Check cache
+            const cached = this._settingsCache.get(key);
+            if (cached && (Date.now() - cached.timestamp) < this._settingsCacheTTL) {
+                return cached.value;
+            }
+
+            // Fetch from settings repository
+            if (!this.hasRepo('settings')) {
+                this.log('warn', `Settings repository not available, using default for: ${key}`);
+                return defaultValue;
+            }
+
+            const value = await this.repo('settings').getValue(key, defaultValue);
+            
+            // Cache the value
+            this._settingsCache.set(key, {
+                value,
+                timestamp: Date.now()
+            });
+
+            return value;
+        } catch (error) {
+            this.log('error', `Failed to get setting ${key}: ${error.message}`);
+            return defaultValue;
+        }
+    }
+
+    /**
+     * Get multiple settings at once
+     * @param {Array<string>} keys - Setting keys
+     * @returns {Promise<Object>} Settings object
+     */
+    async getSettings(keys) {
+        const settings = {};
+        for (const key of keys) {
+            settings[key] = await this.getSetting(key);
+        }
+        return settings;
+    }
+
+    /**
+     * Clear settings cache
+     */
+    clearSettingsCache() {
+        this._settingsCache.clear();
+    }
+
+    // ================================
+    // TRANSACTION SUPPORT
+    // ================================
+
+    /**
+     * Execute operations within a database transaction
+     * @param {Function} callback - Async function to execute
+     * @param {Object} [options={}] - Transaction options
+     * @returns {Promise<*>} Result from callback
+     */
+    async withTransaction(callback, options = {}) {
+        const db = await import('mongoose').then(m => m.default);
+        const session = await db.startSession();
+        
+        try {
+            session.startTransaction();
+            
+            const result = await callback(session);
+            
             await session.commitTransaction();
+            
             return result;
         } catch (error) {
             await session.abortTransaction();
@@ -149,167 +144,407 @@ class BaseService {
         }
     }
 
-    /**
-     * Sanitize data by removing undefined and null values
-     * @param {Object} data - Data to sanitize
-     * @returns {Object} Sanitized data
-     */
-    _sanitizeData(data) {
-        const sanitized = {};
+    // ================================
+    // VALIDATION UTILITIES
+    // ================================
 
-        for (const [key, value] of Object.entries(data)) {
-            if (value !== undefined && value !== null) {
-                if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
-                    sanitized[key] = this._sanitizeData(value);
-                } else {
-                    sanitized[key] = value;
-                }
+    /**
+     * Validate required fields
+     * @param {Object} data - Data to validate
+     * @param {Array<string>} fields - Required field names
+     * @throws {Error} If validation fails
+     */
+    validateRequiredFields(data, fields) {
+        const missing = [];
+        
+        for (const field of fields) {
+            if (data[field] === undefined || data[field] === null || data[field] === '') {
+                missing.push(field);
             }
         }
 
-        return sanitized;
+        if (missing.length > 0) {
+            throw new Error(`Missing required fields: ${missing.join(', ')}`);
+        }
     }
 
     /**
-     * Generate pagination options
-     * @param {Number} page - Page number (1-based)
-     * @param {Number} limit - Items per page
-     * @param {Number} maxLimit - Maximum allowed limit
-     * @returns {Object} Pagination options
+     * Validate email format
+     * @param {string} email - Email to validate
+     * @returns {boolean}
      */
-    _generatePaginationOptions(page = 1, limit = 10, maxLimit = 100) {
-        const validPage = Math.max(1, parseInt(page));
-        const validLimit = Math.min(maxLimit, Math.max(1, parseInt(limit)));
-        const skip = (validPage - 1) * validLimit;
+    validateEmail(email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
+    }
+
+    /**
+     * Validate URL format
+     * @param {string} url - URL to validate
+     * @returns {boolean}
+     */
+    validateURL(url) {
+        try {
+            new URL(url);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Validate password strength
+     * @param {string} password - Password to validate
+     * @returns {Object} { valid: boolean, errors: Array<string> }
+     */
+    validatePassword(password) {
+        const errors = [];
+
+        if (!password || password.length < 8) {
+            errors.push('Password must be at least 8 characters long');
+        }
+        if (!/[A-Z]/.test(password)) {
+            errors.push('Password must contain at least one uppercase letter');
+        }
+        if (!/[a-z]/.test(password)) {
+            errors.push('Password must contain at least one lowercase letter');
+        }
+        if (!/[0-9]/.test(password)) {
+            errors.push('Password must contain at least one number');
+        }
 
         return {
-            page: validPage,
-            limit: validLimit,
-            skip
+            valid: errors.length === 0,
+            errors
         };
     }
 
     /**
-     * Format pagination response
-     * @param {Array} items - Items for current page
-     * @param {Number} total - Total number of items
-     * @param {Number} page - Current page
-     * @param {Number} limit - Items per page
-     * @returns {Object} Formatted pagination response
+     * Sanitize string input (prevent XSS)
+     * @param {string} input - Input to sanitize
+     * @returns {string} Sanitized input
      */
-    _formatPaginationResponse(items, total, page, limit) {
+    sanitizeInput(input) {
+        if (typeof input !== 'string') return input;
+        
+        return input
+            .replace(/[<>]/g, '')
+            .trim();
+    }
+
+    // ================================
+    // ERROR HANDLING
+    // ================================
+
+    /**
+     * Create standardized error response
+     * @param {Error|string} error - Error object or message
+     * @param {string} [context] - Error context
+     * @returns {Object} Error response
+     */
+    handleError(error, context = '') {
+        const errorMessage = error instanceof Error ? error.message : error;
+        const errorStack = error instanceof Error ? error.stack : undefined;
+
+        this.log('error', `${context ? context + ': ' : ''}${errorMessage}`, { stack: errorStack });
+
+        return {
+            success: false,
+            error: errorMessage,
+            context: context || undefined,
+            timestamp: new Date().toISOString()
+        };
+    }
+
+    /**
+     * Create standardized success response
+     * @param {*} data - Response data
+     * @param {string} [message] - Success message
+     * @returns {Object} Success response
+     */
+    handleSuccess(data, message = 'Operation successful') {
+        return {
+            success: true,
+            message,
+            data,
+            timestamp: new Date().toISOString()
+        };
+    }
+
+    // ================================
+    // LOGGING
+    // ================================
+
+    /**
+     * Log message with context
+     * @param {string} level - Log level (info, warn, error, debug)
+     * @param {string} message - Log message
+     * @param {Object} [meta={}] - Additional metadata
+     */
+    log(level, message, meta = {}) {
+        const logEntry = {
+            service: this.serviceName,
+            level,
+            message,
+            timestamp: new Date().toISOString(),
+            ...meta
+        };
+
+        // Use appropriate console method
+        switch (level) {
+            case 'error':
+                console.error(`[${this.serviceName}] ERROR:`, message, meta);
+                break;
+            case 'warn':
+                console.warn(`[${this.serviceName}] WARN:`, message, meta);
+                break;
+            case 'debug':
+                if (config.get('env') === 'development') {
+                    console.debug(`[${this.serviceName}] DEBUG:`, message, meta);
+                }
+                break;
+            default:
+                console.log(`[${this.serviceName}] INFO:`, message, meta);
+        }
+
+        // Log to activity repository if available
+        if (this.hasRepo('activity') && level === 'error') {
+            this.repo('activity').logActivity({
+                action: 'service_error',
+                resource: this.serviceName,
+                metadata: { message, ...meta }
+            }).catch(err => {
+                console.error('Failed to log to activity repository:', err);
+            });
+        }
+    }
+
+    /**
+     * Log activity (user action tracking)
+     * @param {string} userId - User ID
+     * @param {string} action - Action performed
+     * @param {string} resource - Resource affected
+     * @param {Object} [metadata={}] - Additional data
+     */
+    async logActivity(userId, action, resource, metadata = {}) {
+        if (!this.hasRepo('activity')) return;
+
+        try {
+            await this.repo('activity').logActivity({
+                user: userId,
+                action,
+                resource,
+                metadata,
+                ip: metadata.ip,
+                userAgent: metadata.userAgent
+            });
+        } catch (error) {
+            this.log('error', `Failed to log activity: ${error.message}`);
+        }
+    }
+
+    // ================================
+    // PAGINATION HELPERS
+    // ================================
+
+    /**
+     * Parse pagination parameters
+     * @param {Object} query - Query parameters
+     * @returns {Object} { page, limit, skip }
+     */
+    parsePagination(query) {
+        const page = Math.max(1, parseInt(query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(query.limit) || 10));
+        const skip = (page - 1) * limit;
+
+        return { page, limit, skip };
+    }
+
+    /**
+     * Create paginated response
+     * @param {Array} data - Data items
+     * @param {number} total - Total count
+     * @param {number} page - Current page
+     * @param {number} limit - Items per page
+     * @returns {Object} Paginated response
+     */
+    createPaginatedResponse(data, total, page, limit) {
         const totalPages = Math.ceil(total / limit);
 
         return {
-            items,
+            success: true,
+            data,
             pagination: {
-                currentPage: page,
+                total,
+                page,
+                limit,
                 totalPages,
-                totalItems: total,
-                itemsPerPage: limit,
                 hasNextPage: page < totalPages,
-                hasPrevPage: page > 1
+                hasPreviousPage: page > 1
             }
         };
     }
 
+    // ================================
+    // DATE/TIME UTILITIES
+    // ================================
+
     /**
-     * Log service operation
-     * @param {String} operation - Operation name
+     * Check if date is in the past
+     * @param {Date|string} date - Date to check
+     * @returns {boolean}
+     */
+    isDatePast(date) {
+        return new Date(date) < new Date();
+    }
+
+    /**
+     * Check if date is in the future
+     * @param {Date|string} date - Date to check
+     * @returns {boolean}
+     */
+    isDateFuture(date) {
+        return new Date(date) > new Date();
+    }
+
+    /**
+     * Add days to date
+     * @param {Date} date - Base date
+     * @param {number} days - Days to add
+     * @returns {Date}
+     */
+    addDays(date, days) {
+        const result = new Date(date);
+        result.setDate(result.getDate() + days);
+        return result;
+    }
+
+    /**
+     * Get date range for queries
+     * @param {string} period - Period (today, week, month, year)
+     * @returns {Object} { startDate, endDate }
+     */
+    getDateRange(period) {
+        const now = new Date();
+        const startDate = new Date(now);
+        const endDate = new Date(now);
+
+        switch (period) {
+            case 'today':
+                startDate.setHours(0, 0, 0, 0);
+                endDate.setHours(23, 59, 59, 999);
+                break;
+            case 'week':
+                startDate.setDate(now.getDate() - 7);
+                break;
+            case 'month':
+                startDate.setMonth(now.getMonth() - 1);
+                break;
+            case 'year':
+                startDate.setFullYear(now.getFullYear() - 1);
+                break;
+            default:
+                throw new Error(`Invalid period: ${period}`);
+        }
+
+        return { startDate, endDate };
+    }
+
+    // ================================
+    // ASYNC UTILITIES
+    // ================================
+
+    /**
+     * Run operation with context (error boundary)
      * @param {Object} context - Operation context
-     * @param {String} level - Log level (info, warn, error)
+     * @param {Function} callback - Async operation
+     * @returns {Promise<*>}
      */
-    _log(operation, context = {}, level = 'info') {
-        const message = `Service Operation - ${operation}:`;
-
-        // Handle console logging properly
-        if (this.logger === console) {
-            switch (level) {
-                case 'error':
-                    console.error(message, context);
-                    break;
-                case 'warn':
-                    console.warn(message, context);
-                    break;
-                case 'info':
-                default:
-                    console.log(message, context);
-                    break;
-            }
-        } else if (typeof this.logger[level] === 'function') {
-            this.logger[level](message, context);
-        } else {
-            console.log(message, context);
+    async runInContext(context, callback) {
+        const startTime = Date.now();
+        
+        try {
+            this.log('debug', `Starting operation: ${context.action || 'unknown'}`, context);
+            
+            const result = await callback();
+            
+            const duration = Date.now() - startTime;
+            this.log('debug', `Completed operation: ${context.action || 'unknown'}`, { ...context, duration });
+            
+            return result;
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            this.log('error', `Failed operation: ${context.action || 'unknown'}`, { 
+                ...context, 
+                duration,
+                error: error.message 
+            });
+            
+            throw error;
         }
     }
 
     /**
-     * Create search filter from query parameters
-     * @param {Object} query - Query parameters
-     * @param {Array} searchableFields - Fields that can be searched
-     * @returns {Object} MongoDB filter object
+     * Retry operation with exponential backoff
+     * @param {Function} operation - Async operation to retry
+     * @param {Object} [options={}] - Retry options
+     * @returns {Promise<*>}
      */
-    _createSearchFilter(query, searchableFields = [], arrayFields = []) {
-        const filter = {};
+    async retry(operation, options = {}) {
+        const {
+            maxAttempts = 3,
+            initialDelay = 1000,
+            maxDelay = 10000,
+            factor = 2
+        } = options;
 
-        console.log('Creating search filter from query:', query);
+        let lastError;
+        let delay = initialDelay;
 
-        // Handle search term across multiple fields
-        if (query.search && searchableFields.length > 0) {
-            const searchRegex = new RegExp(query.search, 'i');
-            filter.$or = searchableFields.map(field => ({
-                [field]: { $regex: searchRegex }
-            }));
-        }
-
-        // Handle date range filters
-        if (query.startDate || query.endDate) {
-            filter.createdAt = {};
-            if (query.startDate) {
-                filter.createdAt.$gte = new Date(query.startDate);
-            }
-            if (query.endDate) {
-                filter.createdAt.$lte = new Date(query.endDate);
-            }
-        }
-
-        // Handle status filter
-        if (query.status) {
-            filter.status = query.status;
-        }
-
-        // Handle active/inactive filter
-        if (query.isActive !== undefined) {
-            filter.isActive = query.status === 'active';
-        }
-
-        // Handle array filters (e.g., categories, tags, roles)
-        for (const field of arrayFields) {
-            const value = query[field];
-
-            if (value) {
-                let valuesArray = [];
-
-                if (Array.isArray(value)) {
-                    valuesArray = value;
-                } else if (typeof value === 'string') {
-                    valuesArray = value.split(',').map(item => item.trim());
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return await operation();
+            } catch (error) {
+                lastError = error;
+                
+                if (attempt < maxAttempts) {
+                    this.log('warn', `Retry attempt ${attempt} failed, retrying in ${delay}ms`, { error: error.message });
+                    
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay = Math.min(delay * factor, maxDelay);
+                } else {
+                    this.log('error', `All ${maxAttempts} retry attempts failed`, { error: error.message });
                 }
-
-                // Convert to ObjectId if the field expects it
-                const convertedValues = valuesArray.map(v =>
-                    mongoose.Types.ObjectId.isValid(v) ? new mongoose.Types.ObjectId(v) : v
-                );
-
-                filter[field] = { $in: convertedValues };
             }
         }
 
-        console.log('Generated filter:', filter);
-
-        return filter;
+        throw lastError;
     }
 
+    // ================================
+    // BATCH OPERATIONS
+    // ================================
+
+    /**
+     * Process items in batches
+     * @param {Array} items - Items to process
+     * @param {Function} processor - Async function to process each item
+     * @param {number} [batchSize=10] - Batch size
+     * @returns {Promise<Array>} Results
+     */
+    async processBatch(items, processor, batchSize = 10) {
+        const results = [];
+        
+        for (let i = 0; i < items.length; i += batchSize) {
+            const batch = items.slice(i, i + batchSize);
+            const batchResults = await Promise.all(
+                batch.map(item => processor(item).catch(error => ({ error: error.message })))
+            );
+            results.push(...batchResults);
+        }
+
+        return results;
+    }
 }
 
 export default BaseService;

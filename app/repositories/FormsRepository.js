@@ -1,501 +1,527 @@
-#!/usr/bin/env node
+import BaseRepository from '../BaseRepository.js';
+import Form from '../../models/Form.js';
+import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+
 /**
- * Forms Repository
+ * FormsRepository
  * 
- * Extends BaseRepository to provide Form-specific database operations.
- * Includes form management, model-based operations, and field configuration handling.
+ * Manages dynamic forms with intelligent caching. Forms are cached with a 15-minute TTL
+ * since they are accessed frequently but don't change often.
+ * 
+ * Cache Strategy:
+ * - Read operations are cached automatically
+ * - Event-specific and type-specific queries are cached
+ * - Response count updates invalidate entity caches
+ * - Active status changes invalidate caches
+ * 
+ * @extends BaseRepository
  */
-
-import BaseRepository from './BaseRepository.js';
-import Form from '../models/Form.js';
-
 class FormsRepository extends BaseRepository {
-    
     constructor() {
-        // Get the Form model
-        super(Form);
+        super(Form, {
+            enableCache: true,
+            cacheManager: mainCacheManager,
+            cacheTTL: 900 // 15 minutes
+        });
     }
 
     /**
      * Create a new form
+     * 
      * @param {Object} formData - Form data
-     * @param {Object} options - Additional options
+     * @param {string} formData.title - Form title
+     * @param {string} [formData.description] - Form description
+     * @param {string} [formData.event] - Event ID (if event-specific)
+     * @param {string} [formData.type='general'] - Form type (registration, survey, feedback, etc.)
+     * @param {Array<Object>} formData.fields - Array of form field definitions
+     * @param {Object} [formData.settings] - Form settings (redirectUrl, submitMessage, etc.)
+     * @param {Object} [options={}] - Repository options
      * @returns {Promise<Object>} Created form
      */
     async createForm(formData, options = {}) {
-        try {
-            if (Object.keys(formData).length === 0) {
-                throw new Error("The Form Data is Empty");
+        this._validateRequiredFields(formData, ['title', 'fields']);
+
+        if (!Array.isArray(formData.fields) || formData.fields.length === 0) {
+            throw new Error('Form must have at least one field');
+        }
+
+        const formToCreate = {
+            ...formData,
+            type: formData.type || 'general',
+            active: true,
+            responseCount: 0,
+            settings: formData.settings || {}
+        };
+
+        return await this.create(formToCreate, options);
+    }
+
+    /**
+     * Find forms by event
+     * 
+     * @param {string} eventId - Event ID
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Event forms
+     */
+    async findByEvent(eventId, options = {}) {
+        if (!eventId) {
+            throw new Error('Event ID is required');
+        }
+
+        return await this.find(
+            { event: eventId },
+            {
+                ...options,
+                sort: options.sort || { createdAt: -1 }
             }
+        );
+    }
 
-            // Check if form for this model already exists
-            if (formData.modelId && formData.model) {
-                const existingForm = await this.findByModelIdAndModel(formData.modelId, formData.model);
-                if (existingForm) {
-                    throw new Error(`Form for model '${formData.model}' with ID '${formData.modelId}' already exists`);
-                }
+    /**
+     * Find active forms by event
+     * 
+     * @param {string} eventId - Event ID
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Active event forms
+     */
+    async findActiveByEvent(eventId, options = {}) {
+        if (!eventId) {
+            throw new Error('Event ID is required');
+        }
+
+        return await this.find(
+            { event: eventId, active: true },
+            {
+                ...options,
+                sort: options.sort || { createdAt: -1 }
             }
-
-            const form = await this.create(formData, options);
-            return form.toJSON();
-        } catch (error) {
-            throw this._handleError(error, 'createForm');
-        }
+        );
     }
 
     /**
-     * Find form by model ID and model name
-     * @param {String} modelId - Model ID
-     * @param {String} model - Model name
-     * @param {Object} options - Query options
-     * @returns {Promise<Object|null>} Found form or null
+     * Find forms by type
+     * 
+     * @param {string} type - Form type
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Forms of type
      */
-    async findByModelIdAndModel(modelId, model, options = {}) {
-        try {
-            const criteria = { 
-                modelId: modelId,
-                model: model.trim(),
-                isDeleted: false
-            };
-            return await this.findOne(criteria, options);
-        } catch (error) {
-            throw this._handleError(error, 'findByModelIdAndModel');
+    async findByType(type, options = {}) {
+        if (!type) {
+            throw new Error('Form type is required');
         }
+
+        return await this.find(
+            { type, active: true },
+            {
+                ...options,
+                sort: options.sort || { createdAt: -1 }
+            }
+        );
     }
 
     /**
-     * Find forms by model name
-     * @param {String} model - Model name
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Array of forms
+     * Find global forms (not event-specific)
+     * 
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Global forms
      */
-    async findByModel(model, options = {}) {
-        try {
-            const criteria = { 
-                model: model.trim(),
-                isDeleted: false
-            };
-            return await this.find(criteria, options);
-        } catch (error) {
-            throw this._handleError(error, 'findByModel');
-        }
+    async findGlobalForms(options = {}) {
+        return await this.find(
+            { event: { $exists: false }, active: true },
+            {
+                ...options,
+                sort: options.sort || { createdAt: -1 }
+            }
+        );
     }
 
     /**
-     * Find active forms
-     * @param {Object} additionalCriteria - Additional search criteria
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Array of active forms
-     */
-    async findActiveForms(additionalCriteria = {}, options = {}) {
-        try {
-            const criteria = { 
-                isActive: true,
-                isDeleted: false,
-                ...additionalCriteria
-            };
-            return await this.find(criteria, options);
-        } catch (error) {
-            throw this._handleError(error, 'findActiveForms');
-        }
-    }
-
-    /**
-     * Find forms with pagination
-     * @param {Object} criteria - Search criteria
-     * @param {Number} page - Page number
-     * @param {Number} limit - Items per page
-     * @param {Object} options - Additional options
-     * @returns {Promise<Object>} Paginated forms
-     */
-    async findFormsWithPagination(criteria = {}, page = 1, limit = 10, options = {}) {
-        try {
-            const searchCriteria = {
-                isDeleted: false,
-                ...criteria
-            };
-            
-            const defaultOptions = {
-                sort: { createdAt: -1 },
-                populate: [
-                    { path: 'createdBy', select: 'firstName lastName email' },
-                    { path: 'updatedBy', select: 'firstName lastName email' }
-                ],
-                ...options
-            };
-
-            return await this.findWithPagination(searchCriteria, page, limit, defaultOptions);
-        } catch (error) {
-            throw this._handleError(error, 'findFormsWithPagination');
-        }
-    }
-
-    /**
-     * Update form by ID
-     * @param {String} id - Form ID
+     * Update form
+     * 
+     * @param {string} formId - Form ID
      * @param {Object} updateData - Update data
-     * @param {Object} options - Update options
-     * @returns {Promise<Object|null>} Updated form
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated form
      */
-    async updateForm(id, updateData, options = {}) {
-        try {
-            // Add updatedAt timestamp
-            updateData.updatedAt = new Date();
-
-            const defaultOptions = {
-                new: true,
-                runValidators: true,
-                populate: [
-                    { path: 'createdBy', select: 'firstName lastName email' },
-                    { path: 'updatedBy', select: 'firstName lastName email' }
-                ],
-                ...options
-            };
-
-            return await this.updateById(id, updateData, defaultOptions);
-        } catch (error) {
-            throw this._handleError(error, 'updateForm');
+    async updateForm(formId, updateData, options = {}) {
+        if (!formId) {
+            throw new Error('Form ID is required');
         }
-    }
 
-    /**
-     * Soft delete form by ID
-     * @param {String} id - Form ID
-     * @param {String} updatedBy - User ID who is deleting
-     * @param {Object} options - Additional options
-     * @returns {Promise<Object|null>} Soft deleted form
-     */
-    async softDeleteForm(id, updatedBy, options = {}) {
-        try {
-            const updateData = {
-                isDeleted: true,
-                isActive: false,
-                updatedBy: updatedBy,
-                deletedAt: new Date()
-            };
-
-            return await this.updateById(id, updateData, options);
-        } catch (error) {
-            throw this._handleError(error, 'softDeleteForm');
-        }
-    }
-
-    /**
-     * Restore soft deleted form
-     * @param {String} id - Form ID
-     * @param {String} updatedBy - User ID who is restoring
-     * @param {Object} options - Additional options
-     * @returns {Promise<Object|null>} Restored form
-     */
-    async restoreForm(id, updatedBy, options = {}) {
-        try {
-            const updateData = {
-                isDeleted: false,
-                isActive: true,
-                updatedBy: updatedBy,
-                restoredAt: new Date()
-            };
-
-            return await this.updateById(id, updateData, options);
-        } catch (error) {
-            throw this._handleError(error, 'restoreForm');
-        }
-    }
-
-    /**
-     * Toggle form active status
-     * @param {String} id - Form ID
-     * @param {String} updatedBy - User ID who is toggling
-     * @param {Object} options - Additional options
-     * @returns {Promise<Object|null>} Updated form
-     */
-    async toggleActiveStatus(id, updatedBy, options = {}) {
-        try {
-            const form = await this.findById(id);
-            if (!form) {
-                throw new Error('Form not found');
+        // Validate fields if being updated
+        if (updateData.fields) {
+            if (!Array.isArray(updateData.fields) || updateData.fields.length === 0) {
+                throw new Error('Form must have at least one field');
             }
-
-            const updateData = {
-                isActive: !form.isActive,
-                updatedBy: updatedBy
-            };
-
-            return await this.updateById(id, updateData, options);
-        } catch (error) {
-            throw this._handleError(error, 'toggleActiveStatus');
         }
+
+        // Prevent updating responseCount directly
+        const { responseCount, ...safeUpdateData } = updateData;
+
+        return await this.updateById(formId, safeUpdateData, options);
     }
 
     /**
-     * Find forms by creator
-     * @param {String} createdBy - User ID who created the forms
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Array of forms created by user
+     * Increment response count
+     * 
+     * @param {string} formId - Form ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated form
      */
-    async findByCreator(createdBy, options = {}) {
-        try {
-            const criteria = { 
-                createdBy: createdBy,
-                isDeleted: false
-            };
-            
-            const defaultOptions = {
-                sort: { createdAt: -1 },
-                populate: [
-                    { path: 'createdBy', select: 'firstName lastName email' },
-                    { path: 'updatedBy', select: 'firstName lastName email' }
-                ],
-                ...options
-            };
-
-            return await this.find(criteria, defaultOptions);
-        } catch (error) {
-            throw this._handleError(error, 'findByCreator');
+    async incrementResponseCount(formId, options = {}) {
+        if (!formId) {
+            throw new Error('Form ID is required');
         }
+
+        const form = await this.Model.findByIdAndUpdate(
+            formId,
+            { $inc: { responseCount: 1 } },
+            { new: true, session: options.session }
+        ).lean();
+
+        // Manually invalidate cache
+        await this._invalidateCache('findById', formId, { entity: form });
+
+        return form;
     }
 
     /**
-     * Update form fields
-     * @param {String} id - Form ID
-     * @param {Array} fields - New fields array
-     * @param {String} updatedBy - User ID who is updating
-     * @param {Object} options - Additional options
-     * @returns {Promise<Object|null>} Updated form
+     * Activate form
+     * 
+     * @param {string} formId - Form ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated form
      */
-    async updateFormFields(id, fields, updatedBy, options = {}) {
-        try {
-            if (!Array.isArray(fields)) {
-                throw new Error('Fields must be an array');
-            }
-
-            const updateData = {
-                fields: fields,
-                updatedBy: updatedBy
-            };
-
-            return await this.updateForm(id, updateData, options);
-        } catch (error) {
-            throw this._handleError(error, 'updateFormFields');
+    async activateForm(formId, options = {}) {
+        if (!formId) {
+            throw new Error('Form ID is required');
         }
+
+        return await this.updateById(formId, { active: true }, options);
     }
 
     /**
-     * Search forms by model or fields content
-     * @param {String} searchTerm - Search term
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Array of matching forms
+     * Deactivate form
+     * 
+     * @param {string} formId - Form ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated form
      */
-    async searchForms(searchTerm, options = {}) {
-        try {
-            if (!searchTerm || searchTerm.trim() === '') {
-                return [];
-            }
-
-            const searchRegex = new RegExp(searchTerm.trim(), 'i');
-            const criteria = {
-                isDeleted: false,
-                $or: [
-                    { model: searchRegex },
-                    { 'fields.name': searchRegex },
-                    { 'fields.label': searchRegex },
-                    { 'fields.placeholder': searchRegex }
-                ]
-            };
-
-            const defaultOptions = {
-                sort: { createdAt: -1 },
-                populate: [
-                    { path: 'createdBy', select: 'firstName lastName email' },
-                    { path: 'updatedBy', select: 'firstName lastName email' }
-                ],
-                ...options
-            };
-
-            return await this.find(criteria, defaultOptions);
-        } catch (error) {
-            throw this._handleError(error, 'searchForms');
+    async deactivateForm(formId, options = {}) {
+        if (!formId) {
+            throw new Error('Form ID is required');
         }
+
+        return await this.updateById(formId, { active: false }, options);
+    }
+
+    /**
+     * Delete form
+     * 
+     * @param {string} formId - Form ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Deleted form
+     */
+    async deleteForm(formId, options = {}) {
+        if (!formId) {
+            throw new Error('Form ID is required');
+        }
+
+        return await this.deleteById(formId, options);
+    }
+
+    /**
+     * Delete all forms for an event
+     * 
+     * @param {string} eventId - Event ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Delete result
+     */
+    async deleteByEvent(eventId, options = {}) {
+        if (!eventId) {
+            throw new Error('Event ID is required');
+        }
+
+        return await this.deleteMany({ event: eventId }, options);
+    }
+
+    /**
+     * Add field to form
+     * 
+     * @param {string} formId - Form ID
+     * @param {Object} field - Field definition
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated form
+     */
+    async addField(formId, field, options = {}) {
+        if (!formId || !field) {
+            throw new Error('Form ID and field are required');
+        }
+
+        const form = await this.findById(formId, { skipCache: true });
+        
+        if (!form) {
+            throw new Error('Form not found');
+        }
+
+        const updatedFields = [...form.fields, field];
+        return await this.updateById(formId, { fields: updatedFields }, options);
+    }
+
+    /**
+     * Remove field from form
+     * 
+     * @param {string} formId - Form ID
+     * @param {string} fieldName - Name of field to remove
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated form
+     */
+    async removeField(formId, fieldName, options = {}) {
+        if (!formId || !fieldName) {
+            throw new Error('Form ID and field name are required');
+        }
+
+        const form = await this.findById(formId, { skipCache: true });
+        
+        if (!form) {
+            throw new Error('Form not found');
+        }
+
+        const updatedFields = form.fields.filter(f => f.name !== fieldName);
+        
+        if (updatedFields.length === form.fields.length) {
+            throw new Error('Field not found');
+        }
+
+        if (updatedFields.length === 0) {
+            throw new Error('Cannot remove last field from form');
+        }
+
+        return await this.updateById(formId, { fields: updatedFields }, options);
+    }
+
+    /**
+     * Update form settings
+     * 
+     * @param {string} formId - Form ID
+     * @param {Object} settings - New settings
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated form
+     */
+    async updateSettings(formId, settings, options = {}) {
+        if (!formId || !settings) {
+            throw new Error('Form ID and settings are required');
+        }
+
+        return await this.updateById(formId, { settings }, options);
     }
 
     /**
      * Get form statistics
+     * 
+     * @param {string} [eventId] - Optional event ID filter
      * @returns {Promise<Object>} Form statistics
      */
-    async getFormStatistics() {
-        try {
-            const [totalForms, activeForms, deletedForms, formsByModel] = await Promise.all([
-                this.countDocuments({}),
-                this.countDocuments({ isActive: true, isDeleted: false }),
-                this.countDocuments({ isDeleted: true }),
-                this.model.aggregate([
-                    { $match: { isDeleted: false } },
-                    { $group: { _id: '$model', count: { $sum: 1 } } },
-                    { $sort: { count: -1 } }
-                ])
-            ]);
+    async getFormStats(eventId = null) {
+        const query = eventId ? { event: eventId } : {};
 
-            return {
-                totalForms,
-                activeForms,
-                inactiveForms: totalForms - activeForms - deletedForms,
-                deletedForms,
-                formsByModel: formsByModel.map(item => ({
-                    model: item._id,
-                    count: item.count
-                }))
-            };
-        } catch (error) {
-            throw this._handleError(error, 'getFormStatistics');
-        }
-    }
-
-    /**
-     * Bulk update forms
-     * @param {Array} formIds - Array of form IDs
-     * @param {Object} updateData - Data to update
-     * @param {String} updatedBy - User ID who is updating
-     * @param {Object} options - Additional options
-     * @returns {Promise<Object>} Update result
-     */
-    async bulkUpdateForms(formIds, updateData, updatedBy, options = {}) {
-        try {
-            if (!Array.isArray(formIds) || formIds.length === 0) {
-                throw new Error('Form IDs must be a non-empty array');
-            }
-
-            const criteria = { 
-                _id: { $in: formIds },
-                isDeleted: false
-            };
-
-            const updatePayload = {
-                ...updateData,
-                updatedBy: updatedBy,
-                updatedAt: new Date()
-            };
-
-            const result = await this.updateMany(criteria, updatePayload, options);
-            return result;
-        } catch (error) {
-            throw this._handleError(error, 'bulkUpdateForms');
-        }
-    }
-
-    /**
-     * Get forms with field count
-     * @param {Object} criteria - Search criteria
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Forms with field count
-     */
-    async getFormsWithFieldCount(criteria = {}, options = {}) {
-        try {
-            const searchCriteria = {
-                isDeleted: false,
-                ...criteria
-            };
-
-            const aggregationPipeline = [
-                { $match: searchCriteria },
+        const [totalForms, activeForms, typeBreakdown, totalResponses] = await Promise.all([
+            this.count(query),
+            this.count({ ...query, active: true }),
+            this.Model.aggregate([
+                { $match: query },
                 {
-                    $addFields: {
-                        fieldCount: { $size: { $ifNull: ['$fields', []] } }
+                    $group: {
+                        _id: '$type',
+                        count: { $sum: 1 }
                     }
-                },
-                { $sort: options.sort || { createdAt: -1 } }
-            ];
+                }
+            ]),
+            this.Model.aggregate([
+                { $match: query },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: '$responseCount' }
+                    }
+                }
+            ])
+        ]);
 
-            if (options.limit) {
-                aggregationPipeline.push({ $limit: options.limit });
-            }
+        const typeStats = typeBreakdown.reduce((acc, item) => {
+            acc[item._id] = item.count;
+            return acc;
+        }, {});
 
-            return await this.model.aggregate(aggregationPipeline);
-        } catch (error) {
-            throw this._handleError(error, 'getFormsWithFieldCount');
-        }
+        return {
+            totalForms,
+            activeForms,
+            inactiveForms: totalForms - activeForms,
+            typeBreakdown: typeStats,
+            totalResponses: totalResponses[0]?.total || 0
+        };
     }
 
     /**
-     * Increase the submission count for a form
-     * @param {String} formId - Form ID
-     * @returns {Promise<Object>} Update result
+     * Get most popular forms
+     * Based on response count
+     * 
+     * @param {number} [limit=5] - Number of forms to return
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Most popular forms
      */
-    async increaseSubmissionCount(formId) {
-        try {
-            const result = await this.updateOne(
-                { _id: formId },
-                { $inc: { submissionCount: 1 } }
-            );
-
-            return result;
-        } catch (error) {
-            throw this._handleError(error, 'increaseSubmissionCount');
-        }
+    async getMostPopular(limit = 5, options = {}) {
+        return await this.find(
+            { active: true },
+            {
+                ...options,
+                sort: { responseCount: -1 },
+                limit
+            }
+        );
     }
 
     /**
-     * Create a submission for a form
-     * @param {String} formId - Form ID
-     * @param {Object} submissionData - Submission data
-     * @returns {Promise<Object>} Created submission
+     * Find forms with no responses
+     * 
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Forms with zero responses
      */
-    async createSubmission(formId, submissionData) {
-        try {
-            const form = await this.findById(formId);
-            if (!form) {
-                throw new Error('Form not found');
+    async findWithNoResponses(options = {}) {
+        return await this.find(
+            { active: true, responseCount: 0 },
+            {
+                ...options,
+                sort: options.sort || { createdAt: -1 }
             }
+        );
+    }
 
-            const newSubmission = {
-                data: submissionData.data,
-                submittedBy: submissionData.submittedBy,
-                ipAddress: submissionData.ipAddress,
-                userAgent: submissionData.userAgent,
-                createdAt: new Date()
+    /**
+     * Clone form
+     * Creates a copy with a new title
+     * 
+     * @param {string} formId - Source form ID
+     * @param {string} newTitle - Title for the cloned form
+     * @param {string} [targetEventId] - Optional target event ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Cloned form
+     */
+    async cloneForm(formId, newTitle, targetEventId = null, options = {}) {
+        if (!formId || !newTitle) {
+            throw new Error('Form ID and new title are required');
+        }
+
+        const sourceForm = await this.findById(formId);
+        
+        if (!sourceForm) {
+            throw new Error('Source form not found');
+        }
+
+        const { _id, createdAt, updatedAt, responseCount, ...formData } = sourceForm.toObject();
+
+        const clonedFormData = {
+            ...formData,
+            title: newTitle,
+            event: targetEventId !== null ? targetEventId : formData.event,
+            responseCount: 0
+        };
+
+        return await this.createForm(clonedFormData, options);
+    }
+
+    /**
+     * Validate form structure
+     * Check if form has all required fields configured correctly
+     * 
+     * @param {string} formId - Form ID
+     * @returns {Promise<Object>} Validation result
+     */
+    async validateFormStructure(formId) {
+        if (!formId) {
+            throw new Error('Form ID is required');
+        }
+
+        const form = await this.findById(formId);
+        
+        if (!form) {
+            return {
+                valid: false,
+                errors: ['Form not found']
             };
-
-            form.submissions.push(newSubmission);
-            await form.save();
-
-            return newSubmission;
-        } catch (error) {
-            throw this._handleError(error, 'createSubmission');
         }
+
+        const errors = [];
+
+        // Check if form has fields
+        if (!form.fields || form.fields.length === 0) {
+            errors.push('Form has no fields');
+        }
+
+        // Validate each field has required properties
+        form.fields.forEach((field, index) => {
+            if (!field.name) {
+                errors.push(`Field ${index + 1} is missing name`);
+            }
+            if (!field.type) {
+                errors.push(`Field ${index + 1} (${field.name || 'unnamed'}) is missing type`);
+            }
+            if (!field.label) {
+                errors.push(`Field ${index + 1} (${field.name || 'unnamed'}) is missing label`);
+            }
+        });
+
+        // Check for duplicate field names
+        const fieldNames = form.fields.map(f => f.name).filter(Boolean);
+        const duplicates = fieldNames.filter((name, index) => fieldNames.indexOf(name) !== index);
+        
+        if (duplicates.length > 0) {
+            errors.push(`Duplicate field names: ${[...new Set(duplicates)].join(', ')}`);
+        }
+
+        return {
+            valid: errors.length === 0,
+            errors
+        };
     }
 
     /**
-     * Update submission status
-     * @param {String} formId - Form ID
-     * @param {String} submissionId - Submission ID
-     * @param {String} status - New status
-     * @param {String} updatedBy - User ID who is updating
-     * @returns {Promise<Object|null>} Updated submission
+     * Count forms by type
+     * 
+     * @param {string} type - Form type
+     * @returns {Promise<number>} Form count
      */
-    async updateSubmissionStatus(formId, submissionId, status, updatedBy) {
-        try {
-            const form = await this.findById(formId);
-            if (!form) {
-                throw new Error('Form not found');
-            }
-
-            const submission = form.submissions.id(submissionId);
-            if (!submission) {
-                throw new Error('Submission not found');
-            }
-
-            submission.status = status;
-            submission.updatedBy = updatedBy;
-            submission.updatedAt = new Date();
-
-            await form.save();
-            return submission;
-        } catch (error) {
-            throw this._handleError(error, 'updateSubmissionStatus');
+    async countByType(type) {
+        if (!type) {
+            throw new Error('Form type is required');
         }
+
+        return await this.count({ type, active: true });
     }
 
-   
-    
+    /**
+     * Search forms by title
+     * 
+     * @param {string} searchTerm - Search term
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Matching forms
+     */
+    async searchByTitle(searchTerm, options = {}) {
+        if (!searchTerm) {
+            throw new Error('Search term is required');
+        }
+
+        return await this.find(
+            {
+                active: true,
+                title: { $regex: searchTerm, $options: 'i' }
+            },
+            {
+                ...options,
+                sort: options.sort || { createdAt: -1 }
+            }
+        );
+    }
 }
 
 export default FormsRepository;

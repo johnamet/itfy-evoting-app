@@ -1,316 +1,383 @@
 #!/usr/bin/env node
 /**
- * Payment model class for the application.
- * This file defines the Payment class which extends the BaseModel class.
- * 
+ * Enhanced Payment Model for ITFY E-Voting System
+ *
  * @module Payment
+ * @version 2.0.0
  */
 
-import BaseModel from './BaseModel.js';
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
+import BaseModel from "./deprecated/BaseModel2.js";
 
-/**
- * Payment model class extending BaseModel.
- * Represents a payment transaction for vote bundles with Paystack integration.
- * Supports public voting with voter information (email, IP, contact).
- * 
- * @class
- * @extends BaseModel
- */
-class Payment extends BaseModel {
-    /**
-     * Initializes the Payment schema with fields for Paystack transactions, bundles, and voter info.
-     */
-    constructor() {
-        const schemaDefinition = {
-            // Paystack transaction reference
-            reference: {
-                type: String,
-                required: true,
-                unique: true,
-                trim: true
-            },
-            // Voter information (public voting)
-            voter: {
-                email: {
-                    type: String,
-                    required: true,
-                    trim: true,
-                    lowercase: true,
-                    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
-                },
-                contact: {
-                    type: String,
-                    required: false,
-                    trim: true
-                },
-                name: {
-                    type: String,
-                    required: false,
-                    trim: true
-                },
-                ipAddress: {
-                    type: String,
-                    required: true,
-                    trim: true
-                },
-                userAgent: {
-                    type: String,
-                    required: false,
-                    trim: true
-                }
-            },
-            // Vote bundles being purchased
-            voteBundles: [{
-                quantity: {
-                    type: Number,
-                    required: true,
-                    min: 1
-                },
-                id: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'VoteBundle',
-                    required: true
-                },
-                price: {
-                    type: Number,
-                    required: true,
-                    min: 0
-                },
-                votes: {
-                    type:Number,
-                    required: true,
-                    min: 1
-                },
+const PaymentSchema = {
+  // Reference
+  reference: {
+    type: String,
+    required: [true, "Payment reference is required"],
+    unique: true,
+  },
 
-                category: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'Category',
-                    required: true
-                }
-            }],
-            votesCast: {
-                type: Number,
-                default: 0,
-                min: 0
-            },
-            // Event for which the bundle is purchased
-            event: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'Event',
-                required: true
-            },
-            candidate: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'Candidate',
-                required: true
-            },
-            // Coupon applied (optional)
-            coupon: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'Coupon',
-                required: false
-            },
-            // Original bundle price
-            originalAmount: {
-                type: Number,
-                required: true,
-                min: 0
-            },
-            // Discount amount (if coupon applied)
-            discountAmount: {
-                type: Number,
-                default: 0,
-                min: 0
-            },
-            // Final amount paid
-            finalAmount: {
-                type: Number,
-                required: true,
-                min: 0
-            },
-            // Currency
-            currency: {
-                type: String,
-                required: true,
-                default: 'GHS',
-                uppercase: true
-            },
-            // Payment status
-            status: {
-                type: String,
-                required: true,
-                enum: ['pending', 'success', 'failed', 'abandoned', 'expired'],
-                default: 'pending'
-            },
-            // Paystack transaction data
-            paystackData: {
-                authorization_url: String,
-                access_code: String,
-                transaction_id: String,
-                gateway_response: String,
-                paid_at: Date,
-                channel: String,
-                fees: Number,
-                customer: {
-                    id: String,
-                    email: String,
-                    customer_code: String
-                }
-            },
-        
-            
-            // Votes that have been cast using this payment
-            votesData: {
-                candidate: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'Candidate',
-                    required: true
-                },
-                votes: {
-                    type: Number,
-                    required: true,
-                    min: 1
-                },
-                castedAt: {
-                    type: Date,
-                    default: Date.now
-                }
-            },
-            // Payment metadata
-            metadata: {
-                webhook_verified: {
-                    type: Boolean,
-                    default: false
-                },
-                verification_attempts: {
-                    type: Number,
-                    default: 0
-                },
-                fraud_check: {
-                    passed: {
-                        type: Boolean,
-                        default: true
-                    },
-                    reasons: [String]
-                }
-            },
-            // Timestamps
-            paidAt: {
-                type: Date,
-                required: false
-            },
-            expiresAt: {
-                type: Date,
-                required: false, // Allow null for successful payments
-                default: () => new Date(Date.now() + 15 * 60 * 1000) // 15 minutes from now
-            },
-            verified: {
-                type: Boolean,
-                default: false
-            }
-        };
+  // Voter Info
+  voter: {
+    email: {
+      type: String,
+      required: [true, "Voter email is required"],
+      lowercase: true,
+    },
+    name: String,
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  },
 
-        super(schemaDefinition, { collection: 'payments' });
-    }
+  // Vote Bundles
+  voteBundles: [
+    {
+      bundle: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "VoteBundle",
+        required: true,
+      },
+      quantity: {
+        type: Number,
+        required: true,
+        min: 1,
+      },
+      price: Number,
+      votes: Number,
+    },
+  ],
 
-    /**
-     * Returns the Mongoose schema with additional indexes and middleware.
-     * @returns {mongoose.Schema} The constructed schema.
-     */
-    getSchema() {
-        const schema = super.getSchema();
+  // Event and Candidate
+  event: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Event",
+    required: [true, "Event reference is required"],
+  },
 
-        // Indexes for efficient queries
-        schema.index({ 'voter.email': 1 });
-        schema.index({ 'voter.ipAddress': 1 });
-        schema.index({ status: 1 });
-        schema.index({ event: 1, category: 1 });
-        schema.index({ voteBundle: 1 });
-        schema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // TTL index for cleanup
-        schema.index({ 'paystackData.transaction_id': 1 });
+  candidate: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Candidate",
+  },
 
-        // Compound indexes for common queries
-        schema.index({ 'voter.email': 1, status: 1 });
-        schema.index({ 'voter.email': 1, event: 1, category: 1 });
+  // Transaction Details
+  transaction: {
+    provider: {
+      type: String,
+      enum: ["paystack", "stripe", "manual"],
+      default: "paystack",
+    },
+    transactionId: String,
+    accessCode: String,
+    authorizationUrl: String,
+    gatewayResponse: mongoose.Schema.Types.Mixed,
+    channel: String,
+    fees: {
+      type: Number,
+      default: 0,
+    },
+  },
 
+  // Amounts
+  amounts: {
+    subtotal: {
+      type: Number,
+      required: true,
+    },
+    discount: {
+      type: Number,
+      default: 0,
+    },
+    couponDiscount: {
+      type: Number,
+      default: 0,
+    },
+    tax: {
+      type: Number,
+      default: 0,
+    },
+    fees: {
+      type: Number,
+      default: 0,
+    },
+    total: {
+      type: Number,
+      required: true,
+    },
+    currency: {
+      type: String,
+      default: "GHS",
+      uppercase: true,
+    },
+    exchangeRate: {
+      type: Number,
+      default: 1,
+    },
+  },
 
-        // Pre-save hook to set paidAt date if status is success
-        schema.pre('save', function(next) {
-            if (this.isModified('status') && this.status === 'success') {
-                this.paidAt = new Date();
-                // Remove expiration for successful payments to prevent auto-deletion
-                this.expiresAt = undefined;
-            }
-            next();
-        });
+  // Status
+  status: {
+    type: String,
+    enum: ["initialized", "pending", "processing", "success", "failed", "cancelled", "refunded"],
+    default: "initialized",
+  },
 
-        // Virtual for checking if payment is expired
-        schema.virtual('isExpired').get(function() {
-            return this.status === 'pending' && new Date() > this.expiresAt;
-        });
+  // Verification
+  verification: {
+    verified: {
+      type: Boolean,
+      default: false,
+    },
+    verifiedAt: Date,
+    verificationAttempts: {
+      type: Number,
+      default: 0,
+    },
+    webhookReceived: {
+      type: Boolean,
+      default: false,
+    },
+    webhookVerified: {
+      type: Boolean,
+      default: false,
+    },
+    manualVerification: {
+      type: Boolean,
+      default: false,
+    },
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  },
 
-        // Virtual for total votes purchased
-        schema.virtual('totalVotes').get(function() {
-            return this.votesCast + this.votesRemaining;
-        });
+  // Fraud Detection
+  fraud: {
+    riskScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    riskFactors: [String],
+    blocked: {
+      type: Boolean,
+      default: false,
+    },
+    blockReason: String,
+    ipAddress: String,
+    deviceFingerprint: String,
+    location: {
+      city: String,
+      country: String,
+      coordinates: [Number],
+    },
+  },
 
-        // Instance method to check if voter can cast more votes
-        schema.methods.canCastVotes = function(votesToCast = 1) {
-            return this.status === 'success' && this.votesRemaining >= votesToCast;
-        };
+  // Reconciliation
+  reconciliation: {
+    reconciled: {
+      type: Boolean,
+      default: false,
+    },
+    reconciledAt: Date,
+    reconciledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    discrepancyFound: {
+      type: Boolean,
+      default: false,
+    },
+    discrepancyReason: String,
+    resolved: {
+      type: Boolean,
+      default: true,
+    },
+  },
 
-        // Instance method to cast votes
-        schema.methods.castVotes = function(candidate, votesToCast = 1) {
-            if (!this.canCastVotes(votesToCast)) {
-                throw new Error('Insufficient votes remaining or payment not successful');
-            }
+  // Refund
+  refund: {
+    refunded: {
+      type: Boolean,
+      default: false,
+    },
+    refundedAt: Date,
+    refundAmount: Number,
+    refundReason: String,
+    refundTransactionId: String,
+    refundedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  },
+};
 
-            this.votesCast += votesToCast;
-            this.votesRemaining -= votesToCast;
-            
-            // Add to votes data
-            const existingVote = this.votesData.find(v => v.candidate.toString() === candidate.toString());
-            if (existingVote) {
-                existingVote.votesUsed += votesToCast;
-            } else {
-                this.votesData.push({
-                    candidate,
-                    votesUsed: votesToCast,
-                    castedAt: new Date()
-                });
-            }
+// Create Payment model using BaseModel
+const paymentModel = new BaseModel(PaymentSchema, {
+  collection: "payments",
+  timestamps: true,
+});
 
-            return this.save();
-        };
+// Add Indexes
+paymentModel.addUniqueIndex({ reference: 1 });
+paymentModel.addCompoundIndex([{ "voter.email": 1 }, { event: 1 }, { status: 1 }]);
+paymentModel.addCompoundIndex([{ status: 1 }, { createdAt: -1 }]);
+paymentModel.addIndex({ "transaction.transactionId": 1 });
+paymentModel.addIndex({ "fraud.ipAddress": 1 });
+paymentModel.addIndex({ event: 1, candidate: 1 });
 
-        // Static method to find payments by voter
-        schema.statics.findByVoter = function(email, options = {}) {
-            const query = { 'voter.email': email };
-            if (options.event) query.event = options.event;
-            if (options.category) query.category = options.category;
-            if (options.status) query.status = options.status;
-            
-            return this.find(query)
-                .populate('voteBundle')
-                .populate('event')
-                .populate('category')
-                .populate('coupon')
-                .sort({ createdAt: -1 });
-        };
+// Virtuals
 
-        // Static method to check if voter has already paid for event/category
-        schema.statics.hasVoterPaid = function(email, eventId, categoryId) {
-            return this.findOne({
-                'voter.email': email,
-                event: eventId,
-                category: categoryId,
-                status: { $in: ['pending', 'success'] }
-            });
-        };
+paymentModel.addVirtual("isPaid", function () {
+  return this.status === "success";
+});
 
-        return schema;
-    }
-}
+paymentModel.addVirtual("isPending", function () {
+  return this.status === "pending" || this.status === "processing";
+});
 
-export default mongoose.model('Payment', new Payment().getSchema());
+paymentModel.addVirtual("canRefund", function () {
+  return this.status === "success" && !this.refund.refunded;
+});
+
+paymentModel.addVirtual("netAmount", function () {
+  return this.amounts.total - this.amounts.fees - this.amounts.discount;
+});
+
+// Instance Methods
+
+paymentModel.addInstanceMethod("verify", async function () {
+  // This will be implemented in PaymentService
+  return this;
+});
+
+paymentModel.addInstanceMethod("complete", async function () {
+  this.status = "success";
+  this.verification.verified = true;
+  this.verification.verifiedAt = new Date();
+  return await this.save();
+});
+
+paymentModel.addInstanceMethod("fail", async function (reason = null) {
+  this.status = "failed";
+  if (reason) {
+    this.metadata = this.metadata || {};
+    this.metadata.failureReason = reason;
+  }
+  return await this.save();
+});
+
+paymentModel.addInstanceMethod("refund", async function (amount, reason, refundedBy = null) {
+  if (!this.canRefund) {
+    throw new Error("Payment cannot be refunded");
+  }
+
+  this.status = "refunded";
+  this.refund.refunded = true;
+  this.refund.refundedAt = new Date();
+  this.refund.refundAmount = amount || this.amounts.total;
+  this.refund.refundReason = reason;
+  if (refundedBy) {
+    this.refund.refundedBy = refundedBy;
+  }
+
+  return await this.save();
+});
+
+paymentModel.addInstanceMethod("assessFraud", function () {
+  let riskScore = 0;
+  const riskFactors = [];
+
+  // Check for multiple payments from same IP
+  // Check for unusual amounts
+  // Check for suspicious patterns
+  // This will be implemented in PaymentService
+
+  this.fraud.riskScore = riskScore;
+  this.fraud.riskFactors = riskFactors;
+
+  return riskScore;
+});
+
+paymentModel.addInstanceMethod("reconcile", async function (reconciledBy = null) {
+  this.reconciliation.reconciled = true;
+  this.reconciliation.reconciledAt = new Date();
+  if (reconciledBy) {
+    this.reconciliation.reconciledBy = reconciledBy;
+  }
+  return await this.save();
+});
+
+// Static Methods
+
+paymentModel.addStaticMethod("findByReference", async function (reference) {
+  return await this.findOne({ reference, deleted: false });
+});
+
+paymentModel.addStaticMethod("findByVoter", async function (email) {
+  return await this.find({
+    "voter.email": email.toLowerCase(),
+    deleted: false,
+  }).sort({ createdAt: -1 });
+});
+
+paymentModel.addStaticMethod("findPending", async function () {
+  return await this.find({
+    status: { $in: ["pending", "processing"] },
+    deleted: false,
+  });
+});
+
+paymentModel.addStaticMethod("findUnreconciled", async function () {
+  return await this.find({
+    status: "success",
+    "reconciliation.reconciled": false,
+    deleted: false,
+  });
+});
+
+paymentModel.addStaticMethod("getPaymentStats", async function (filters = {}) {
+  const matchQuery = { deleted: false };
+  if (filters.event) matchQuery.event = filters.event;
+  if (filters.startDate && filters.endDate) {
+    matchQuery.createdAt = { $gte: filters.startDate, $lte: filters.endDate };
+  }
+
+  const stats = await this.aggregate([
+    { $match: matchQuery },
+    {
+      $group: {
+        _id: "$status",
+        count: { $sum: 1 },
+        totalAmount: { $sum: "$amounts.total" },
+        avgAmount: { $avg: "$amounts.total" },
+      },
+    },
+  ]);
+
+  return stats;
+});
+
+paymentModel.addStaticMethod("detectFraud", async function (threshold = 70) {
+  return await this.find({
+    "fraud.riskScore": { $gte: threshold },
+    deleted: false,
+  });
+});
+
+// Middleware
+
+// Auto-assess fraud on save
+paymentModel.addPreHook("save", function (next) {
+  if (this.isNew && this.fraud.ipAddress) {
+    this.assessFraud();
+  }
+  next();
+});
+
+// Create and export model
+const Payment = paymentModel.getModel("Payment");
+
+export default Payment;

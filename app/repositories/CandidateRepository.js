@@ -1,916 +1,302 @@
 #!/usr/bin/env node
 /**
- * Candidate Repository
+ * Enhanced Candidate Repository
  * 
- * Extends BaseRepository to provide Candidate-specific database operations.
- * Includes candidate management, category association, and voting statistics.
+ * Provides candidate-specific database operations with intelligent caching.
+ * 
+ * @module CandidateRepository
+ * @version 2.0.0
  */
 
-import BaseRepository from './BaseRepository.js';
-import Candidate from '../models/Candidate.js';
-import mongoose from 'mongoose';
+import BaseRepository from '../BaseRepository.js';
+import Candidate from '../../models/Candidate.js';
+import { mainCacheManager } from '../../utils/engine/CacheManager.js';
 
 class CandidateRepository extends BaseRepository {
-
     constructor() {
-        // Get the Candidate model
-        super(Candidate);
+        super(Candidate, {
+            enableCache: true,
+            cacheManager: mainCacheManager,
+        });
     }
+
+    // ============================================
+    // CANDIDATE MANAGEMENT
+    // ============================================
 
     /**
      * Create a new candidate
      * @param {Object} candidateData - Candidate data
-     * @returns {Promise<Object>} Created candidate
+     * @param {Object} options - Additional options
+     * @returns {Promise<Object>}
      */
-    async createCandidate(candidateData) {
+    async createCandidate(candidateData, options = {}) {
         try {
-            // Validate candidate doesn't already exist in the same category for the event
-            await this._validateUniqueCandidate(candidateData);
+            this.validateRequiredFields(candidateData, [
+                'name',
+                'event',
+            ]);
 
-            return await this.create(candidateData);
+            const candidate = await this.create(candidateData, options);
+
+            this.log('createCandidate', { 
+                candidateId: candidate._id,
+                name: candidate.name,
+            });
+
+            return candidate;
         } catch (error) {
-            throw this._handleError(error, 'createCandidate');
+            throw this.handleError(error, 'createCandidate', { name: candidateData.name });
         }
     }
 
+    /**
+     * Update candidate by ID
+     * @param {String} candidateId - Candidate ID
+     * @param {Object} updateData - Data to update
+     * @param {Object} options - Update options
+     * @returns {Promise<Object>}
+     */
+    async updateCandidate(candidateId, updateData, options = {}) {
+        try {
+            this.validateObjectId(candidateId, 'Candidate ID');
+
+            const candidate = await this.updateById(candidateId, updateData, {
+                ...options,
+                new: true,
+                runValidators: true,
+            });
+
+            if (!candidate) {
+                return null;
+            }
+
+            this.log('updateCandidate', { candidateId, success: true });
+
+            return candidate;
+        } catch (error) {
+            throw this.handleError(error, 'updateCandidate', { candidateId });
+        }
+    }
+
+    // ============================================
+    // CANDIDATE QUERIES
+    // ============================================
 
     /**
      * Find candidates by event
-     * @param {String|ObjectId} eventId - Event ID
+     * @param {String} eventId - Event ID
      * @param {Object} options - Query options
-     * @returns {Promise<Array>} Candidates for the event
+     * @returns {Promise<Array>}
      */
     async findByEvent(eventId, options = {}) {
         try {
-            const criteria = { event: eventId };
-            return await this.find(criteria, {
-                ...options,
-                populate: [
-                    { path: 'categories', select: 'name description' },
-                    { path: 'event', select: 'name status' }
-                ],
-                sort: { name: 1 }
-            });
+            this.validateObjectId(eventId, 'Event ID');
+
+            return await this.find(
+                { event: eventId, deleted: false },
+                { ...options, sort: { position: 1, createdAt: 1 }, lean: true }
+            );
         } catch (error) {
-            throw this._handleError(error, 'findByEvent');
+            throw this.handleError(error, 'findByEvent', { eventId });
         }
     }
 
     /**
      * Find candidates by category
-     * @param {String|ObjectId} categoryId - Category ID
+     * @param {String} categoryId - Category ID
      * @param {Object} options - Query options
-     * @returns {Promise<Array>} Candidates in the category
+     * @returns {Promise<Array>}
      */
     async findByCategory(categoryId, options = {}) {
         try {
-            const criteria = { categories: categoryId };
-            return await this.find(criteria, {
-                ...options,
-                populate: [
-                    { path: 'event', select: 'name status' },
-                    { path: 'categories', select: 'name description' }
-                ],
-                sort: { name: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByCategory');
-        }
-    }
+            this.validateObjectId(categoryId, 'Category ID');
 
-    /**
-     * Authenticate candidate by email and password
-     * @param {String} email - Candidate email
-     * @param {String} password - Candidate password
-     * @returns {Object} candidate object
-     */
-    async authenticateEmail(email, password) {
-        try {
-            const candidate = await this.findOne({ email });
-            if (!candidate) {
-                throw new Error('Candidate not found');
-            }
-
-            const isMatch = await candidate.verifyToken(password);
-
-            if (!isMatch) {
-                throw new Error('Invalid password');
-            }
-
-            return candidate
-        } catch (error) {
-            throw this._handleError(error, 'authenticate', { email });
-        }
-    }
-
-    /**
-     * Authenticate candidate by cId and password
-     * @param {String} cId - Candidate assigned ID
-     * @param {String} password - Candidate's password
-     * @returns {Object} candidate object
-     */
-    async authenticateCId(cId, password) {
-        try {
-            const candidate = await this.findOne({ cId });
-            if (!candidate) {
-                throw new Error('Candidate not found');
-            }
-
-            const isMatch = await candidate.verifyToken(password);
-
-            if (!isMatch) {
-                throw new Error('Invalid password');
-            }
-
-            return candidate
-        } catch (error) {
-            throw this._handleError(error, 'authenticate', { cId });
-        }
-    }
-
-    /**
-     * Find candidates by event and category
-     * @param {String|ObjectId} eventId - Event ID
-     * @param {String|ObjectId} categoryId - Category ID
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Candidates in the event and category
-     */
-    async findByEventAndCategory(eventId, categoryId, options = {}) {
-        try {
-            const criteria = {
-                event: eventId,
-                categories: categoryId
-            };
-            return await this.find(criteria, {
-                ...options,
-                sort: { name: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByEventAndCategory');
-        }
-    }
-
-    /**
-     * Get candidate with vote statistics
-     * @param {String|ObjectId} candidateId - Candidate ID
-     * @returns {Promise<Object|null>} Candidate with vote stats
-     */
-    async getCandidateWithStats(candidateId) {
-        try {
-            const pipeline = [
-                { $match: { _id: new mongoose.Types.ObjectId(candidateId) } },
-                {
-                    $lookup: {
-                        from: 'votes',
-                        localField: '_id',
-                        foreignField: 'candidate',
-                        as: 'votes'
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'categories',
-                        localField: 'categories',
-                        foreignField: '_id',
-                        as: 'categoryInfo'
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'events',
-                        localField: 'event',
-                        foreignField: '_id',
-                        as: 'eventInfo'
-                    }
-                },
-                {
-                    $addFields: {
-                        voteCount: { $size: '$votes' },
-                        categories: '$categoryInfo',
-                        event: { $arrayElemAt: ['$eventInfo', 0] }
-                    }
-                },
-                {
-                    $project: {
-                        categoryInfo: 0,
-                        eventInfo: 0,
-                        votes: 0
-                    }
-                }
-            ];
-
-            const [candidate] = await this.aggregate(pipeline);
-            console.log(candidate)
-            return candidate || null;
-        } catch (error) {
-            throw this._handleError(error, 'getCandidateWithStats');
-        }
-    }
-
-    /**
-     * Get candidates with vote statistics for an event
-     * @param {String|ObjectId} eventId - Event ID
-     * @returns {Promise<Array>} Candidates with vote statistics
-     */
-    async getCandidatesWithStatsForEvent(eventId) {
-        try {
-            const pipeline = [
-                { $match: { event: new mongoose.Types.ObjectId(eventId) } },
-                {
-                    $lookup: {
-                        from: 'votes',
-                        localField: '_id',
-                        foreignField: 'candidate',
-                        as: 'votes'
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'categories',
-                        localField: 'categories',
-                        foreignField: '_id',
-                        as: 'categoryInfo'
-                    }
-                },
-                {
-                    $addFields: {
-                        voteCount: { $size: '$votes' },
-                        categories: '$categoryInfo'
-                    }
-                },
-                {
-                    $unwind: {
-                        path: '$categories',
-                        preserveNullAndEmptyArrays: false
-                    }
-                },
-                {
-                    $group: {
-                        _id: '$categories._id',
-                        categoryName: { $first: '$categories.name' },
-                        candidates: {
-                            $push: {
-                                _id: '$_id',
-                                name: '$name',
-                                description: '$description',
-                                image: '$image',
-                                voteCount: '$voteCount',
-                                allCategories: '$categoryInfo'
-                            }
-                        },
-                        totalVotes: { $sum: '$voteCount' }
-                    }
-                },
-                {
-                    $addFields: {
-                        candidates: {
-                            $map: {
-                                input: '$candidates',
-                                as: 'candidate',
-                                in: {
-                                    _id: '$$candidate._id',
-                                    name: '$$candidate.name',
-                                    description: '$$candidate.description',
-                                    image: '$$candidate.image',
-                                    voteCount: '$$candidate.voteCount',
-                                    percentage: {
-                                        $cond: [
-                                            { $eq: ['$totalVotes', 0] },
-                                            0,
-                                            {
-                                                $round: [
-                                                    {
-                                                        $multiply: [
-                                                            { $divide: ['$$candidate.voteCount', '$totalVotes'] },
-                                                            100
-                                                        ]
-                                                    },
-                                                    2
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                {
-                    $sort: { categoryName: 1 }
-                }
-            ];
-
-            return await this.aggregate(pipeline);
-        } catch (error) {
-            throw this._handleError(error, 'getCandidatesWithStatsForEvent');
-        }
-    }
-
-    /**
-     * Update candidate information
-     * @param {String|ObjectId} candidateId - Candidate ID
-     * @param {Object} updateData - Data to update
-     * @returns {Promise<Object|null>} Updated candidate
-     */
-    async updateCandidate(candidateId, updateData) {
-        try {
-            // Remove fields that shouldn't be updated directly
-            const { event, ...safeUpdateData } = updateData;
-
-            return await this.updateById(candidateId, safeUpdateData, {
-                populate: [
-                    { path: 'categories', select: 'name' },
-                    { path: 'event', select: 'name status' }
-                ]
-            });
-        } catch (error) {
-            throw this._handleError(error, 'updateCandidate');
-        }
-    }
-
-
-
-    /**
-     * Get top candidates by votes
-     * @param {String|ObjectId} eventId - Event ID (optional)
-     * @param {Number} limit - Number of top candidates to return
-     * @returns {Promise<Array>} Top candidates
-     */
-    async getTopCandidates(eventId = null, limit = 10) {
-        try {
-            const matchStage = eventId
-                ? { $match: { event: eventId } }
-                : { $match: {} };
-
-            const pipeline = [
-                matchStage,
-                {
-                    $lookup: {
-                        from: 'votes',
-                        localField: '_id',
-                        foreignField: 'candidate',
-                        as: 'votes'
-                    }
-                },
-                { $unwind: { path: "$votes", preserveNullAndEmptyArrays: true } },
-                {
-                    $lookup: {
-                        from: "voteBundles",
-                        localField: "votes.voteBundles",
-                        foreignField: "_id",
-                        as: "voteBundleDocs"
-                    }
-                },
-                {
-                    $addFields: {
-                        voteBundleCount: { $sum: "$voteBundleDocs.votes" }
-                    }
-                },
-                // Group back by candidate
-                {
-                    $group: {
-                        _id: "$_id",
-                        name: { $first: "$name" },
-                        categories: { $first: "$categories" },
-                        event: { $first: "$event" },
-                        voteCount: { $sum: "$voteBundleCount" }
-                    }
-                },
-
-                // Lookup category + event info
-                {
-                    $lookup: {
-                        from: 'categories',
-                        localField: 'categories',
-                        foreignField: '_id',
-                        as: 'categoryInfo'
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'events',
-                        localField: 'event',
-                        foreignField: '_id',
-                        as: 'eventInfo'
-                    }
-                },
-                {
-                    $addFields: {
-                        categories: '$categoryInfo',
-                        event: { $arrayElemAt: ['$eventInfo', 0] }
-                    }
-                },
-
-                // --- compute totalVotes for all candidates
-                {
-                    $group: {
-                        _id: null,
-                        candidates: { $push: "$$ROOT" },
-                        totalVotes: { $sum: "$voteCount" }
-                    }
-                },
-                { $unwind: "$candidates" },
-                {
-                    $addFields: {
-                        "candidates.totalVotes": "$totalVotes",
-                        "candidates.votePercentage": {
-                            $cond: [
-                                { $eq: ["$totalVotes", 0] },
-                                0,
-                                {
-                                    $multiply: [
-                                        { $divide: ["$candidates.voteCount", "$totalVotes"] },
-                                        100
-                                    ]
-                                }
-                            ]
-                        }
-                    }
-                },
-                {
-                    $replaceRoot: { newRoot: "$candidates" }
-                },
-
-                // --- sort + limit
-                {
-                    $sort: { voteCount: -1, name: 1 }
-                },
-                { $limit: limit },
-
-                {
-                    $project: {
-                        categoryInfo: 0,
-                        eventInfo: 0
-                    }
-                }
-            ];
-
-            // Remove the empty match stage if no eventId
-            if (!eventId) {
-                pipeline.shift();
-            }
-
-            return await this.aggregate(pipeline);
-        } catch (error) {
-            throw this._handleError(error, 'getTopCandidates');
-        }
-    }
-
-    /**
-     * Get candidate with detailed statistics
-     * @param {String|ObjectId} candidateId - Candidate ID
-     * @returns {Promise<Object|null>} Candidate with detailed statistics
-     */
-    async getCandidateWithStatistics(candidateId) {
-        try {
-            const pipeline = [
-                { $match: { _id: new mongoose.Types.ObjectId(candidateId) } },
-                {
-                    $lookup: {
-                        from: 'votes',
-                        localField: '_id',
-                        foreignField: 'candidate',
-                        as: 'votes'
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'categories',
-                        localField: 'categories',
-                        foreignField: '_id',
-                        as: 'categoryInfo'
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'events',
-                        localField: 'event',
-                        foreignField: '_id',
-                        as: 'eventInfo'
-                    }
-                },
-                {
-                    $addFields: {
-                        voteCount: { $size: '$votes' },
-                        categories: '$categoryInfo',
-                        event: { $arrayElemAt: ['$eventInfo', 0] }
-                    }
-                },
-                {
-                    $project: {
-                        categoryInfo: 0,
-                        eventInfo: 0,
-                        votes: 0
-                    }
-                }
-            ];
-
-            const [candidate] = await this.aggregate(pipeline);
-            return candidate || null;
-        } catch (error) {
-            throw this._handleError(error, 'getCandidateWithStatistics');
-        }
-    }
-
-    /**
-     * Get candidates with statistics for an event
-     * @param {String|ObjectId} eventId - Event ID
-     * @returns {Promise<Array>} Candidates with statistics grouped by category
-     */
-    async getCandidatesWithStatisticsForEvent(eventId) {
-        try {
-            const pipeline = [
-                { $match: { event: new mongoose.Types.ObjectId(eventId) } },
-                {
-                    $lookup: {
-                        from: 'votes',
-                        localField: '_id',
-                        foreignField: 'candidate',
-                        as: 'votes'
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'categories',
-                        localField: 'categories',
-                        foreignField: '_id',
-                        as: 'categoryInfo'
-                    }
-                },
-                {
-                    $addFields: {
-                        voteCount: { $size: '$votes' },
-                        categories: '$categoryInfo'
-                    }
-                },
-                {
-                    $unwind: {
-                        path: '$categories',
-                        preserveNullAndEmptyArrays: false
-                    }
-                },
-                {
-                    $group: {
-                        _id: '$categories._id',
-                        categoryName: { $first: '$categories.name' },
-                        candidates: {
-                            $push: {
-                                _id: '$_id',
-                                name: '$name',
-                                description: '$description',
-                                image: '$image',
-                                voteCount: '$voteCount',
-                                allCategories: '$categoryInfo'
-                            }
-                        }
-                    }
-                },
-                {
-                    $sort: { categoryName: 1 }
-                }
-            ];
-
-            return await this.aggregate(pipeline);
-        } catch (error) {
-            throw this._handleError(error, 'getCandidatesWithStatisticsForEvent');
-        }
-    }
-
-
-    /**
-     * Search candidates by name
-     * @param {String} searchTerm - Search term
-     * @param {Object} options - Search options
-     * @returns {Promise<Array>} Matching candidates
-     */
-    async searchCandidatesByName(searchTerm, options = {}) {
-        try {
-            return await this.searchByName(searchTerm, options.eventId, options);
-        } catch (error) {
-            throw this._handleError(error, 'searchCandidatesByName');
-        }
-    }
-
-    /**
-     * Find candidate by cId
-     * @param {String} candidateId - The candidate cId
-     * @returns {Promise<Object>} The candidate object
-     */
-    async findByCId(candidateId) {
-        try {
-            return await this.findOne({ cId: candidateId })
-        } catch (error) {
-            throw this._handleError(error, 'findByCId')
-        }
-    }
-
-    /**
-     * Search candidates by name within a specific event
-     * @param {String} searchTerm - Search term
-     * @param {String|ObjectId} eventId - Event ID
-     * @param {Object} options - Search options
-     * @returns {Promise<Array>} Matching candidates
-     */
-    async searchByName(searchTerm, eventId, options = {}) {
-        try {
-            const criteria = {
-                name: { $regex: new RegExp(searchTerm, 'i') },
-                event: eventId
-            };
-
-            return await this.find(criteria, options);
-        } catch (error) {
-            throw this._handleError(error, 'searchByName');
-        }
-    }
-    /**
-     * Get detailed candidate statistics
-     * @param {String|ObjectId} candidateId - Candidate ID
-     * @returns {Promise<Object>} Detailed candidate statistics
-     */
-    async getCandidateStatistics(candidateId) {
-        try {
-            const pipeline = [
-                { $match: { _id: new mongoose.Types.ObjectId(candidateId) } },
-                {
-                    $lookup: {
-                        from: 'votes',
-                        localField: '_id',
-                        foreignField: 'candidate',
-                        as: 'votes'
-                    }
-                },
-                { $unwind: { path: '$votes', preserveNullAndEmptyArrays: true } }, // Unwind votes array
-                {
-                    $lookup: {
-                        from: 'voteBundles',
-                        localField: 'votes.voteBundles',
-                        foreignField: '_id',
-                        as: 'voteBundles'
-                    }
-                },
-                { $unwind: { path: '$voteBundles', preserveNullAndEmptyArrays: true } }, // Unwind voteBundles array
-                {
-                    $group: {
-                        _id: '$_id',
-                        name: { $first: '$name' },
-                        description: { $first: '$description' },
-                        photo: { $first: '$photo' },
-                        createdAt: { $first: '$createdAt' },
-                        categories: { $first: '$categories' }, // Preserve the categories array
-                        event: { $first: '$event' },
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'categories',
-                        localField: 'categories',
-                        foreignField: '_id',
-                        as: 'categories'
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'events',
-                        localField: 'event',
-                        foreignField: '_id',
-                        as: 'event'
-                    }
-                },
-                {
-                    $project: {
-                        name: 1,
-                        description: { $ifNull: ['$description', 'No description available'] },
-                        photo: { $ifNull: ['$photo', 'No image available'] },
-                        categories: {
-                            $map: {
-                                input: '$categories',
-                                as: 'cat',
-                                in: { name: '$$cat.name', _id: '$$cat._id' }
-                            }
-                        },
-                        event: {
-                            $let: {
-                                vars: { event: { $arrayElemAt: ['$event', 0] } },
-                                in: { name: '$$event.name', _id: '$$event._id' }
-                            }
-                        },
-                        createdAt: 1
-                    }
-                }
-            ];
-
-            const [statistics] = await this.aggregate(pipeline);
-            return statistics || null;
-        } catch (error) {
-            throw this._handleError(error, 'getCandidateStatistics');
-        }
-    }
-    /**
-         * Bulk create candidates
-         * @param {Array} candidatesData - Array of candidate data
-         * @returns {Promise<Array>} Created candidates
-         */
-    async bulkCreateCandidates(candidatesData) {
-        try {
-            // Validate each candidate
-            for (const candidateData of candidatesData) {
-                await this._validateUniqueCandidate(candidateData);
-            }
-
-            return await this.createMany(candidatesData);
-        } catch (error) {
-            throw this._handleError(error, 'bulkCreateCandidates');
-        }
-    }
-
-    /**
-     * Update the candidate's categories (not used with new multiple categories approach)
-     * @deprecated Use direct updateById method instead
-     * @param {String|ObjectId} candidateId - Candidate ID
-     * @param {Array} categoryIds - Category IDs array
-     * @returns {Promise<Object|null>} Updated candidate
-     */
-    async updateCandidateCategories(candidateId, categoryIds) {
-        try {
-            if (!Array.isArray(categoryIds)) {
-                categoryIds = [categoryIds];
-            }
-
-            // Validate each category ID
-            for (const categoryId of categoryIds) {
-                this._validateObjectId(categoryId, 'categoryId');
-            }
-
-            return await this.updateById(candidateId, {
-                categories: categoryIds,
-                updatedAt: new Date()
-            });
-        } catch (error) {
-            throw this._handleError(error, 'updateCandidateCategories');
-        }
-    }
-
-    /**
-     * Update candidate votes after cast
-     * @param {String|ObjectId} candidateId - Candidate ID
-     * @param {Object} voteData - Vote data
-     * @returns {Promise<Object|null>} Updated candidate
-     */
-    async updateVotes(candidateId, voteData) {
-        try {
-            return await this.updateById(candidateId, {
-                $push: { votes: voteData },
-                updatedAt: new Date()
-            });
-        } catch (error) {
-            throw this._handleError(error, 'updateCandidateVotes');
-        }
-    }
-
-    /**
-     * Increment vote count for a candidate
-     * @param {String|ObjectId} candidateId - Candidate ID
-     * @param {Number} voteCount - Number of votes to add
-     * @param {Object} options - Update options
-     * @returns {Promise<Object|null>} Updated candidate
-     */
-    async incrementVoteCount(candidateId, voteCount = 1, options = {}) {
-        try {
-            return await this.model.findByIdAndUpdate(
-                candidateId,
-                {
-                    $inc: { voteCount: voteCount },
-                    updatedAt: new Date()
-                },
-                {
-                    new: true,
-                    runValidators: true,
-                    ...options
-                }
+            return await this.find(
+                { category: categoryId, deleted: false },
+                { ...options, sort: { position: 1, createdAt: 1 }, lean: true }
             );
         } catch (error) {
-            throw this._handleError(error, 'incrementVoteCount');
+            throw this.handleError(error, 'findByCategory', { categoryId });
         }
     }
 
     /**
-     * Delete candidate (only if no votes exist)
-     * @param {String|ObjectId} candidateId - Candidate ID
-     * @returns {Promise<Object|null>} Deleted candidate
+     * Find active candidates
+     * @param {Object} filter - Additional filters
+     * @param {Object} options - Query options
+     * @returns {Promise<Array>}
      */
-    async deleteCandidate(candidateId) {
+    async findActiveCandidates(filter = {}, options = {}) {
         try {
-            // Check if candidate has votes
-            const voteCount = await mongoose.model('Vote').countDocuments({ candidate: candidateId });
-
-            if (voteCount > 0) {
-                throw new Error('Cannot delete candidate with existing votes');
-            }
-
-            return await this.deleteById(candidateId);
+            return await this.find(
+                { ...filter, active: true, deleted: false },
+                { ...options, sort: { position: 1, createdAt: 1 }, lean: true }
+            );
         } catch (error) {
-            throw this._handleError(error, 'deleteCandidate');
+            throw this.handleError(error, 'findActiveCandidates');
         }
     }
 
     /**
-     * Validate unique candidate in categories for event
-     * @private
-     * @param {Object} candidateData - Candidate data
+     * Search candidates by text
+     * @param {String} searchText - Search query
+     * @param {Object} options - Query options
+     * @returns {Promise<Array>}
      */
-    async _validateUniqueCandidate(candidateData) {
-        const { name, event, categories } = candidateData;
-
-        if (!name || !event || !categories) {
-            throw new Error('Name, event, and categories are required');
-        }
-
-        if (!Array.isArray(categories) || categories.length === 0) {
-            throw new Error('Categories must be a non-empty array');
-        }
-
-        // Check if candidate with same name exists in the same event
-        // We'll allow candidates with same name in different categories of the same event
-        // but prevent exact duplicates across all categories
-        const existingCandidate = await this.findOne({
-            name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
-            event,
-            categories: { $in: categories }
-        });
-
-        if (existingCandidate) {
-            throw new Error(`Candidate "${name}" already exists with overlapping categories in this event`);
-        }
-    }
-
-    /**
-     * Delete all candidates for a specific event
-     * @param {String|ObjectId} eventId - Event ID
-     * @returns {Promise<Object>} Delete result
-     */
-    async deleteByEvent(eventId) {
+    async searchCandidates(searchText, options = {}) {
         try {
-            this._validateObjectId(eventId, 'Event ID');
+            if (!searchText) {
+                return [];
+            }
 
-            const deleteResult = await this.model.deleteMany({ event: eventId });
-
-            return {
-                success: true,
-                deletedCount: deleteResult.deletedCount
-            };
+            return await this.textSearch(searchText, { deleted: false }, options);
         } catch (error) {
-            throw this._handleError(error, 'deleteByEvent');
+            throw this.handleError(error, 'searchCandidates', { searchText });
         }
     }
 
+    // ============================================
+    // CANDIDATE STATISTICS
+    // ============================================
+
     /**
-     * Change candidate password
-     * @param {String|ObjectId} candidateId - Candidate ID
-     * @param {String} currentPassword - Current password
-     * @param {String} newPassword - New password
-     * @returns {Promise<Object>} Password change result
+     * Get candidate statistics
+     * @param {String} candidateId - Candidate ID
+     * @returns {Promise<Object>}
      */
-    async changePassword(candidateId, currentPassword, newPassword) {
+    async getCandidateStats(candidateId) {
         try {
-            this._validateObjectId(candidateId, 'Candidate ID');
+            this.validateObjectId(candidateId, 'Candidate ID');
 
-            if (!currentPassword) {
-                throw new Error('Current password is required');
-            }
-
-            if (!newPassword) {
-                throw new Error('New password is required');
-            }
-
-            // Find the candidate
             const candidate = await this.findById(candidateId);
+
             if (!candidate) {
                 throw new Error('Candidate not found');
             }
 
-            // Verify current password
-            const isCurrentPasswordValid = await candidate.verifyToken(currentPassword);
-            if (!isCurrentPasswordValid) {
-                throw new Error('Current password is incorrect');
-            }
-
-            // Update password (hashing will be done by the model pre-save middleware)
-            const updatedCandidate = await this.updateById(candidateId, {
-                password: await candidate.hashPassword(newPassword),
-                updatedAt: new Date()
-            });
-
-            if (!updatedCandidate) {
-                throw new Error('Failed to update password');
-            }
-
             return {
-                success: true,
-                message: 'Password changed successfully'
+                candidateId,
+                name: candidate.name,
+                voteCount: candidate.voteCount || 0,
+                event: candidate.event,
+                category: candidate.category,
+                active: candidate.active,
+                createdAt: candidate.createdAt,
             };
         } catch (error) {
-            throw this._handleError(error, 'changePassword');
+            throw this.handleError(error, 'getCandidateStats', { candidateId });
+        }
+    }
+
+    /**
+     * Increment vote count for candidate
+     * @param {String} candidateId - Candidate ID
+     * @param {Number} count - Number to increment by (default: 1)
+     * @returns {Promise<Object>}
+     */
+    async incrementVoteCount(candidateId, count = 1) {
+        try {
+            this.validateObjectId(candidateId, 'Candidate ID');
+
+            return await this.updateById(candidateId, {
+                $inc: { voteCount: count },
+            });
+        } catch (error) {
+            throw this.handleError(error, 'incrementVoteCount', { candidateId });
+        }
+    }
+
+    /**
+     * Get total candidate count
+     * @param {Object} filter - Optional filter
+     * @returns {Promise<Number>}
+     */
+    async getCandidateCount(filter = {}) {
+        try {
+            return await this.count({ ...filter, deleted: false });
+        } catch (error) {
+            throw this.handleError(error, 'getCandidateCount');
+        }
+    }
+
+    // ============================================
+    // CANDIDATE STATUS MANAGEMENT
+    // ============================================
+
+    /**
+     * Activate candidate
+     * @param {String} candidateId - Candidate ID
+     * @returns {Promise<Object>}
+     */
+    async activateCandidate(candidateId) {
+        try {
+            this.validateObjectId(candidateId, 'Candidate ID');
+
+            return await this.updateById(candidateId, {
+                active: true,
+            });
+        } catch (error) {
+            throw this.handleError(error, 'activateCandidate', { candidateId });
+        }
+    }
+
+    /**
+     * Deactivate candidate
+     * @param {String} candidateId - Candidate ID
+     * @returns {Promise<Object>}
+     */
+    async deactivateCandidate(candidateId) {
+        try {
+            this.validateObjectId(candidateId, 'Candidate ID');
+
+            return await this.updateById(candidateId, {
+                active: false,
+            });
+        } catch (error) {
+            throw this.handleError(error, 'deactivateCandidate', { candidateId });
+        }
+    }
+
+    // ============================================
+    // BATCH OPERATIONS
+    // ============================================
+
+    /**
+     * Delete candidates by event
+     * @param {String} eventId - Event ID
+     * @param {Object} options - Delete options
+     * @returns {Promise<Object>}
+     */
+    async deleteByEvent(eventId, options = {}) {
+        try {
+            this.validateObjectId(eventId, 'Event ID');
+
+            return await this.deleteMany(
+                { event: eventId },
+                options
+            );
+        } catch (error) {
+            throw this.handleError(error, 'deleteByEvent', { eventId });
+        }
+    }
+
+    /**
+     * Update candidates by event
+     * @param {String} eventId - Event ID
+     * @param {Object} updateData - Data to update
+     * @returns {Promise<Object>}
+     */
+    async updateByEvent(eventId, updateData) {
+        try {
+            this.validateObjectId(eventId, 'Event ID');
+
+            return await this.updateMany(
+                { event: eventId },
+                updateData
+            );
+        } catch (error) {
+            throw this.handleError(error, 'updateByEvent', { eventId });
         }
     }
 }

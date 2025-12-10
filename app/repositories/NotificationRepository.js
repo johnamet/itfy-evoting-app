@@ -1,291 +1,447 @@
-#!/usr/bin/env node
+import BaseRepository from '../BaseRepository.js';
+import Notification from '../../models/Notification.js';
+import { mainCacheManager } from '../../utils/engine/CacheManager.js';
 
 /**
- * Notification Repository
+ * NotificationRepository
  * 
- * Data access layer for Notification operations
+ * Manages notifications with intelligent caching. Notifications are cached with a 10-minute TTL
+ * since they can be time-sensitive but don't change frequently once created.
+ * 
+ * Cache Strategy:
+ * - Read operations (findById, findOne, find) are cached automatically
+ * - User-specific queries skip cache for real-time unread count accuracy
+ * - Mark as read operations invalidate user-specific caches
+ * - Bulk operations invalidate all query caches
+ * 
+ * @extends BaseRepository
  */
-
-import BaseRepository from './BaseRepository.js';
-import Notification from '../models/Notification.js';
-
 class NotificationRepository extends BaseRepository {
     constructor() {
-        super(Notification);
+        super(Notification, {
+            enableCache: true,
+            cacheManager: mainCacheManager,
+            cacheTTL: 600 // 10 minutes
+        });
     }
 
     /**
-     * Find unread notifications for a specific user
+     * Create a new notification
+     * 
+     * @param {Object} notificationData - Notification data
+     * @param {string} notificationData.user - User ID to notify
+     * @param {string} notificationData.title - Notification title
+     * @param {string} notificationData.message - Notification message
+     * @param {string} [notificationData.type='info'] - Notification type (info, warning, error, success)
+     * @param {Object} [notificationData.metadata] - Additional metadata
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Created notification
      */
-    async findUnreadForUser(userId, role = null) {
-        try {
-            const query = {
-                $or: [
-                    { recipientUser: userId },
-                    { isGlobalNotification: true }
-                ],
-                isRead: false,
-                $or: [
-                    { expiresAt: { $exists: false } },
-                    { expiresAt: null },
-                    { expiresAt: { $gt: new Date() } }
-                ]
-            };
+    async createNotification(notificationData, options = {}) {
+        this._validateRequiredFields(notificationData, ['user', 'title', 'message']);
 
-            // Add admin notifications if user has appropriate role
-            if (role && role.level >= 3) {
-                query.$or.push({ isAdminNotification: true });
-            }
+        const notificationToCreate = {
+            ...notificationData,
+            type: notificationData.type || 'info',
+            read: false,
+            readAt: null
+        };
 
-            // Add role-based notifications
-            if (role) {
-                query.$or.push({ recipientRole: role._id });
-            }
-
-            return await this.model.find(query)
-                .populate('createdBy', 'name email')
-                .populate('recipientUser', 'name email')
-                .populate('recipientRole', 'name level')
-                .sort({ priority: -1, createdAt: -1 });
-        } catch (error) {
-            throw new Error(`Error finding unread notifications: ${error.message}`);
-        }
+        return await this.create(notificationToCreate, options);
     }
 
     /**
-     * Find notifications by entity reference
+     * Find notifications by user ID
+     * Skip cache for accurate real-time data
+     * 
+     * @param {string} userId - User ID
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} User notifications
      */
-    async findByEntityReference(entityType, entityId) {
-        try {
-            return await this.model.find({
-                'relatedEntity.entityType': entityType,
-                'relatedEntity.entityId': entityId
-            })
-            .populate('createdBy', 'name email')
-            .populate('recipientUser', 'name email')
-            .sort({ createdAt: -1 });
-        } catch (error) {
-            throw new Error(`Error finding notifications by entity: ${error.message}`);
+    async findByUser(userId, options = {}) {
+        if (!userId) {
+            throw new Error('User ID is required');
         }
+
+        // Skip cache for user-specific queries to ensure real-time data
+        return await this.find(
+            { user: userId },
+            {
+                ...options,
+                skipCache: true,
+                sort: options.sort || { createdAt: -1 }
+            }
+        );
+    }
+
+    /**
+     * Find unread notifications for a user
+     * Always skip cache for accurate unread count
+     * 
+     * @param {string} userId - User ID
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Unread notifications
+     */
+    async findUnreadByUser(userId, options = {}) {
+        if (!userId) {
+            throw new Error('User ID is required');
+        }
+
+        return await this.find(
+            { user: userId, read: false },
+            {
+                ...options,
+                skipCache: true,
+                sort: options.sort || { createdAt: -1 }
+            }
+        );
+    }
+
+    /**
+     * Count unread notifications for a user
+     * Skip cache for accurate count
+     * 
+     * @param {string} userId - User ID
+     * @returns {Promise<number>} Unread notification count
+     */
+    async countUnreadByUser(userId) {
+        if (!userId) {
+            throw new Error('User ID is required');
+        }
+
+        return await this.count({ user: userId, read: false });
     }
 
     /**
      * Mark notification as read
+     * Invalidates user-specific caches
+     * 
+     * @param {string} notificationId - Notification ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated notification
      */
-    async markAsRead(notificationId, userId) {
-        try {
-            return await this.model.findByIdAndUpdate(
-                notificationId,
-                {
-                    isRead: true,
-                    readAt: new Date(),
-                    readBy: userId
-                },
-                { new: true }
-            ).populate('createdBy', 'name email');
-        } catch (error) {
-            throw new Error(`Error marking notification as read: ${error.message}`);
+    async markAsRead(notificationId, options = {}) {
+        if (!notificationId) {
+            throw new Error('Notification ID is required');
         }
+
+        return await this.updateById(
+            notificationId,
+            {
+                read: true,
+                readAt: new Date()
+            },
+            options
+        );
     }
 
     /**
-     * Mark multiple notifications as read
+     * Mark notification as unread
+     * 
+     * @param {string} notificationId - Notification ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated notification
      */
-    async markMultipleAsRead(notificationIds, userId) {
-        try {
-            return await this.model.updateMany(
-                { _id: { $in: notificationIds } },
-                {
-                    isRead: true,
-                    readAt: new Date(),
-                    readBy: userId
-                }
-            );
-        } catch (error) {
-            throw new Error(`Error marking multiple notifications as read: ${error.message}`);
+    async markAsUnread(notificationId, options = {}) {
+        if (!notificationId) {
+            throw new Error('Notification ID is required');
         }
+
+        return await this.updateById(
+            notificationId,
+            {
+                read: false,
+                readAt: null
+            },
+            options
+        );
     }
 
     /**
-     * Get notifications by category and type
+     * Mark all notifications as read for a user
+     * Bulk operation invalidates all query caches
+     * 
+     * @param {string} userId - User ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Update result with modified count
      */
-    async findByCategoryAndType(category, type = null, limit = 50) {
-        try {
-            const query = { category };
-            if (type) query.type = type;
-
-            return await this.model.find(query)
-                .populate('createdBy', 'name email')
-                .populate('recipientUser', 'name email')
-                .sort({ createdAt: -1 })
-                .limit(limit);
-        } catch (error) {
-            throw new Error(`Error finding notifications by category: ${error.message}`);
+    async markAllAsReadByUser(userId, options = {}) {
+        if (!userId) {
+            throw new Error('User ID is required');
         }
+
+        const result = await this.updateMany(
+            { user: userId, read: false },
+            {
+                read: true,
+                readAt: new Date()
+            },
+            options
+        );
+
+        return result;
     }
 
     /**
-     * Get notifications by priority
+     * Find notifications by type
+     * 
+     * @param {string} type - Notification type (info, warning, error, success)
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Notifications of specified type
      */
-    async findByPriority(priority, isRead = null) {
-        try {
-            const query = { priority };
-            if (isRead !== null) query.isRead = isRead;
-
-            return await this.model.find(query)
-                .populate('createdBy', 'name email')
-                .populate('recipientUser', 'name email')
-                .sort({ createdAt: -1 });
-        } catch (error) {
-            throw new Error(`Error finding notifications by priority: ${error.message}`);
+    async findByType(type, options = {}) {
+        if (!type) {
+            throw new Error('Notification type is required');
         }
-    }
 
-    /**
-     * Get scheduled notifications that need to be sent
-     */
-    async findScheduledToSend() {
-        try {
-            return await this.model.find({
-                scheduledFor: { $lte: new Date() },
-                isSent: false
-            })
-            .populate('createdBy', 'name email')
-            .populate('recipientUser', 'name email')
-            .sort({ scheduledFor: 1 });
-        } catch (error) {
-            throw new Error(`Error finding scheduled notifications: ${error.message}`);
-        }
-    }
-
-    /**
-     * Delete expired notifications
-     */
-    async deleteExpired() {
-        try {
-            const result = await this.model.deleteMany({
-                expiresAt: { $lt: new Date() }
-            });
-            return result.deletedCount;
-        } catch (error) {
-            throw new Error(`Error deleting expired notifications: ${error.message}`);
-        }
-    }
-
-    /**
-     * Auto-delete old notifications based on settings
-     */
-    async autoDeleteOld() {
-        try {
-            const notifications = await this.model.find({
-                'settings.autoDelete': true,
-                isRead: true
-            });
-
-            let deletedCount = 0;
-            for (const notification of notifications) {
-                const daysSinceRead = Math.floor((new Date() - notification.readAt) / (1000 * 60 * 60 * 24));
-                const autoDeleteAfterDays = notification.settings.autoDeleteAfterDays || 30;
-                
-                if (daysSinceRead >= autoDeleteAfterDays) {
-                    await this.model.findByIdAndDelete(notification._id);
-                    deletedCount++;
-                }
+        return await this.find(
+            { type },
+            {
+                ...options,
+                sort: options.sort || { createdAt: -1 }
             }
-
-            return deletedCount;
-        } catch (error) {
-            throw new Error(`Error auto-deleting old notifications: ${error.message}`);
-        }
+        );
     }
 
     /**
-     * Get notification statistics
+     * Delete old notifications (cleanup)
+     * Useful for maintaining database size
+     * 
+     * @param {number} daysOld - Delete notifications older than this many days
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Delete result with deleted count
      */
-    async getStats(userId = null, dateRange = null) {
-        try {
-            const matchStage = {};
-            
-            if (userId) {
-                matchStage.$or = [
-                    { recipientUser: userId },
-                    { isGlobalNotification: true },
-                    { isAdminNotification: true }
-                ];
-            }
+    async deleteOldNotifications(daysOld = 90, options = {}) {
+        if (daysOld <= 0) {
+            throw new Error('Days must be a positive number');
+        }
 
-            if (dateRange) {
-                matchStage.createdAt = {
-                    $gte: dateRange.start,
-                    $lte: dateRange.end
-                };
-            }
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysOld);
 
-            const stats = await this.model.aggregate([
-                { $match: matchStage },
+        const result = await this.deleteMany(
+            { createdAt: { $lt: cutoffDate } },
+            options
+        );
+
+        return result;
+    }
+
+    /**
+     * Delete read notifications older than specified days
+     * 
+     * @param {number} daysOld - Delete read notifications older than this many days
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Delete result with deleted count
+     */
+    async deleteOldReadNotifications(daysOld = 30, options = {}) {
+        if (daysOld <= 0) {
+            throw new Error('Days must be a positive number');
+        }
+
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+
+        const result = await this.deleteMany(
+            {
+                read: true,
+                readAt: { $lt: cutoffDate }
+            },
+            options
+        );
+
+        return result;
+    }
+
+    /**
+     * Get notification statistics for a user
+     * Skip cache for accurate real-time stats
+     * 
+     * @param {string} userId - User ID
+     * @returns {Promise<Object>} Notification statistics
+     */
+    async getUserNotificationStats(userId) {
+        if (!userId) {
+            throw new Error('User ID is required');
+        }
+
+        const [totalCount, unreadCount, typeStats] = await Promise.all([
+            this.count({ user: userId }),
+            this.count({ user: userId, read: false }),
+            this.Model.aggregate([
+                { $match: { user: this._toObjectId(userId) } },
                 {
                     $group: {
-                        _id: null,
-                        total: { $sum: 1 },
-                        unread: { $sum: { $cond: [{ $eq: ['$isRead', false] }, 1, 0] } },
-                        read: { $sum: { $cond: [{ $eq: ['$isRead', true] }, 1, 0] } },
-                        urgent: { $sum: { $cond: [{ $eq: ['$priority', 'urgent'] }, 1, 0] } },
-                        high: { $sum: { $cond: [{ $eq: ['$priority', 'high'] }, 1, 0] } },
-                        normal: { $sum: { $cond: [{ $eq: ['$priority', 'normal'] }, 1, 0] } },
-                        low: { $sum: { $cond: [{ $eq: ['$priority', 'low'] }, 1, 0] } }
+                        _id: '$type',
+                        count: { $sum: 1 }
                     }
                 }
-            ]);
+            ])
+        ]);
 
-            return stats[0] || {
-                total: 0,
-                unread: 0,
-                read: 0,
-                urgent: 0,
-                high: 0,
-                normal: 0,
-                low: 0
-            };
-        } catch (error) {
-            throw new Error(`Error getting notification stats: ${error.message}`);
-        }
+        const typeBreakdown = typeStats.reduce((acc, item) => {
+            acc[item._id] = item.count;
+            return acc;
+        }, {});
+
+        return {
+            totalCount,
+            unreadCount,
+            readCount: totalCount - unreadCount,
+            typeBreakdown
+        };
     }
 
     /**
-     * Search notifications
+     * Create bulk notifications for multiple users
+     * Efficient for sending the same notification to many users
+     * 
+     * @param {Array<string>} userIds - Array of user IDs
+     * @param {Object} notificationData - Base notification data
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Array>} Created notifications
      */
-    async search(searchTerm, filters = {}) {
-        try {
-            const query = {
-                $text: { $search: searchTerm }
-            };
-
-            // Apply filters
-            if (filters.type) query.type = filters.type;
-            if (filters.category) query.category = filters.category;
-            if (filters.priority) query.priority = filters.priority;
-            if (filters.isRead !== undefined) query.isRead = filters.isRead;
-            if (filters.recipientUser) query.recipientUser = filters.recipientUser;
-
-            return await this.model.find(query, { score: { $meta: 'textScore' } })
-                .populate('createdBy', 'name email')
-                .populate('recipientUser', 'name email')
-                .sort({ score: { $meta: 'textScore' }, createdAt: -1 })
-                .limit(filters.limit || 50);
-        } catch (error) {
-            throw new Error(`Error searching notifications: ${error.message}`);
+    async createBulkNotifications(userIds, notificationData, options = {}) {
+        if (!Array.isArray(userIds) || userIds.length === 0) {
+            throw new Error('User IDs array is required and must not be empty');
         }
+
+        this._validateRequiredFields(notificationData, ['title', 'message']);
+
+        const notifications = userIds.map(userId => ({
+            ...notificationData,
+            user: userId,
+            type: notificationData.type || 'info',
+            read: false,
+            readAt: null
+        }));
+
+        return await this.createMany(notifications, options);
     }
 
     /**
-     * Create bulk notifications
+     * Find recent notifications for a user
+     * Returns notifications from the last N days
+     * 
+     * @param {string} userId - User ID
+     * @param {number} [days=7] - Number of days to look back
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Recent notifications
      */
-    async createBulk(notifications) {
-        try {
-            return await this.model.insertMany(notifications);
-        } catch (error) {
-            throw new Error(`Error creating bulk notifications: ${error.message}`);
+    async findRecentByUser(userId, days = 7, options = {}) {
+        if (!userId) {
+            throw new Error('User ID is required');
         }
+
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+
+        return await this.find(
+            {
+                user: userId,
+                createdAt: { $gte: startDate }
+            },
+            {
+                ...options,
+                skipCache: true,
+                sort: options.sort || { createdAt: -1 }
+            }
+        );
+    }
+
+    /**
+     * Delete all notifications for a user
+     * 
+     * @param {string} userId - User ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Delete result with deleted count
+     */
+    async deleteByUser(userId, options = {}) {
+        if (!userId) {
+            throw new Error('User ID is required');
+        }
+
+        return await this.deleteMany({ user: userId }, options);
+    }
+
+    /**
+     * Find notifications by metadata field
+     * Useful for finding notifications related to specific events or entities
+     * 
+     * @param {string} key - Metadata key to search
+     * @param {*} value - Value to match
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Matching notifications
+     */
+    async findByMetadata(key, value, options = {}) {
+        if (!key) {
+            throw new Error('Metadata key is required');
+        }
+
+        const query = {};
+        query[`metadata.${key}`] = value;
+
+        return await this.find(query, {
+            ...options,
+            sort: options.sort || { createdAt: -1 }
+        });
+    }
+
+    /**
+     * Get notification delivery stats for a time period
+     * 
+     * @param {Date} startDate - Start date for stats
+     * @param {Date} endDate - End date for stats
+     * @returns {Promise<Object>} Notification delivery statistics
+     */
+    async getDeliveryStats(startDate, endDate) {
+        if (!startDate || !endDate) {
+            throw new Error('Start date and end date are required');
+        }
+
+        const stats = await this.Model.aggregate([
+            {
+                $match: {
+                    createdAt: { $gte: startDate, $lte: endDate }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalSent: { $sum: 1 },
+                    totalRead: {
+                        $sum: { $cond: ['$read', 1, 0] }
+                    },
+                    typeBreakdown: {
+                        $push: '$type'
+                    }
+                }
+            }
+        ]);
+
+        if (stats.length === 0) {
+            return {
+                totalSent: 0,
+                totalRead: 0,
+                totalUnread: 0,
+                readRate: '0%',
+                typeBreakdown: {}
+            };
+        }
+
+        const result = stats[0];
+        const typeBreakdown = result.typeBreakdown.reduce((acc, type) => {
+            acc[type] = (acc[type] || 0) + 1;
+            return acc;
+        }, {});
+
+        return {
+            totalSent: result.totalSent,
+            totalRead: result.totalRead,
+            totalUnread: result.totalSent - result.totalRead,
+            readRate: `${((result.totalRead / result.totalSent) * 100).toFixed(2)}%`,
+            typeBreakdown
+        };
     }
 }
 

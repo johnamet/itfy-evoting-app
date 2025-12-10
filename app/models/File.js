@@ -1,81 +1,68 @@
 #!/usr/bin/env node
 /**
- * File Model
- * 
- * Defines the schema for storing file metadata in the database.
+ * File Model for file uploads
+ *
+ * @module File
+ * @version 2.0.0
  */
 
-import mongoose from 'mongoose';
-import crypto from 'crypto';
-import BaseModel from './BaseModel.js';
-import { type } from 'os';
+import mongoose from "mongoose";
+import BaseModel from "./BaseModel.js";
 
-class File extends BaseModel {
-    constructor() {
-        const schemaDefinition = {
-            fileId: {
-                type: String,
-                unique: true,
-                default: () => crypto.randomBytes(16).toString('hex'),
-                required: [true, 'File ID is required']
-            },
-            filename: {
-                type: String,
-                required: [true, 'Filename is required']
-            },
-            originalName: {
-                type: String,
-                required: [true, 'Original name is required']
-            },
-            path: {
-                type: String,
-                required: [true, 'Path is required']
-            },
-            relativePath: {
-                type: String,
-                required: [true, 'Relative path is required']
-            },
-            size: {
-                type: Number,
-                required: [true, 'Size is required']
-            },
-            mimetype: {
-                type: String,
-                required: [true, 'MIME type is required']
-            },
-            uploadedBy: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'User',
-                required: [true, 'Uploaded by is required']
-            },
-            entityType: {
-                type: String,
-                enum: ['candidate', 'event', 'document', 'avatar', 'slide', 'category', 'user'],
-                required: [true, 'Entity type is required']
-            },
-            entityId: {
-                type: mongoose.Schema.Types.ObjectId,
-                required: [true, 'Entity ID is required']
-            },
-            category:{
-                type: String,
-            },
-    
-            status: {
-                type: String,
-                enum: ['pending', 'processed', 'deleted'],
-                default: 'processed',
-                required: [true, 'Status is required']
-            },
-        }
-        super(schemaDefinition, { collection: "files" });
-    }
+const FileSchema = {
+  filename: {
+    type: String,
+    required: true,
+  },
 
-    getSchema() {
-        const schema = super.getSchema();
-        schema.index({ entityType: 1, entityId: 1 });
-        return schema;
-    }
-}
+  originalName: {
+    type: String,
+    required: true,
+  },
 
-export default mongoose.model('File', new File().getSchema());
+  path: {
+    type: String,
+    required: true,
+  },
+
+  url: String,
+
+  mimetype: {
+    type: String,
+    required: true,
+  },
+
+  size: {
+    type: Number,
+    required: true,
+  },
+
+  uploadedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
+
+  category: {
+    type: String,
+    enum: ["image", "document", "video", "audio", "other"],
+    default: "other",
+  },
+
+  relatedTo: {
+    model: String,
+    id: mongoose.Schema.Types.ObjectId,
+  },
+};
+
+const fileModel = new BaseModel(FileSchema, {
+  collection: "files",
+  timestamps: true,
+});
+
+fileModel.addIndex({ uploadedBy: 1, createdAt: -1 });
+fileModel.addIndex({ category: 1 });
+fileModel.addCompoundIndex([{ "relatedTo.model": 1 }, { "relatedTo.id": 1 }]);
+
+const File = fileModel.getModel("File");
+
+export default File;

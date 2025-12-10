@@ -1,115 +1,169 @@
 #!/usr/bin/env node
 /**
- * Event Repository
+ * Enhanced Event Repository
  * 
- * Extends BaseRepository to provide Event-specific database operations.
- * Includes event lifecycle management, participant tracking, and scheduling.
+ * Provides event-specific database operations with intelligent caching.
+ * Event data is automatically cached and invalidated when updated.
+ * 
+ * @module EventRepository
+ * @version 2.0.0
  */
 
-import BaseRepository from './BaseRepository.js';
-import Event from '../models/Event.js';
-import mongoose from 'mongoose';
+import BaseRepository from '../BaseRepository.js';
+import Event from '../../models/Event.js';
+import { eventCacheManager } from '../../utils/engine/CacheManager.js';
 
-
-/**
- * Event status enumeration
- * @enum {String}
- */
 class EventRepository extends BaseRepository {
-    static Status = {
-        DRAFT: 'draft',
-        SCHEDULED: 'scheduled',
-        ACTIVE: 'active',
-        PAUSED: 'paused',
-        COMPLETED: 'completed',
-        CANCELLED: 'cancelled'
-    };
-
     constructor() {
-        // Get the Event model
-        super(Event);
+        super(Event, {
+            enableCache: true,
+            cacheManager: eventCacheManager,
+        });
     }
+
+    // ============================================
+    // EVENT MANAGEMENT
+    // ============================================
 
     /**
      * Create a new event
      * @param {Object} eventData - Event data
-     * @returns {Promise<Object>} Created event
+     * @param {Object} options - Additional options
+     * @returns {Promise<Object>}
      */
-    async createEvent(eventData) {
+    async createEvent(eventData, options = {}) {
         try {
-            // Validate event dates
-            this._validateEventDates(eventData);
+            this.validateRequiredFields(eventData, [
+                'title',
+                'startDate',
+                'endDate',
+                'createdBy',
+            ]);
 
+            const event = await this.create(eventData, options);
 
-            return await this.create({
-                ...eventData,
-                status: eventData.status || 'draft'
-            });
+            this.log('createEvent', { eventId: event._id, title: event.title });
+
+            return event;
         } catch (error) {
-            throw this._handleError(error, 'createEvent');
+            throw this.handleError(error, 'createEvent', { title: eventData.title });
+        }
+    }
+
+    /**
+     * Update event by ID
+     * @param {String} eventId - Event ID
+     * @param {Object} updateData - Data to update
+     * @param {Object} options - Update options
+     * @returns {Promise<Object>}
+     */
+    async updateEvent(eventId, updateData, options = {}) {
+        try {
+            this.validateObjectId(eventId, 'Event ID');
+
+            const event = await this.updateById(eventId, updateData, {
+                ...options,
+                new: true,
+                runValidators: true,
+            });
+
+            if (!event) {
+                return null;
+            }
+
+            this.log('updateEvent', { eventId, success: true });
+
+            return event;
+        } catch (error) {
+            throw this.handleError(error, 'updateEvent', { eventId });
+        }
+    }
+
+    // ============================================
+    // EVENT QUERIES
+    // ============================================
+
+    /**
+     * Find events by creator
+     * @param {String} userId - User ID
+     * @param {Object} options - Query options
+     * @returns {Promise<Array>}
+     */
+    async findByCreator(userId, options = {}) {
+        try {
+            this.validateObjectId(userId, 'User ID');
+
+            return await this.find(
+                { createdBy: userId, deleted: false },
+                { ...options, sort: { createdAt: -1 }, lean: true }
+            );
+        } catch (error) {
+            throw this.handleError(error, 'findByCreator', { userId });
         }
     }
 
     /**
      * Find active events
      * @param {Object} options - Query options
-     * @returns {Promise<Array>} Active events
+     * @returns {Promise<Array>}
      */
     async findActiveEvents(options = {}) {
         try {
-            const criteria = {
-                status: 'active',
-                startDate: { $lte: new Date() },
-                endDate: { $gte: new Date() }
-            };
+            const now = new Date();
 
-            return await this.find(criteria, {
-                ...options,
-                sort: { startDate: 1 }
-            });
+            return await this.find(
+                {
+                    status: 'active',
+                    startDate: { $lte: now },
+                    endDate: { $gte: now },
+                    deleted: false,
+                },
+                { ...options, sort: { startDate: -1 }, lean: true }
+            );
         } catch (error) {
-            throw this._handleError(error, 'findActiveEvents');
+            throw this.handleError(error, 'findActiveEvents');
         }
     }
 
     /**
      * Find upcoming events
      * @param {Object} options - Query options
-     * @returns {Promise<Array>} Upcoming events
+     * @returns {Promise<Array>}
      */
     async findUpcomingEvents(options = {}) {
         try {
-            const criteria = {
-                startDate: { $gt: new Date() },
-                status: { $in: ['active', 'scheduled'] }
-            };
+            const now = new Date();
 
-            return await this.find(criteria, {
-                ...options,
-                sort: { startDate: 1 }
-            });
+            return await this.find(
+                {
+                    startDate: { $gt: now },
+                    deleted: false,
+                },
+                { ...options, sort: { startDate: 1 }, lean: true }
+            );
         } catch (error) {
-            throw this._handleError(error, 'findUpcomingEvents');
+            throw this.handleError(error, 'findUpcomingEvents');
         }
     }
 
     /**
      * Find past events
      * @param {Object} options - Query options
-     * @returns {Promise<Array>} Past events
+     * @returns {Promise<Array>}
      */
     async findPastEvents(options = {}) {
         try {
-            const criteria = {
-                endDate: { $lt: new Date() }
-            };
+            const now = new Date();
 
-            return await this.find(criteria, {
-                ...options,
-                sort: { endDate: -1 }
-            });
+            return await this.find(
+                {
+                    endDate: { $lt: now },
+                    deleted: false,
+                },
+                { ...options, sort: { endDate: -1 }, lean: true }
+            );
         } catch (error) {
-            throw this._handleError(error, 'findPastEvents');
+            throw this.handleError(error, 'findPastEvents');
         }
     }
 
@@ -117,463 +171,252 @@ class EventRepository extends BaseRepository {
      * Find events by status
      * @param {String} status - Event status
      * @param {Object} options - Query options
-     * @returns {Promise<Array>} Events with specified status
+     * @returns {Promise<Array>}
      */
     async findByStatus(status, options = {}) {
         try {
-            const criteria = { status };
-            return await this.find(criteria, {
-                ...options,
-                sort: { createdAt: -1 },
+            return await this.find(
+                { status, deleted: false },
+                { ...options, sort: { createdAt: -1 }, lean: true }
+            );
+        } catch (error) {
+            throw this.handleError(error, 'findByStatus', { status });
+        }
+    }
+
+    /**
+     * Find events by category
+     * @param {String} categoryId - Category ID
+     * @param {Object} options - Query options
+     * @returns {Promise<Array>}
+     */
+    async findByCategory(categoryId, options = {}) {
+        try {
+            this.validateObjectId(categoryId, 'Category ID');
+
+            return await this.find(
+                { category: categoryId, deleted: false },
+                { ...options, sort: { createdAt: -1 }, lean: true }
+            );
+        } catch (error) {
+            throw this.handleError(error, 'findByCategory', { categoryId });
+        }
+    }
+
+    /**
+     * Search events by text
+     * @param {String} searchText - Search query
+     * @param {Object} options - Query options
+     * @returns {Promise<Array>}
+     */
+    async searchEvents(searchText, options = {}) {
+        try {
+            if (!searchText) {
+                return [];
+            }
+
+            return await this.textSearch(searchText, { deleted: false }, options);
+        } catch (error) {
+            throw this.handleError(error, 'searchEvents', { searchText });
+        }
+    }
+
+    // ============================================
+    // EVENT STATUS MANAGEMENT
+    // ============================================
+
+    /**
+     * Publish event
+     * @param {String} eventId - Event ID
+     * @returns {Promise<Object>}
+     */
+    async publishEvent(eventId) {
+        try {
+            this.validateObjectId(eventId, 'Event ID');
+
+            return await this.updateById(eventId, {
+                status: 'active',
+                publishedAt: new Date(),
             });
         } catch (error) {
-            throw this._handleError(error, 'findByStatus');
+            throw this.handleError(error, 'publishEvent', { eventId });
         }
     }
 
     /**
-     * Update event status
-     * @param {String|ObjectId} eventId - Event ID
-     * @param {String} status - New status
-     * @returns {Promise<Object|null>} Updated event
+     * Close event
+     * @param {String} eventId - Event ID
+     * @returns {Promise<Object>}
      */
-    async updateStatus(eventId, status) {
+    async closeEvent(eventId) {
         try {
-            const validStatuses = Object.values(EventRepository.Status);
-            
-            if (!validStatuses.includes(status)) {
-                throw new Error(`Invalid status: ${status}`);
-            }
+            this.validateObjectId(eventId, 'Event ID');
 
-            const updateData = { status };
-            
-            // Set completion date if status is completed
-            if (status === 'completed') {
-                updateData.completedAt = new Date();
-            }
-            
-            // Set cancellation date if status is cancelled
-            if (status === 'cancelled') {
-                updateData.cancelledAt = new Date();
-            }
-
-            return await this.updateById(eventId, updateData);
+            return await this.updateById(eventId, {
+                status: 'closed',
+                closedAt: new Date(),
+            });
         } catch (error) {
-            throw this._handleError(error, 'updateStatus');
+            throw this.handleError(error, 'closeEvent', { eventId });
         }
     }
 
     /**
-     * Start an event (change status to active)
-     * @param {String|ObjectId} eventId - Event ID
-     * @returns {Promise<Object|null>} Updated event
-     */
-    async startEvent(eventId) {
-        try {
-            const event = await this.findById(eventId);
-            
-            if (!event) {
-                throw new Error('Event not found');
-            }
-
-            if (event.status === 'active') {
-                throw new Error('Event is already active');
-            }
-
-            if (event.status === 'completed' || event.status === 'cancelled') {
-                throw new Error('Cannot start a completed or cancelled event');
-            }
-
-            return await this.updateStatus(eventId, 'active');
-        } catch (error) {
-            throw this._handleError(error, 'startEvent');
-        }
-    }
-
-    /**
-     * End an event (change status to completed)
-     * @param {String|ObjectId} eventId - Event ID
-     * @returns {Promise<Object|null>} Updated event
-     */
-    async endEvent(eventId) {
-        try {
-            const event = await this.findById(eventId);
-            
-            if (!event) {
-                throw new Error('Event not found');
-            }
-
-            if (event.status === 'completed') {
-                throw new Error('Event is already completed');
-            }
-
-            if (event.status === 'cancelled') {
-                throw new Error('Cannot complete a cancelled event');
-            }
-
-            return await this.updateStatus(eventId, 'completed');
-        } catch (error) {
-            throw this._handleError(error, 'endEvent');
-        }
-    }
-
-    /**
-     * Cancel an event
-     * @param {String|ObjectId} eventId - Event ID
+     * Cancel event
+     * @param {String} eventId - Event ID
      * @param {String} reason - Cancellation reason
-     * @returns {Promise<Object|null>} Updated event
+     * @returns {Promise<Object>}
      */
-    async cancelEvent(eventId, reason = '') {
+    async cancelEvent(eventId, reason = null) {
         try {
-            const event = await this.findById(eventId);
-            
-            if (!event) {
-                throw new Error('Event not found');
-            }
-
-            if (event.status === 'cancelled') {
-                throw new Error('Event is already cancelled');
-            }
-
-            if (event.status === 'completed') {
-                throw new Error('Cannot cancel a completed event');
-            }
+            this.validateObjectId(eventId, 'Event ID');
 
             return await this.updateById(eventId, {
                 status: 'cancelled',
                 cancelledAt: new Date(),
-                cancellationReason: reason
+                cancellationReason: reason,
             });
         } catch (error) {
-            throw this._handleError(error, 'cancelEvent');
-        }
-    }
-    /**
-     * Get event with full details (candidates, categories, etc.)
-     * @param {String|ObjectId} eventId - Event ID
-     * @param {Boolean} [includeVotes=false] - Whether to include votes details
-     * @returns {Promise<Object|null>} Event with full details
-     */
-    async getEventDetails(eventId, includeVotes = false) {
-        try {
-            const pipeline = [
-                { $match: { _id: new mongoose.Types.ObjectId(eventId) } },
-                {
-                    $lookup: {
-                        from: 'candidates',
-                        localField: '_id',
-                        foreignField: 'event',
-                        as: 'candidates'
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'categories',
-                        localField: 'candidates.category',
-                        foreignField: '_id',
-                        as: 'categories'
-                    }
-                }
-            ];
-
-            if (includeVotes) {
-                pipeline.push(
-                    {
-                        $lookup: {
-                            from: 'votes',
-                            localField: '_id',
-                            foreignField: 'event',
-                            as: 'votes'
-                        }
-                    },
-                    {
-                        $addFields: {
-                            totalVotes: { $size: '$votes' },
-                            uniqueVoters: { $size: { $setUnion: ['$votes.voter.email'] } }
-                        }
-                    }
-                );
-            }
-
-            pipeline.push({
-                $addFields: {
-                    candidateCount: { $size: '$candidates' },
-                    categoryCount: { $size: { $setUnion: ['$candidates.category'] } }
-                }
-            });
-
-            const [eventDetails] = await this.aggregate(pipeline);
-            return eventDetails || null;
-        } catch (error) {
-            throw this._handleError(error, 'getEventDetails');
+            throw this.handleError(error, 'cancelEvent', { eventId });
         }
     }
 
-    /**
-     * Get events where voting is open and at least one category is active
-     * @returns {Promise<Array>} Events where voting is open
-     */
-    async getVotableEvents() {
-        try {
-            const pipeline = [
-                {
-                    $match: {
-                        status: 'active',
-                        startDate: { $lte: new Date() },
-                        endDate: { $gte: new Date() }
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'categories',
-                        localField: '_id',
-                        foreignField: 'event',
-                        as: 'categories'
-                    }
-                },
-                {
-                    $addFields: {
-                        activeCategoryCount: {
-                            $size: {
-                                $filter: {
-                                    input: '$categories',
-                                    as: 'cat',
-                                    cond: { $eq: ['$$cat.status', 'active'] }
-                                }
-                            }
-                        }
-                    }
-                },
-                {
-                    $match: {
-                        activeCategoryCount: { $gt: 0 }
-                    }
-                },
-                {
-                    $sort: { startDate: 1 }
-                }
-            ];
-
-            return await this.aggregate(pipeline);
-        } catch (error) {
-            throw this._handleError(error, 'getVotableEvents');
-        }
-    }
+    // ============================================
+    // EVENT STATISTICS
+    // ============================================
 
     /**
      * Get event statistics
-     * @param {String|ObjectId} eventId - Event ID
-     * @returns {Promise<Object>} Event statistics
+     * @param {String} eventId - Event ID
+     * @returns {Promise<Object>}
      */
     async getEventStats(eventId) {
         try {
-            const pipeline = [
-                { $match: { _id: new mongoose.Types.ObjectId(eventId) } },
-                {
-                    $lookup: {
-                        from: 'votes',
-                        localField: '_id',
-                        foreignField: 'event',
-                        as: 'votes'
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'candidates',
-                        localField: '_id',
-                        foreignField: 'event',
-                        as: 'candidates'
-                    }
-                },
-                {
-                    $addFields: {
-                        totalVotes: {
-                            $sum: 1
-                        },
-                        candidateCount: { $size: '$candidates' },
-                        categoryCount: { $size: '$categories' }
-                    }
-                },
-                {
-                    $project: {
-                        name: 1,
-                        status: 1,
-                        startDate: 1,
-                        endDate: 1,
-                        totalVotes: 1,
-                        candidateCount: 1,
-                        categoryCount: 1,
-                        votingDuration: {
-                            $divide: [
-                                { $subtract: ['$endDate', '$startDate'] },
-                                1000 * 60 * 60 * 24 // Convert to days
-                            ]
-                        },
-                        isActive: {
-                            $and: [
-                                { $eq: ['$status', 'active'] },
-                                { $lte: ['$startDate', new Date()] },
-                                { $gte: ['$endDate', new Date()] }
-                            ]
-                        }
-                    }
-                }
-            ];
+            this.validateObjectId(eventId, 'Event ID');
 
-            const [stats] = await this.aggregate(pipeline);
-            return stats || null;
-        } catch (error) {
-            throw this._handleError(error, 'getEventStats');
-        }
-    }
+            const event = await this.findById(eventId, {
+                populate: ['candidates', 'categories'],
+            });
 
-    /**
-     * Check if voting is allowed for event
-     * @param {String|ObjectId} eventId - Event ID
-     * @returns {Promise<Object>} Voting status
-     */
-    async checkVotingStatus(eventId) {
-        try {
-            const event = await this.findById(eventId);
-            
-            if (!event) {
-                return {
-                    canVote: false,
-                    reason: 'Event not found'
-                };
-            }
-
-            const now = new Date();
-            
-            if (event.status !== 'active') {
-                return {
-                    canVote: false,
-                    reason: `Event is ${event.status}`,
-                    event
-                };
-            }
-
-            if (now < event.startDate) {
-                return {
-                    canVote: false,
-                    reason: 'Voting has not started yet',
-                    startsIn: event.startDate - now,
-                    event
-                };
-            }
-
-            if (now > event.endDate) {
-                return {
-                    canVote: false,
-                    reason: 'Voting has ended',
-                    endedAgo: now - event.endDate,
-                    event
-                };
-            }
-
-            return {
-                canVote: true,
-                reason: 'Voting is open',
-                timeRemaining: event.endDate - now,
-                event
-            };
-        } catch (error) {
-            throw this._handleError(error, 'checkVotingStatus');
-        }
-    }
-
-    /**
-     * Update event dates
-     * @param {String|ObjectId} eventId - Event ID
-     * @param {Date} startDate - New start date
-     * @param {Date} endDate - New end date
-     * @returns {Promise<Object|null>} Updated event
-     */
-    async updateEventDates(eventId, startDate, endDate) {
-        try {
-            const event = await this.findById(eventId);
-            
             if (!event) {
                 throw new Error('Event not found');
             }
 
-            if (event.status === EventRepository.Status.COMPLETED || event.status === EventRepository.Status.CANCELLED) {
-                throw new Error('Cannot update dates for completed or cancelled events');
-            }
+            // Get vote count (you'll need to implement this with Vote repository)
+            const candidateCount = event.candidates?.length || 0;
+            const categoryCount = event.categories?.length || 0;
 
-            // Validate new dates
-            this._validateEventDates({ startDate, endDate });
+            return {
+                eventId,
+                title: event.title,
+                status: event.status,
+                candidateCount,
+                categoryCount,
+                totalVotes: event.totalVotes || 0,
+                startDate: event.startDate,
+                endDate: event.endDate,
+                isPaid: event.isPaid,
+                price: event.price,
+                createdAt: event.createdAt,
+            };
+        } catch (error) {
+            throw this.handleError(error, 'getEventStats', { eventId });
+        }
+    }
+
+    /**
+     * Increment vote count for event
+     * @param {String} eventId - Event ID
+     * @param {Number} count - Number to increment by (default: 1)
+     * @returns {Promise<Object>}
+     */
+    async incrementVoteCount(eventId, count = 1) {
+        try {
+            this.validateObjectId(eventId, 'Event ID');
 
             return await this.updateById(eventId, {
-                startDate,
-                endDate
+                $inc: { totalVotes: count },
             });
         } catch (error) {
-            throw this._handleError(error, 'updateEventDates');
+            throw this.handleError(error, 'incrementVoteCount', { eventId });
         }
     }
 
     /**
-     * Get events requiring status updates
-     * @returns {Promise<Array>} Events that need status updates
+     * Get total event count
+     * @param {Object} filter - Optional filter
+     * @returns {Promise<Number>}
      */
-    async getEventsRequiringUpdates() {
+    async getEventCount(filter = {}) {
+        try {
+            return await this.count({ ...filter, deleted: false });
+        } catch (error) {
+            throw this.handleError(error, 'getEventCount');
+        }
+    }
+
+    /**
+     * Get active event count
+     * @returns {Promise<Number>}
+     */
+    async getActiveEventCount() {
         try {
             const now = new Date();
-            
-            const pipeline = [
-                {
-                    $match: {
-                        $or: [
-                            // Events that should be started
-                            {
-                                status: 'scheduled',
-                                startDate: { $lte: now }
-                            },
-                            // Events that should be ended
-                            {
-                                status: 'active',
-                                endDate: { $lt: now }
-                            }
-                        ]
-                    }
-                },
-                {
-                    $addFields: {
-                        requiredAction: {
-                            $cond: [
-                                { $and: [{ $eq: ['$status', 'scheduled'] }, { $lte: ['$startDate', now] }] },
-                                'start',
-                                'end'
-                            ]
-                        }
-                    }
-                }
-            ];
 
-            return await this.aggregate(pipeline);
+            return await this.count({
+                status: 'active',
+                startDate: { $lte: now },
+                endDate: { $gte: now },
+                deleted: false,
+            });
         } catch (error) {
-            throw this._handleError(error, 'getEventsRequiringUpdates');
+            throw this.handleError(error, 'getActiveEventCount');
+        }
+    }
+
+    // ============================================
+    // BATCH OPERATIONS
+    // ============================================
+
+    /**
+     * Update multiple events by creator
+     * @param {String} userId - User ID
+     * @param {Object} updateData - Data to update
+     * @returns {Promise<Object>}
+     */
+    async updateEventsByCreator(userId, updateData) {
+        try {
+            this.validateObjectId(userId, 'User ID');
+
+            return await this.updateMany(
+                { createdBy: userId },
+                updateData
+            );
+        } catch (error) {
+            throw this.handleError(error, 'updateEventsByCreator', { userId });
         }
     }
 
     /**
-     * Validate event dates
-     * @private
-     * @param {Object} eventData - Event data with dates
+     * Close all expired events
+     * @returns {Promise<Object>}
      */
-    _validateEventDates(eventData) {
-        const { startDate, endDate } = eventData;
-        
-        if (startDate && endDate) {
-            if (new Date(startDate) >= new Date(endDate)) {
-                throw new Error('End date must be after start date');
-            }
-        }
-        
-        if (startDate && new Date(startDate) < new Date()) {
-            // Allow this for updating existing events, but warn in logs
-            console.warn('Warning: Start date is in the past');
+    async closeExpiredEvents() {
+        try {
+            const now = new Date();
+
+            return await this.updateMany(
+                {
+                    status: 'active',
+                    endDate: { $lt: now },
+                },
+                {
+                    status: 'closed',
+                    closedAt: now,
+                }
+            );
+        } catch (error) {
+            throw this.handleError(error, 'closeExpiredEvents');
         }
     }
 }

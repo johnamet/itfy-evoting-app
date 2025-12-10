@@ -1,21 +1,30 @@
 #!/usr/bin/env node
 /**
- * User Repository
+ * Enhanced User Repository
  * 
- * Extends BaseRepository to provide User-specific database operations.
- * Includes user authentication, role management, and user-specific queries.
+ * Provides user-specific database operations with intelligent caching.
+ * All user data is automatically cached and invalidated when updated.
+ * 
+ * @module UserRepository
+ * @version 2.0.0
  */
 
-import BaseRepository from './BaseRepository.js';
-import User from '../models/User.js';
+import BaseRepository from '../BaseRepository.js';
+import User from '../../models/User.js';
 import bcrypt from 'bcrypt';
+import { userCacheManager } from '../../utils/engine/CacheManager.js';
 
 class UserRepository extends BaseRepository {
-    
     constructor() {
-        // Get the User model - we need to handle this properly based on how models are exported
-        super(User);
+        super(User, {
+            enableCache: true,
+            cacheManager: userCacheManager,
+        });
     }
+
+    // ============================================
+    // USER MANAGEMENT
+    // ============================================
 
     /**
      * Create a new user with hashed password
@@ -25,391 +34,466 @@ class UserRepository extends BaseRepository {
      */
     async createUser(userData, options = {}) {
         try {
-            if (Object.keys(userData).length === 0){
-                throw this._handleError(new Error("The User Data is Empty"), 'createUser')
-            }
-            const password = this._hashPassword(userData.password)
-            userData.password = password
-            console.log(password)
-            const user = await this.create(userData, options)
-            return user.toJSON()
+            this.validateRequiredFields(userData, ['email', 'password', 'firstName', 'lastName']);
+
+            // Hash password
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(userData.password, salt);
+
+            const userDataWithHashedPassword = {
+                ...userData,
+                password: hashedPassword,
+                email: userData.email.toLowerCase().trim(),
+            };
+
+            const user = await this.create(userDataWithHashedPassword, options);
+            
+            // Return without password
+            const userObj = user.toJSON ? user.toJSON() : user;
+            delete userObj.password;
+
+            this.log('createUser', { email: userData.email, success: true });
+            
+            return userObj;
         } catch (error) {
-            throw this._handleError(error, 'createUser');
+            throw this.handleError(error, 'createUser', { email: userData.email });
         }
     }
+
+    /**
+     * Update user by ID
+     * @param {String} userId - User ID
+     * @param {Object} updateData - Data to update
+     * @param {Object} options - Update options
+     * @returns {Promise<Object>}
+     */
+    async updateUser(userId, updateData, options = {}) {
+        try {
+            this.validateObjectId(userId, 'User ID');
+
+            // Don't allow direct password updates through this method
+            if (updateData.password) {
+                delete updateData.password;
+            }
+
+            // Normalize email if provided
+            if (updateData.email) {
+                updateData.email = updateData.email.toLowerCase().trim();
+            }
+
+            const user = await this.updateById(userId, updateData, {
+                ...options,
+                new: true,
+                runValidators: true,
+            });
+
+            if (!user) {
+                return null;
+            }
+
+            // Return without password
+            const userObj = user.toJSON ? user.toJSON() : user;
+            delete userObj.password;
+
+            return userObj;
+        } catch (error) {
+            throw this.handleError(error, 'updateUser', { userId });
+        }
+    }
+
+    // ============================================
+    // USER QUERIES
+    // ============================================
 
     /**
      * Find user by email
      * @param {String} email - User email
      * @param {Object} options - Query options
-     * @returns {Promise<Object|null>} Found user or null
+     * @returns {Promise<Object|null>}
      */
     async findByEmail(email, options = {}) {
         try {
-            const criteria = { email: email.toLowerCase().trim() };
-            return await this.findOne(criteria, options);
+            if (!email) {
+                throw new Error('Email is required');
+            }
+
+            const normalizedEmail = email.toLowerCase().trim();
+            const user = await this.findOne(
+                { email: normalizedEmail },
+                { ...options, lean: true }
+            );
+
+            if (user && user.password) {
+                delete user.password;
+            }
+
+            return user;
         } catch (error) {
-            throw this._handleError(error, 'findByEmail');
+            throw this.handleError(error, 'findByEmail', { email });
         }
     }
 
     /**
-     * Find user by email with password included
+     * Find user by email with password (for authentication)
      * @param {String} email - User email
      * @param {Object} options - Query options
-     * @returns {Promise<Object|null>} Found user with password or null
+     * @returns {Promise<Object|null>}
      */
     async findByEmailWithPassword(email, options = {}) {
         try {
-            const criteria = { email: email.toLowerCase().trim() };
-            return await this.findOne(criteria, { 
-                ...options, 
-                select: '+password' // Include password field
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByEmailWithPassword');
-        }
-    }
-
-    /**
-     * Authenticate user with email and password
-     * @param {String} email - User email
-     * @param {String} password - User password
-     * @returns {Promise<Object|null>} Authenticated user or null
-     */
-    async authenticate(email, password) {
-        try {
-            const user = await this.findByEmailWithPassword(email, {
-                populate: 'role'
-            });
-
-            console.log("Found user:", user);
-
-            if (!user) {
-                return null;
+            if (!email) {
+                throw new Error('Email is required');
             }
-            
-            const isValidPassword = await user.verifyPassword(password);
 
-            console.log("Password validation result:", isValidPassword);
+            const normalizedEmail = email.toLowerCase().trim();
             
-            if (!isValidPassword) {
-                return null;
-            }
-            
-            // Remove password from returned object
-            const userObj = user.toJSON();  
-            
-            console.log(userObj)
-            return userObj;
-        } catch (error) {
-            throw this._handleError(error, 'authenticate');
-        }
-    }
-
-    /**
-     * Update user password
-     * @param {String|ObjectId} userId - User ID
-     * @param {String} newPassword - New password
-     * @param {String} currentPassword - Current password (for verification)
-     * @returns {Promise<Boolean>} True if password updated successfully
-     */
-    async updatePassword(userId, newPassword, currentPassword = null) {
-        try {
-            const user = await this.findById(userId, { select: '+password' });
-            
-            if (!user) {
-                throw new Error('User not found');
-            }
-            
-            // Verify current password if provided
-            if (currentPassword) {
-                const isValidCurrentPassword = await bcrypt.compare(currentPassword, user.password);
-                if (!isValidCurrentPassword) {
-                    throw new Error('Current password is incorrect');
+            // Skip cache for sensitive operations
+            const user = await this.findOne(
+                { email: normalizedEmail },
+                { 
+                    ...options,
+                    select: '+password',
+                    skipCache: true,
                 }
-            }
-            
-            const hashedNewPassword = await this._hashPassword(newPassword);
+            );
 
-            await this.updateById(userId, { password: hashedNewPassword });
-            
-            return true;
+            return user;
         } catch (error) {
-            throw this._handleError(error, 'updatePassword');
+            throw this.handleError(error, 'findByEmailWithPassword', { email });
         }
     }
 
     /**
      * Find users by role
-     * @param {String|ObjectId} roleId - Role ID
+     * @param {String} roleId - Role ID
      * @param {Object} options - Query options
-     * @returns {Promise<Array>} Users with the specified role
+     * @returns {Promise<Array>}
      */
     async findByRole(roleId, options = {}) {
         try {
-            const criteria = { role: roleId };
-            return await this.find(criteria, {
-                ...options,
-                populate: 'role'
-            });
+            this.validateObjectId(roleId, 'Role ID');
+
+            return await this.find(
+                { role: roleId },
+                { ...options, lean: true }
+            );
         } catch (error) {
-            throw this._handleError(error, 'findByRole');
+            throw this.handleError(error, 'findByRole', { roleId });
         }
     }
 
     /**
-     * Find users by role name
-     * @param {String} roleName - Role name
+     * Find users by level
+     * @param {Number} level - User level
      * @param {Object} options - Query options
-     * @returns {Promise<Array>} Users with the specified role
+     * @returns {Promise<Array>}
      */
-    async findByRoleName(roleName, options = {}) {
+    async findByLevel(level, options = {}) {
         try {
-            const pipeline = [
-                {
-                    $lookup: {
-                        from: 'roles',
-                        localField: 'role',
-                        foreignField: '_id',
-                        as: 'roleInfo'
-                    }
-                },
-                {
-                    $match: {
-                        'roleInfo.name': roleName
-                    }
-                }
-            ];
-            
-            return await this.aggregate(pipeline, options);
+            return await this.find(
+                { level },
+                { ...options, lean: true }
+            );
         } catch (error) {
-            throw this._handleError(error, 'findByRoleName');
-        }
-    }
-
-    /**
-     * Get user profile with populated references
-     * @param {String|ObjectId} userId - User ID
-     * @returns {Promise<Object|null>} User profile or null
-     */
-    async getProfile(userId) {
-        try {
-            return await this.findById(userId, {
-                populate: [
-                    { path: 'role', select: 'name level' }
-                ],
-                select: '-password'
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getProfile');
-        }
-    }
-
-    /**
-     * Update user profile
-     * @param {String|ObjectId} userId - User ID
-     * @param {Object} profileData - Profile data to update
-     * @returns {Promise<Object|null>} Updated user profile
-     */
-    async updateUser(userId, profileData) {
-        try {
-            // Remove sensitive fields that shouldn't be updated via profile
-            const { password, role, email, ...safeProfileData } = profileData;
-            
-            return await this.updateById(userId, safeProfileData, {
-                select: '-password',
-                populate: 'role'
-            });
-        } catch (error) {
-            throw this._handleError(error, 'updateUser');
-        }
-    }
-
-    /**
-     * Soft delete user (mark as inactive)
-     * @param {String|ObjectId} userId - User ID
-     * @returns {Promise<Object|null>} Updated user
-     */
-    async softDelete(userId) {
-        try {
-            return await this.updateById(userId, {
-                isActive: false,
-                deletedAt: new Date()
-            });
-        } catch (error) {
-            throw this._handleError(error, 'softDelete');
-        }
-    }
-
-    /**
-     * Restore soft deleted user
-     * @param {String|ObjectId} userId - User ID
-     * @returns {Promise<Object|null>} Updated user
-     */
-    async restore(userId) {
-        try {
-            return await this.updateById(userId, {
-                isActive: true,
-                $unset: { deletedAt: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'restore');
+            throw this.handleError(error, 'findByLevel', { level });
         }
     }
 
     /**
      * Find active users
-     * @param {Object} criteria - Additional search criteria
      * @param {Object} options - Query options
-     * @returns {Promise<Array>} Active users
+     * @returns {Promise<Array>}
      */
-    async findActive(criteria = {}, options = {}) {
+    async findActiveUsers(options = {}) {
         try {
-            const activeCriteria = {
-                ...criteria,
-                isActive: { $ne: false }
-            };
-            return await this.find(activeCriteria, options);
+            return await this.find(
+                { active: true, deleted: false },
+                { ...options, lean: true }
+            );
         } catch (error) {
-            throw this._handleError(error, 'findActive');
+            throw this.handleError(error, 'findActiveUsers');
         }
     }
 
     /**
-     * Get all the users
-     * @param {Object} criteria - The search criteria
-     * @param {Number} page - The page number
-     * @param {Number} limit - The number of users per page
-     * @param {Object} options - Other query options
-     * @returns {Promise<Object>} An object containing the number of pages, page number and
-     * and limit 
-     */
-    async getUsers(criteria={}, options={}){
-        try{
-            const result = this.find(criteria, {
-                ...options,
-                select: '-password',
-                populate: 'role',
-                sort: { createdAt: -1 } // Sort by creation date descending
-            });
-            return result
-        }catch(error){
-            this._handleError(error, "getUsers")
-        }
-    }
-
-    /**
-     * Search users by name or email
-     * @param {String} searchTerm - Search term
+     * Search users by text
+     * @param {String} searchText - Search query
      * @param {Object} options - Query options
-     * @returns {Promise<Array>} Matching users
+     * @returns {Promise<Array>}
      */
-    async search(searchTerm, options = {}) {
+    async searchUsers(searchText, options = {}) {
         try {
-            const searchRegex = new RegExp(searchTerm, 'i');
-            const criteria = {
-                $or: [
-                    { name: { $regex: searchRegex } },
-                    { email: { $regex: searchRegex } }
-                ],
-                isActive: { $ne: false }
-            };
+            if (!searchText) {
+                return [];
+            }
+
+            return await this.textSearch(searchText, {}, options);
+        } catch (error) {
+            throw this.handleError(error, 'searchUsers', { searchText });
+        }
+    }
+
+    // ============================================
+    // AUTHENTICATION
+    // ============================================
+
+    /**
+     * Authenticate user with email and password
+     * @param {String} email - User email
+     * @param {String} password - User password
+     * @returns {Promise<Object|null>} User object or null if authentication fails
+     */
+    async authenticate(email, password) {
+        try {
+            if (!email || !password) {
+                throw new Error('Email and password are required');
+            }
+
+            const user = await this.findByEmailWithPassword(email, {
+                populate: ['role'],
+            });
+
+            if (!user) {
+                this.log('authenticate', { email, success: false, reason: 'user_not_found' });
+                return null;
+            }
+
+            // Check if user is active
+            if (!user.active) {
+                this.log('authenticate', { email, success: false, reason: 'user_inactive' });
+                return null;
+            }
+
+            // Verify password
+            const isValidPassword = await bcrypt.compare(password, user.password);
+
+            if (!isValidPassword) {
+                this.log('authenticate', { email, success: false, reason: 'invalid_password' });
+                return null;
+            }
+
+            // Update last login
+            await this.updateById(user._id, {
+                lastLogin: new Date(),
+                $inc: { loginCount: 1 },
+            }, { skipCache: true });
+
+            // Remove password from returned object
+            const userObj = user.toJSON ? user.toJSON() : { ...user };
+            delete userObj.password;
+
+            this.log('authenticate', { email, success: true });
             
-            return await this.find(criteria, {
-                ...options,
-                select: '-password',
-                populate: 'role'
-            });
+            return userObj;
         } catch (error) {
-            throw this._handleError(error, 'search');
+            throw this.handleError(error, 'authenticate', { email });
         }
     }
+
+    /**
+     * Change user password
+     * @param {String} userId - User ID
+     * @param {String} oldPassword - Current password
+     * @param {String} newPassword - New password
+     * @returns {Promise<Boolean>}
+     */
+    async changePassword(userId, oldPassword, newPassword) {
+        try {
+            this.validateObjectId(userId, 'User ID');
+
+            if (!oldPassword || !newPassword) {
+                throw new Error('Old and new passwords are required');
+            }
+
+            if (oldPassword === newPassword) {
+                throw new Error('New password must be different from old password');
+            }
+
+            // Get user with password
+            const user = await this.findById(userId, {
+                select: '+password',
+                skipCache: true,
+            });
+
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            // Verify old password
+            const isValidPassword = await bcrypt.compare(oldPassword, user.password);
+
+            if (!isValidPassword) {
+                this.log('changePassword', { userId, success: false, reason: 'invalid_old_password' });
+                return false;
+            }
+
+            // Hash new password
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+            // Update password
+            await this.updateById(userId, {
+                password: hashedPassword,
+                passwordChangedAt: new Date(),
+            }, { skipCache: true });
+
+            this.log('changePassword', { userId, success: true });
+            
+            return true;
+        } catch (error) {
+            throw this.handleError(error, 'changePassword', { userId });
+        }
+    }
+
+    /**
+     * Reset user password (admin function)
+     * @param {String} userId - User ID
+     * @param {String} newPassword - New password
+     * @returns {Promise<Boolean>}
+     */
+    async resetPassword(userId, newPassword) {
+        try {
+            this.validateObjectId(userId, 'User ID');
+
+            if (!newPassword) {
+                throw new Error('New password is required');
+            }
+
+            // Hash new password
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+            // Update password
+            await this.updateById(userId, {
+                password: hashedPassword,
+                passwordChangedAt: new Date(),
+            }, { skipCache: true });
+
+            this.log('resetPassword', { userId, success: true });
+            
+            return true;
+        } catch (error) {
+            throw this.handleError(error, 'resetPassword', { userId });
+        }
+    }
+
+    // ============================================
+    // USER STATUS MANAGEMENT
+    // ============================================
+
+    /**
+     * Activate user account
+     * @param {String} userId - User ID
+     * @returns {Promise<Object>}
+     */
+    async activateUser(userId) {
+        try {
+            this.validateObjectId(userId, 'User ID');
+
+            return await this.updateById(userId, {
+                active: true,
+                activatedAt: new Date(),
+            });
+        } catch (error) {
+            throw this.handleError(error, 'activateUser', { userId });
+        }
+    }
+
+    /**
+     * Deactivate user account
+     * @param {String} userId - User ID
+     * @param {String} reason - Reason for deactivation
+     * @returns {Promise<Object>}
+     */
+    async deactivateUser(userId, reason = null) {
+        try {
+            this.validateObjectId(userId, 'User ID');
+
+            return await this.updateById(userId, {
+                active: false,
+                deactivatedAt: new Date(),
+                deactivationReason: reason,
+            });
+        } catch (error) {
+            throw this.handleError(error, 'deactivateUser', { userId });
+        }
+    }
+
+    /**
+     * Verify user email
+     * @param {String} userId - User ID
+     * @returns {Promise<Object>}
+     */
+    async verifyEmail(userId) {
+        try {
+            this.validateObjectId(userId, 'User ID');
+
+            return await this.updateById(userId, {
+                emailVerified: true,
+                emailVerifiedAt: new Date(),
+            });
+        } catch (error) {
+            throw this.handleError(error, 'verifyEmail', { userId });
+        }
+    }
+
+    // ============================================
+    // STATISTICS
+    // ============================================
 
     /**
      * Get user statistics
-     * @returns {Promise<Object>} User statistics
+     * @param {String} userId - User ID
+     * @returns {Promise<Object>}
      */
-    async getUserStats() {
+    async getUserStats(userId) {
         try {
-            const pipeline = [
-                {
-                    $group: {
-                        _id: null,
-                        totalUsers: { $sum: 1 },
-                        activeUsers: {
-                            $sum: {
-                                $cond: [{ $ne: ['$isActive', false] }, 1, 0]
-                            }
-                        },
-                        inactiveUsers: {
-                            $sum: {
-                                $cond: [{ $eq: ['$isActive', false] }, 1, 0]
-                            }
-                        }
-                    }
-                },
-                {
-                    $lookup: {
-                        from: 'roles',
-                        pipeline: [
-                            {
-                                $group: {
-                                    _id: '$name',
-                                    count: { $sum: 1 }
-                                }
-                            }
-                        ],
-                        as: 'roleStats'
-                    }
-                }
-            ];
-            
-            const [stats] = await this.aggregate(pipeline);
-            return stats || {
-                totalUsers: 0,
-                activeUsers: 0,
-                inactiveUsers: 0,
-                roleStats: []
+            this.validateObjectId(userId, 'User ID');
+
+            const user = await this.findById(userId);
+
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            return {
+                userId,
+                loginCount: user.loginCount || 0,
+                lastLogin: user.lastLogin,
+                eventsCreated: user.eventsCreated || 0,
+                votesCount: user.votesCount || 0,
+                active: user.active,
+                emailVerified: user.emailVerified,
+                createdAt: user.createdAt,
             };
         } catch (error) {
-            throw this._handleError(error, 'getUserStats');
+            throw this.handleError(error, 'getUserStats', { userId });
         }
     }
 
     /**
-     * Check if email is available
-     * @param {String} email - Email to check
-     * @param {String|ObjectId} excludeUserId - User ID to exclude from check
-     * @returns {Promise<Boolean>} True if email is available
+     * Get total user count
+     * @param {Object} filter - Optional filter
+     * @returns {Promise<Number>}
      */
-    async isEmailAvailable(email, excludeUserId = null) {
+    async getUserCount(filter = {}) {
         try {
-            const criteria = { email: email.toLowerCase().trim() };
-            
-            if (excludeUserId) {
-                criteria._id = { $ne: excludeUserId };
-            }
-            
-            const existingUser = await this.findOne(criteria);
-            return !existingUser;
+            return await this.count({ ...filter, deleted: false });
         } catch (error) {
-            throw this._handleError(error, 'isEmailAvailable');
+            throw this.handleError(error, 'getUserCount');
         }
     }
 
     /**
-     * Hash password
-     * @private
-     * @param {String} password - Password to hash
-     * @returns {Promise<String>} Hashed password
+     * Get active user count
+     * @returns {Promise<Number>}
      */
-    async _hashPassword(password) {
-          if (typeof password !== 'string' || password.length < 6 || password.length > 100 || /^\s+$/.test(password)) {
-            throw new Error('Password must be at least 6 characters long and not just whitespace.');
+    async getActiveUserCount() {
+        try {
+            return await this.count({ active: true, deleted: false });
+        } catch (error) {
+            throw this.handleError(error, 'getActiveUserCount');
         }
-        const saltRounds = 12;
-        return await bcrypt.hash(password, saltRounds)
     }
 }
 

@@ -1,398 +1,471 @@
-#!/usr/bin/env node
-
 /**
- * Settings Service
+ * SettingsService
  * 
- * Business logic for Settings operations
+ * Handles settings CRUD operations, validation, import/export,
+ * and category management for platform-wide configuration.
+ * 
+ * @extends BaseService
+ * @module services/SettingsService
+ * @version 2.0.0
  */
 
 import BaseService from './BaseService.js';
-import SettingsRepository from '../repositories/SettingsRepository.js';
 
-class SettingsService extends BaseService {
-    constructor() {
-        super();
-        this.repository = new SettingsRepository();
+export default class SettingsService extends BaseService {
+    constructor(repositories) {
+        super(repositories, {
+            serviceName: 'SettingsService',
+            primaryRepository: 'settings',
+        });
+
+        this.validCategories = [
+            'system',
+            'email',
+            'payment',
+            'voting',
+            'security',
+            'notification',
+            'events',
+            'uploads',
+        ];
+
+        this.validDataTypes = ['string', 'number', 'boolean', 'json', 'array'];
     }
 
     /**
      * Get setting by key
      */
-    async getSetting(key, type = 'general', modelType = null, modelId = null) {
-        try {
-            const setting = await this.repository.findByKey(key, type, modelType, modelId);
-            return setting ? setting.value : null;
-        } catch (error) {
-            throw new Error(`Error getting setting: ${error.message}`);
-        }
-    }
+    async getSetting(key, defaultValue = null) {
+        return this.runInContext('getSetting', async () => {
+            const setting = await this.repo('settings').findOne({ key });
 
-    /**
-     * Set setting value
-     */
-    async setSetting(key, value, type = 'general', userId = null, options = {}) {
-        try {
-            const settingData = {
-                key,
-                value,
-                type,
-                lastChangedBy: userId,
-                lastChangedAt: new Date(),
-                ...options
-            };
-
-            return await this.repository.upsertSetting(settingData);
-        } catch (error) {
-            throw new Error(`Error setting value: ${error.message}`);
-        }
-    }
-
-    /**
-     * Get all general settings (for frontend)
-     */
-    async getGeneralSettings() {
-        try {
-            const settings = await this.repository.findByType('general');
-            const settingsObj = {};
-            
-            settings.forEach(setting => {
-                settingsObj[setting.key] = setting.value;
-            });
-
-            return settingsObj;
-        } catch (error) {
-            throw new Error(`Error getting general settings: ${error.message}`);
-        }
-    }
-
-    /**
-     * Get model-specific settings
-     */
-    async getModelSettings(modelType, modelId = null) {
-        try {
-            const settings = await this.repository.findByModelType(modelType, modelId);
-            const settingsObj = {};
-            
-            settings.forEach(setting => {
-                settingsObj[setting.key] = setting.value;
-            });
-
-            return settingsObj;
-        } catch (error) {
-            throw new Error(`Error getting model settings: ${error.message}`);
-        }
-    }
-
-    /**
-     * Update multiple settings at once
-     */
-    async updateSettings(settingsData, userId = null) {
-        try {
-            const results = [];
-            
-            for (const [key, data] of Object.entries(settingsData)) {
-                const setting = await this.setSetting(
-                    key, 
-                    data.value, 
-                    data.type || 'general', 
-                    userId,
-                    {
-                        name: data.name,
-                        description: data.description,
-                        category: data.category,
-                        modelType: data.modelType,
-                        modelId: data.modelId
-                    }
-                );
-                results.push(setting);
+            if (!setting) {
+                return this.handleSuccess({
+                    key,
+                    value: defaultValue,
+                    exists: false,
+                }, 'Setting not found, using default value');
             }
 
-            return results;
-        } catch (error) {
-            throw new Error(`Error updating settings: ${error.message}`);
-        }
-    }
-
-    /**
-     * Initialize default system settings
-     */
-    async initializeDefaultSettings(userId = null) {
-        try {
-            const defaultSettings = {
-                // General site settings
-                'site.name': {
-                    value: 'ITFY E-Voting System',
-                    name: 'Site Name',
-                    description: 'The name of the website displayed in headers and footers',
-                    category: 'general',
-                    type: 'general'
-                },
-                'site.description': {
-                    value: 'Ghana\'s premier technology awards and voting platform',
-                    name: 'Site Description',
-                    description: 'Brief description of the website',
-                    category: 'general',
-                    type: 'general'
-                },
-                'site.logo': {
-                    value: '/images/logo.png',
-                    name: 'Site Logo',
-                    description: 'Path to the main site logo',
-                    category: 'general',
-                    type: 'general'
-                },
-                'site.favicon': {
-                    value: '/images/favicon.ico',
-                    name: 'Site Favicon',
-                    description: 'Path to the site favicon',
-                    category: 'general',
-                    type: 'general'
-                },
-
-                // Contact information
-                'contact.email': {
-                    value: 'info@itfy.com',
-                    name: 'Contact Email',
-                    description: 'Main contact email address',
-                    category: 'contact',
-                    type: 'general'
-                },
-                'contact.phone': {
-                    value: '+233 24 123 4567',
-                    name: 'Contact Phone',
-                    description: 'Main contact phone number',
-                    category: 'contact',
-                    type: 'general'
-                },
-                'contact.address': {
-                    value: 'Accra Digital Centre, Ridge, Accra, Ghana',
-                    name: 'Contact Address',
-                    description: 'Physical address of the organization',
-                    category: 'contact',
-                    type: 'general'
-                },
-
-                // Social media links
-                'social.facebook': {
-                    value: 'https://facebook.com/itfyghana',
-                    name: 'Facebook URL',
-                    description: 'Facebook page URL',
-                    category: 'social',
-                    type: 'general'
-                },
-                'social.twitter': {
-                    value: 'https://twitter.com/itfyghana',
-                    name: 'Twitter URL',
-                    description: 'Twitter profile URL',
-                    category: 'social',
-                    type: 'general'
-                },
-                'social.linkedin': {
-                    value: 'https://linkedin.com/company/itfyghana',
-                    name: 'LinkedIn URL',
-                    description: 'LinkedIn company page URL',
-                    category: 'social',
-                    type: 'general'
-                },
-                'social.instagram': {
-                    value: 'https://instagram.com/itfyghana',
-                    name: 'Instagram URL',
-                    description: 'Instagram profile URL',
-                    category: 'social',
-                    type: 'general'
-                },
-                'social.youtube': {
-                    value: 'https://youtube.com/itfyghana',
-                    name: 'YouTube URL',
-                    description: 'YouTube channel URL',
-                    category: 'social',
-                    type: 'general'
-                },
-
-                // Theme settings
-                'theme.primary_color': {
-                    value: '#007bff',
-                    name: 'Primary Color',
-                    description: 'Main brand color',
-                    category: 'theme',
-                    type: 'theme'
-                },
-                'theme.secondary_color': {
-                    value: '#6c757d',
-                    name: 'Secondary Color',
-                    description: 'Secondary brand color',
-                    category: 'theme',
-                    type: 'theme'
-                },
-                'theme.dark_mode': {
-                    value: false,
-                    name: 'Dark Mode',
-                    description: 'Enable dark mode by default',
-                    category: 'theme',
-                    type: 'theme'
-                },
-
-                // System settings
-                'system.maintenance_mode': {
-                    value: false,
-                    name: 'Maintenance Mode',
-                    description: 'Put the site in maintenance mode',
-                    category: 'system',
-                    type: 'system'
-                },
-                'system.registration_enabled': {
-                    value: true,
-                    name: 'Registration Enabled',
-                    description: 'Allow new user registration',
-                    category: 'system',
-                    type: 'system'
-                },
-                'system.voting_enabled': {
-                    value: true,
-                    name: 'Voting Enabled',
-                    description: 'Enable voting functionality',
-                    category: 'system',
-                    type: 'system'
-                },
-
-                // Email settings
-                'email.notifications_enabled': {
-                    value: true,
-                    name: 'Email Notifications',
-                    description: 'Enable email notifications',
-                    category: 'email',
-                    type: 'email'
-                },
-                'email.smtp_host': {
-                    value: 'smtp.gmail.com',
-                    name: 'SMTP Host',
-                    description: 'SMTP server hostname',
-                    category: 'email',
-                    type: 'email'
-                },
-                'email.smtp_port': {
-                    value: 587,
-                    name: 'SMTP Port',
-                    description: 'SMTP server port',
-                    category: 'email',
-                    type: 'email'
-                },
-
-                // Payment settings
-                'payment.default_currency': {
-                    value: 'GHS',
-                    name: 'Default Currency',
-                    description: 'Default currency for payments',
-                    category: 'payment',
-                    type: 'payment'
-                },
-                'payment.paystack_enabled': {
-                    value: true,
-                    name: 'Paystack Enabled',
-                    description: 'Enable Paystack payment gateway',
-                    category: 'payment',
-                    type: 'payment'
-                }
-            };
-
-            return await this.updateSettings(defaultSettings, userId);
-        } catch (error) {
-            throw new Error(`Error initializing default settings: ${error.message}`);
-        }
+            return this.handleSuccess({
+                key: setting.key,
+                value: setting.value,
+                category: setting.category,
+                dataType: setting.dataType,
+                exists: true,
+            }, 'Setting retrieved successfully');
+        });
     }
 
     /**
      * Get settings by category
      */
     async getSettingsByCategory(category) {
-        try {
-            return await this.repository.findByCategory(category);
-        } catch (error) {
-            throw new Error(`Error getting settings by category: ${error.message}`);
-        }
+        return this.runInContext('getSettingsByCategory', async () => {
+            if (!this.validCategories.includes(category)) {
+                throw new Error(`Invalid category. Must be one of: ${this.validCategories.join(', ')}`);
+            }
+
+            const settings = await this.repo('settings').find({ category });
+
+            const settingsMap = {};
+            settings.forEach(setting => {
+                settingsMap[setting.key] = setting.value;
+            });
+
+            return this.handleSuccess({
+                category,
+                settings: settingsMap,
+                count: settings.length,
+            }, 'Settings retrieved successfully');
+        });
+    }
+
+    /**
+     * Get all settings
+     */
+    async getAllSettings(filters = {}, pagination = {}) {
+        return this.runInContext('getAllSettings', async () => {
+            const { page, limit } = this.parsePagination(pagination);
+
+            const query = {};
+
+            // Filter by category
+            if (filters.category) {
+                query.category = filters.category;
+            }
+
+            // Search by key or description
+            if (filters.search) {
+                query.$or = [
+                    { key: { $regex: filters.search, $options: 'i' } },
+                    { description: { $regex: filters.search, $options: 'i' } },
+                ];
+            }
+
+            // Filter by public visibility
+            if (filters.isPublic !== undefined) {
+                query.isPublic = filters.isPublic === 'true';
+            }
+
+            const settings = await this.repo('settings').findWithPagination(query, {
+                page,
+                limit,
+                sort: filters.sort || { category: 1, key: 1 },
+            });
+
+            return this.handleSuccess(
+                this.createPaginatedResponse(settings.docs, settings.total, page, limit),
+                'Settings retrieved successfully'
+            );
+        });
+    }
+
+    /**
+     * Create or update setting
+     */
+    async setSetting(key, value, metadata = {}, userId) {
+        return this.runInContext('setSetting', async () => {
+            // Validate key format (alphanumeric, dots, underscores)
+            if (!/^[a-zA-Z0-9._]+$/.test(key)) {
+                throw new Error('Invalid key format. Use alphanumeric characters, dots, and underscores only.');
+            }
+
+            // Validate category if provided
+            if (metadata.category && !this.validCategories.includes(metadata.category)) {
+                throw new Error(`Invalid category. Must be one of: ${this.validCategories.join(', ')}`);
+            }
+
+            // Validate data type if provided
+            if (metadata.dataType && !this.validDataTypes.includes(metadata.dataType)) {
+                throw new Error(`Invalid data type. Must be one of: ${this.validDataTypes.join(', ')}`);
+            }
+
+            // Check if setting exists
+            const existingSetting = await this.repo('settings').findOne({ key });
+
+            let setting;
+
+            if (existingSetting) {
+                // Update existing setting
+                setting = await this.repo('settings').update(existingSetting._id, {
+                    value,
+                    ...metadata,
+                    updatedBy: userId,
+                });
+
+                await this.logActivity(userId, 'update', 'settings', {
+                    settingId: setting._id,
+                    key,
+                    previousValue: existingSetting.value,
+                    newValue: value,
+                });
+            } else {
+                // Create new setting
+                setting = await this.repo('settings').create({
+                    key,
+                    value,
+                    category: metadata.category || 'system',
+                    dataType: metadata.dataType || this._inferDataType(value),
+                    description: metadata.description || '',
+                    isPublic: metadata.isPublic !== undefined ? metadata.isPublic : false,
+                    createdBy: userId,
+                    updatedBy: userId,
+                });
+
+                await this.logActivity(userId, 'create', 'settings', {
+                    settingId: setting._id,
+                    key,
+                    value,
+                });
+            }
+
+            return this.handleSuccess(
+                { setting },
+                existingSetting ? 'Setting updated successfully' : 'Setting created successfully'
+            );
+        });
+    }
+
+    /**
+     * Update multiple settings at once
+     */
+    async updateSettings(settings, userId) {
+        return this.runInContext('updateSettings', async () => {
+            const results = [];
+
+            for (const [key, value] of Object.entries(settings)) {
+                try {
+                    const result = await this.setSetting(key, value, {}, userId);
+                    results.push({ key, success: true, data: result.data });
+                } catch (error) {
+                    results.push({ key, success: false, error: error.message });
+                }
+            }
+
+            const successCount = results.filter(r => r.success).length;
+
+            return this.handleSuccess({
+                total: results.length,
+                successful: successCount,
+                failed: results.length - successCount,
+                results,
+            }, `Settings update completed: ${successCount}/${results.length} successful`);
+        });
     }
 
     /**
      * Delete setting
      */
-    async deleteSetting(key, type = 'general', modelType = null, modelId = null) {
-        try {
-            return await this.repository.deleteSetting(key, type, modelType, modelId);
-        } catch (error) {
-            throw new Error(`Error deleting setting: ${error.message}`);
-        }
+    async deleteSetting(key, userId) {
+        return this.runInContext('deleteSetting', async () => {
+            const setting = await this.repo('settings').findOne({ key });
+
+            if (!setting) {
+                throw new Error('Setting not found');
+            }
+
+            await this.repo('settings').delete(setting._id);
+
+            await this.logActivity(userId, 'delete', 'settings', {
+                settingId: setting._id,
+                key,
+                value: setting.value,
+            });
+
+            return this.handleSuccess(null, 'Setting deleted successfully');
+        });
     }
 
     /**
-     * Get public settings (for frontend without sensitive data)
+     * Reset setting to default value
+     */
+    async resetSetting(key, userId) {
+        return this.runInContext('resetSetting', async () => {
+            const setting = await this.repo('settings').findOne({ key });
+
+            if (!setting) {
+                throw new Error('Setting not found');
+            }
+
+            if (!setting.defaultValue) {
+                throw new Error('No default value defined for this setting');
+            }
+
+            const updatedSetting = await this.repo('settings').update(setting._id, {
+                value: setting.defaultValue,
+                updatedBy: userId,
+            });
+
+            await this.logActivity(userId, 'reset', 'settings', {
+                settingId: setting._id,
+                key,
+                previousValue: setting.value,
+                defaultValue: setting.defaultValue,
+            });
+
+            return this.handleSuccess(
+                { setting: updatedSetting },
+                'Setting reset to default value'
+            );
+        });
+    }
+
+    /**
+     * Export settings
+     */
+    async exportSettings(filters = {}) {
+        return this.runInContext('exportSettings', async () => {
+            const query = {};
+
+            // Filter by category
+            if (filters.category) {
+                query.category = filters.category;
+            }
+
+            // Only export public settings if specified
+            if (filters.publicOnly === true) {
+                query.isPublic = true;
+            }
+
+            const settings = await this.repo('settings').find(query);
+
+            const exportData = {};
+
+            settings.forEach(setting => {
+                if (!exportData[setting.category]) {
+                    exportData[setting.category] = {};
+                }
+
+                exportData[setting.category][setting.key] = {
+                    value: setting.value,
+                    dataType: setting.dataType,
+                    description: setting.description,
+                };
+            });
+
+            return this.handleSuccess({
+                exportedAt: new Date(),
+                categories: Object.keys(exportData).length,
+                totalSettings: settings.length,
+                data: exportData,
+            }, 'Settings exported successfully');
+        });
+    }
+
+    /**
+     * Import settings
+     */
+    async importSettings(settingsData, userId, options = {}) {
+        return this.runInContext('importSettings', async () => {
+            const results = [];
+            let imported = 0;
+            let skipped = 0;
+            let errors = 0;
+
+            for (const [category, settings] of Object.entries(settingsData)) {
+                // Validate category
+                if (!this.validCategories.includes(category)) {
+                    this.log('warn', `Invalid category: ${category}`, { userId });
+                    continue;
+                }
+
+                for (const [key, data] of Object.entries(settings)) {
+                    try {
+                        // Check if setting exists
+                        const existingSetting = await this.repo('settings').findOne({ key });
+
+                        if (existingSetting && !options.overwrite) {
+                            skipped++;
+                            results.push({ key, status: 'skipped', reason: 'Already exists' });
+                            continue;
+                        }
+
+                        // Import setting
+                        await this.setSetting(
+                            key,
+                            data.value,
+                            {
+                                category,
+                                dataType: data.dataType,
+                                description: data.description,
+                            },
+                            userId
+                        );
+
+                        imported++;
+                        results.push({ key, status: 'imported' });
+                    } catch (error) {
+                        errors++;
+                        results.push({ key, status: 'error', error: error.message });
+                    }
+                }
+            }
+
+            await this.logActivity(userId, 'import', 'settings', {
+                imported,
+                skipped,
+                errors,
+            });
+
+            return this.handleSuccess({
+                imported,
+                skipped,
+                errors,
+                results,
+            }, `Settings import completed: ${imported} imported, ${skipped} skipped, ${errors} errors`);
+        });
+    }
+
+    /**
+     * Validate setting value against constraints
+     */
+    validateSettingValue(dataType, value, constraints = {}) {
+        switch (dataType) {
+            case 'number':
+                if (typeof value !== 'number') {
+                    throw new Error('Value must be a number');
+                }
+                if (constraints.min !== undefined && value < constraints.min) {
+                    throw new Error(`Value must be at least ${constraints.min}`);
+                }
+                if (constraints.max !== undefined && value > constraints.max) {
+                    throw new Error(`Value must not exceed ${constraints.max}`);
+                }
+                break;
+
+            case 'string':
+                if (typeof value !== 'string') {
+                    throw new Error('Value must be a string');
+                }
+                if (constraints.minLength && value.length < constraints.minLength) {
+                    throw new Error(`Value must be at least ${constraints.minLength} characters`);
+                }
+                if (constraints.maxLength && value.length > constraints.maxLength) {
+                    throw new Error(`Value must not exceed ${constraints.maxLength} characters`);
+                }
+                if (constraints.pattern && !new RegExp(constraints.pattern).test(value)) {
+                    throw new Error('Value does not match required pattern');
+                }
+                break;
+
+            case 'boolean':
+                if (typeof value !== 'boolean') {
+                    throw new Error('Value must be a boolean');
+                }
+                break;
+
+            case 'array':
+                if (!Array.isArray(value)) {
+                    throw new Error('Value must be an array');
+                }
+                break;
+
+            case 'json':
+                if (typeof value !== 'object') {
+                    throw new Error('Value must be a valid JSON object');
+                }
+                break;
+
+            default:
+                // No validation for unknown types
+                break;
+        }
+
+        return true;
+    }
+
+    /**
+     * Get public settings (for frontend)
      */
     async getPublicSettings() {
-        try {
-            const publicCategories = ['general', 'contact', 'social', 'theme'];
-            const settings = {};
+        return this.runInContext('getPublicSettings', async () => {
+            const settings = await this.repo('settings').find({ isPublic: true });
 
-            for (const category of publicCategories) {
-                const categorySettings = await this.getSettingsByCategory(category);
-                categorySettings.forEach(setting => {
-                    // Only include non-sensitive settings
-                    if (!setting.key.includes('password') && 
-                        !setting.key.includes('secret') && 
-                        !setting.key.includes('key')) {
-                        settings[setting.key] = setting.value;
-                    }
-                });
-            }
+            const publicSettings = {};
 
-            return settings;
-        } catch (error) {
-            throw new Error(`Error getting public settings: ${error.message}`);
-        }
+            settings.forEach(setting => {
+                if (!publicSettings[setting.category]) {
+                    publicSettings[setting.category] = {};
+                }
+
+                publicSettings[setting.category][setting.key] = setting.value;
+            });
+
+            return this.handleSuccess({
+                settings: publicSettings,
+            }, 'Public settings retrieved successfully');
+        });
     }
 
     /**
-     * Backup all settings
+     * Infer data type from value
      */
-    async backupSettings() {
-        try {
-            const allSettings = await this.repository.findAll();
-            return {
-                timestamp: new Date().toISOString(),
-                settings: allSettings
-            };
-        } catch (error) {
-            throw new Error(`Error backing up settings: ${error.message}`);
-        }
-    }
-
-    /**
-     * Restore settings from backup
-     */
-    async restoreSettings(backupData, userId = null) {
-        try {
-            const results = [];
-            
-            for (const setting of backupData.settings) {
-                const restored = await this.setSetting(
-                    setting.key,
-                    setting.value,
-                    setting.type,
-                    userId,
-                    {
-                        name: setting.name,
-                        description: setting.description,
-                        category: setting.category,
-                        modelType: setting.modelType,
-                        modelId: setting.modelId
-                    }
-                );
-                results.push(restored);
-            }
-
-            return results;
-        } catch (error) {
-            throw new Error(`Error restoring settings: ${error.message}`);
-        }
+    _inferDataType(value) {
+        if (typeof value === 'boolean') return 'boolean';
+        if (typeof value === 'number') return 'number';
+        if (Array.isArray(value)) return 'array';
+        if (typeof value === 'object' && value !== null) return 'json';
+        return 'string';
     }
 }
-
-export default SettingsService;

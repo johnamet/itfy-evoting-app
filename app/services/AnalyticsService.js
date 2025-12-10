@@ -1,248 +1,544 @@
 /**
- * Analytics Service
- * Handles business logic for analytics processing with real-time updates.
+ * AnalyticsService
+ * 
+ * Handles platform analytics, event tracking, user activity analysis,
+ * and comprehensive reporting across the voting platform.
+ * 
+ * @extends BaseService
+ * @module services/AnalyticsService
+ * @version 2.0.0
  */
 
 import BaseService from './BaseService.js';
-import AnalyticsRepository from '../repositories/AnalyticsRepository.js';
-import CacheService from './CacheService.js';
-import mongoose from 'mongoose';
 
-class AnalyticsService extends BaseService {
-    constructor() {
-        super();
-        this.repository = new AnalyticsRepository();
-        this.cachePrefix = 'analytics:';
-        this.defaultCacheTTL = 3600000; // 1 hour
-        this.changeStreams = new Map();
-        this.changeStreamsInitialized = false;
-    }
-
-    async setupChangeStreams() {
-        try {
-            // Check if database is connected
-            if (mongoose.connection.readyState !== 1) {
-                console.log('Database not connected, skipping change streams setup');
-                return;
-            }
-
-            // Check if already initialized
-            if (this.changeStreamsInitialized) {
-                return;
-            }
-
-            const db = mongoose.connection.db;
-            if (!db) {
-                console.log('Database instance not available, skipping change streams setup');
-                return;
-            }
-
-            ['votes', 'payments'].forEach(collection => {
-                try {
-                    const stream = db.collection(collection).watch([], { fullDocument: 'updateLookup' });
-                    if (stream && typeof stream.on === 'function') {
-                        stream.on('change', (change) => this.handleChangeStream(change, collection));
-                        stream.on('error', (error) => {
-                            console.error(`Change stream error for ${collection}:`, error);
-                            this.changeStreams.delete(collection);
-                        });
-                        this.changeStreams.set(collection, stream);
-                        console.log(`Change stream setup for ${collection} collection`);
-                    }
-                } catch (error) {
-                    console.error(`Failed to setup change stream for ${collection}:`, error);
-                }
-            });
-
-            this.changeStreamsInitialized = true;
-        } catch (error) {
-            console.error('Error setting up change streams:', error);
-        }
-    }
-
-    handleChangeStream(change, collection) {
-        if (change.operationType === 'insert' || change.operationType === 'update') {
-            this.updateIncrementalAnalytics(collection, change.fullDocument);
-        }
-    }
-
-    async updateIncrementalAnalytics(collection, doc) {
-        // Ensure change streams are set up
-        await this.setupChangeStreams();
-
-        const now = new Date();
-        const period = 'hourly';
-        const references = collection === 'votes' ? { event: doc.event } : {};
-        let analytics = await this.repository.findFreshOrCreate(collection === 'votes' ? 'voting' : 'payments', period, references);
-        if (analytics.status === 'computing' || analytics.isExpired) {
-            await this.computeAndUpdate(analytics, now, now);
-        } else {
-            await this.incrementalUpdate(analytics, doc);
-        }
-    }
-
-    async incrementalUpdate(analytics, doc) {
-        const data = analytics.data[analytics.type];
-        if (analytics.type === 'voting') {
-            data.totalVotes += 1;
-            data.uniqueVoters = new Set([...(data.uniqueVoters || []), doc.voter.email]).size;
-        } else if (analytics.type === 'payments') {
-            data.totalTransactions += 1;
-            if (doc.status === 'success') data.totalRevenue += doc.finalAmount;
-        }
-        analytics.metadata.computedAt = new Date();
-        await analytics.save();
-        CacheService.set(`${this.cachePrefix}${analytics.type}:${analytics.period}`, data, this.defaultCacheTTL);
-    }
-
-    async computeAndUpdate(analytics, startDate, endDate) {
-        // Map analytics types to repository method names
-        const methodMap = {
-            'voting': 'computeVotingAnalytics',
-            'payments': 'computePaymentAnalytics', // Note: singular 'Payment' in repository
-            'overview': 'computeOverviewAnalytics',
-            'anomaly': 'computeAnomalyAnalytics',
-            'forecasts': 'computeForecasts'
-        };
-
-        const method = methodMap[analytics.type];
-        if (!method || !this.repository[method]) {
-            throw new Error(`Analytics method for type '${analytics.type}' not found`);
-        }
-
-        const data = await this.repository[method](startDate, endDate, analytics.references.event);
-        Object.assign(analytics, data);
-        // await analytics.markCompleted(data.metadata.computationTime);
-        CacheService.set(`${this.cachePrefix}${analytics.type}:${analytics.period}`, analytics.data[analytics.type], this.defaultCacheTTL);
-    }
-
-    async getDashboardOverview(options = {}) {
-        try {
-            const { period = 'daily' } = options;
-            // Initialize change streams if not already done
-            await this.setupChangeStreams();
-
-            const cacheKey = `${this.cachePrefix}dashboard:overview`;
-            let overview = CacheService.get(cacheKey);
-            if (overview) return overview;
-            const {start, end} = this.getDateRange(period)
-            overview = await this.repository.computeOverviewAnalytics(start, end);
-            CacheService.set(cacheKey, overview.data.overview, this.defaultCacheTTL);
-            return overview.data.overview;
-        } catch (error) {
-            console.error('Error getting dashboard overview:', error);
-            throw error;
-        }
-    }
-
-    async getVotingAnalytics(options = {}) {
-        try {
-            const { period = 'daily', eventId = null, startDate = null, endDate = null, forceRefresh = false } = options;
-            const cacheKey = `${this.cachePrefix}voting:${period}:${eventId || 'all'}`;
-            if (!forceRefresh) {
-                const cached = await CacheService.get(cacheKey);
-                if (cached) return cached;
-            }
-
-            const references = eventId ? { event: eventId } : {};
-            let analytics = await this.repository.findFreshOrCreate('voting', period, references);
-            if (analytics.status === 'computing' || analytics.isExpired || forceRefresh) {
-                const { start, end } = this.getDateRange(period, startDate, endDate);
-                await this.computeAndUpdate(analytics, start, end);
-            }
-            return analytics.data.voting;
-        } catch (error) {
-            console.error('Error getting voting analytics:', error);
-            throw error;
-        }
-    }
-
-    async getPaymentAnalytics(options = {}) {
-        try {
-            const { period = 'daily', startDate = null, endDate = null, forceRefresh = false } = options;
-            const cacheKey = `${this.cachePrefix}payments:${period}`;
-            if (!forceRefresh) {
-                const cached = CacheService.get(cacheKey);
-                if (cached) return cached;
-            }
-
-            let analytics = await this.repository.findFreshOrCreate('payments', period);
-            if (analytics.status === 'computing' || analytics.isExpired || forceRefresh) {
-                const { start, end } = this.getDateRange(period, startDate, endDate);
-                await this.computeAndUpdate(analytics, start, end);
-            }
-            return analytics.data.payments;
-        } catch (error) {
-            console.error('Error getting payments analytics:', error);
-            throw error;
-        }
-    }
-
-    async getAnomalyAnalytics(options = {}) {
-        try {
-            const { period = 'daily', startDate = null, endDate = null } = options;
-            const cacheKey = `${this.cachePrefix}anomalies:${period}`;
-            let cached = await CacheService.get(cacheKey);
-            if (cached) return cached;
-
-            const { start, end } = this.getDateRange(period, startDate, endDate);
-            const analytics = await this.repository.computeAnomalyAnalytics(start, end);
-            CacheService.set(cacheKey, analytics.data.anomalies, this.defaultCacheTTL);
-            return analytics.data.anomalies;
-        } catch (error) {
-            console.error('Error getting anomaly analytics:', error);
-            throw error;
-        }
-    }
-
-    async getForecasts(options = {}) {
-        try {
-            const { period = 'monthly', startDate = null, endDate = null } = options;
-            const cacheKey = `${this.cachePrefix}forecasts:${period}`;
-            let cached = CacheService.get(cacheKey);
-            if (cached) return cached;
-
-            const { start, end } = this.getDateRange(period, startDate, endDate);
-            const analytics = await this.repository.computeForecasts(start, end);
-            CacheService.set(cacheKey, analytics.data.forecasts, this.defaultCacheTTL);
-            return analytics.data.forecasts;
-        } catch (error) {
-            console.error('Error getting forecasts:', error);
-            throw error;
-        }
-    }
-
-    getDateRange(period, startDate, endDate) {
-        const now = new Date();
-        if (period === 'custom' && startDate && endDate) return { start: new Date(startDate), end: new Date(endDate) };
-        const ranges = {
-            hourly: { start: new Date(now.getTime() - 60 * 60 * 1000), end: now },
-            daily: { start: new Date(now.getTime() - 24 * 60 * 60 * 1000), end: now },
-            weekly: { start: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), end: now },
-            monthly: { start: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000), end: now },
-            yearly: { start: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000), end: now },
-            'all-time': { start: new Date(0), end: now }
-        };
-        return ranges[period] || ranges.daily;
+export default class AnalyticsService extends BaseService {
+    constructor(repositories) {
+        super(repositories, {
+            serviceName: 'AnalyticsService',
+            primaryRepository: 'analytics',
+        });
     }
 
     /**
-     * Clean up change streams
+     * Track event (create analytics record)
      */
-    async cleanup() {
-        try {
-            for (const [collection, stream] of this.changeStreams) {
-                if (stream && typeof stream.close === 'function') {
-                    await stream.close();
-                    console.log(`Closed change stream for ${collection}`);
+    async trackEvent(analyticsData) {
+        return this.runInContext('trackEvent', async () => {
+            // Validate required fields
+            this.validateRequiredFields(analyticsData, [
+                'eventType', 'entityType', 'entityId'
+            ]);
+
+            const record = await this.repo('analytics').create({
+                ...analyticsData,
+                timestamp: new Date(),
+            });
+
+            return this.handleSuccess({ record }, 'Event tracked successfully');
+        });
+    }
+
+    /**
+     * Get platform overview statistics
+     */
+    async getPlatformOverview() {
+        return this.runInContext('getPlatformOverview', async () => {
+            // Total counts
+            const totalUsers = await this.repo('user').count({ status: 'active' });
+            const totalEvents = await this.repo('event').count();
+            const activeEvents = await this.repo('event').count({ status: 'active' });
+            const totalVotes = await this.repo('vote').count();
+            const totalCandidates = await this.repo('candidate').count();
+
+            // Revenue statistics
+            const revenueData = await this.repo('payment').aggregate([
+                { $match: { status: 'successful' } },
+                {
+                    $group: {
+                        _id: null,
+                        totalRevenue: { $sum: '$amount' },
+                        transactionCount: { $sum: 1 },
+                    },
+                },
+            ]);
+
+            // Recent activity
+            const recentVotes = await this.repo('vote').find(
+                {},
+                { limit: 5, sort: { createdAt: -1 } }
+            );
+
+            const recentEvents = await this.repo('event').find(
+                {},
+                { limit: 5, sort: { createdAt: -1 } }
+            );
+
+            return this.handleSuccess({
+                overview: {
+                    users: {
+                        total: totalUsers,
+                    },
+                    events: {
+                        total: totalEvents,
+                        active: activeEvents,
+                    },
+                    votes: {
+                        total: totalVotes,
+                    },
+                    candidates: {
+                        total: totalCandidates,
+                    },
+                    revenue: {
+                        total: revenueData[0]?.totalRevenue || 0,
+                        transactions: revenueData[0]?.transactionCount || 0,
+                    },
+                    recentActivity: {
+                        votes: recentVotes,
+                        events: recentEvents,
+                    },
+                },
+            }, 'Platform overview retrieved successfully');
+        });
+    }
+
+    /**
+     * Get user activity analytics
+     */
+    async getUserActivityAnalytics(userId, period = 'month') {
+        return this.runInContext('getUserActivityAnalytics', async () => {
+            const dateRange = this.getDateRange(period);
+
+            // Votes cast
+            const voteCount = await this.repo('vote').count({
+                voterId: userId,
+                createdAt: { $gte: dateRange.start, $lte: dateRange.end },
+            });
+
+            // Events created (if organizer)
+            const eventCount = await this.repo('event').count({
+                createdBy: userId,
+                createdAt: { $gte: dateRange.start, $lte: dateRange.end },
+            });
+
+            // Payments made
+            const paymentData = await this.repo('payment').aggregate([
+                {
+                    $match: {
+                        userId,
+                        status: 'successful',
+                        createdAt: { $gte: dateRange.start, $lte: dateRange.end },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalSpent: { $sum: '$amount' },
+                        transactionCount: { $sum: 1 },
+                    },
+                },
+            ]);
+
+            // Activity timeline
+            const activityTimeline = await this.repo('activity').aggregate([
+                {
+                    $match: {
+                        userId,
+                        createdAt: { $gte: dateRange.start, $lte: dateRange.end },
+                    },
+                },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%d',
+                                date: '$createdAt',
+                            },
+                        },
+                        actions: { $sum: 1 },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ]);
+
+            return this.handleSuccess({
+                userId,
+                period,
+                analytics: {
+                    votes: voteCount,
+                    eventsCreated: eventCount,
+                    payments: {
+                        total: paymentData[0]?.totalSpent || 0,
+                        count: paymentData[0]?.transactionCount || 0,
+                    },
+                    activityTimeline,
+                },
+            }, 'User analytics retrieved successfully');
+        });
+    }
+
+    /**
+     * Get event performance analytics
+     */
+    async getEventPerformanceAnalytics(eventId) {
+        return this.runInContext('getEventPerformanceAnalytics', async () => {
+            const event = await this.repo('event').findById(eventId);
+
+            if (!event) {
+                throw new Error('Event not found');
+            }
+
+            // Vote statistics
+            const totalVotes = await this.repo('vote').count({ eventId });
+            const uniqueVoters = await this.repo('vote').distinct('voterId', { eventId });
+
+            // Voting timeline
+            const votingTimeline = await this.repo('vote').aggregate([
+                { $match: { eventId } },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%d %H:00',
+                                date: '$createdAt',
+                            },
+                        },
+                        votes: { $sum: 1 },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ]);
+
+            // Candidate performance
+            const candidatePerformance = await this.repo('vote').aggregate([
+                { $match: { eventId } },
+                {
+                    $group: {
+                        _id: '$candidateId',
+                        votes: { $sum: 1 },
+                    },
+                },
+                { $sort: { votes: -1 } },
+            ]);
+
+            // Get candidate details
+            const candidateIds = candidatePerformance.map(c => c._id);
+            const candidates = await this.repo('candidate').find({
+                _id: { $in: candidateIds },
+            });
+
+            const candidateMap = new Map(
+                candidates.map(c => [c._id.toString(), c])
+            );
+
+            const enrichedPerformance = candidatePerformance.map((c, index) => {
+                const candidate = candidateMap.get(c._id.toString());
+                return {
+                    rank: index + 1,
+                    candidateId: c._id,
+                    name: candidate?.name,
+                    photo: candidate?.photo,
+                    votes: c.votes,
+                    percentage: totalVotes > 0 ? ((c.votes / totalVotes) * 100).toFixed(2) : 0,
+                };
+            });
+
+            // Revenue statistics
+            const revenueData = await this.repo('payment').aggregate([
+                { $match: { eventId, status: 'successful' } },
+                {
+                    $group: {
+                        _id: null,
+                        totalRevenue: { $sum: '$amount' },
+                        transactions: { $sum: 1 },
+                    },
+                },
+            ]);
+
+            // Engagement metrics
+            const candidateCount = await this.repo('candidate').count({
+                eventId,
+                status: 'approved',
+            });
+
+            const participationRate = totalVotes > 0 && uniqueVoters.length > 0
+                ? ((totalVotes / uniqueVoters.length) * 100).toFixed(2)
+                : 0;
+
+            return this.handleSuccess({
+                event: {
+                    id: event._id,
+                    name: event.name,
+                    status: event.status,
+                    startDate: event.startDate,
+                    endDate: event.endDate,
+                },
+                analytics: {
+                    votes: {
+                        total: totalVotes,
+                        uniqueVoters: uniqueVoters.length,
+                        timeline: votingTimeline,
+                    },
+                    candidates: {
+                        total: candidateCount,
+                        performance: enrichedPerformance,
+                    },
+                    revenue: {
+                        total: revenueData[0]?.totalRevenue || 0,
+                        transactions: revenueData[0]?.transactions || 0,
+                    },
+                    engagement: {
+                        participationRate,
+                    },
+                },
+            }, 'Event analytics retrieved successfully');
+        });
+    }
+
+    /**
+     * Get revenue analytics
+     */
+    async getRevenueAnalytics(filters = {}) {
+        return this.runInContext('getRevenueAnalytics', async () => {
+            const query = { status: 'successful' };
+
+            // Apply date range
+            if (filters.startDate || filters.endDate) {
+                query.createdAt = {};
+                if (filters.startDate) {
+                    query.createdAt.$gte = new Date(filters.startDate);
+                }
+                if (filters.endDate) {
+                    query.createdAt.$lte = new Date(filters.endDate);
                 }
             }
-            this.changeStreams.clear();
-            this.changeStreamsInitialized = false;
-        } catch (error) {
-            console.error('Error cleaning up change streams:', error);
-        }
+
+            // Total revenue
+            const totalRevenue = await this.repo('payment').aggregate([
+                { $match: query },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: '$amount' },
+                        count: { $sum: 1 },
+                        average: { $avg: '$amount' },
+                    },
+                },
+            ]);
+
+            // Revenue by event
+            const byEvent = await this.repo('payment').aggregate([
+                { $match: query },
+                {
+                    $group: {
+                        _id: '$eventId',
+                        revenue: { $sum: '$amount' },
+                        transactions: { $sum: 1 },
+                    },
+                },
+                { $sort: { revenue: -1 } },
+                { $limit: 10 },
+            ]);
+
+            // Revenue over time
+            const overTime = await this.repo('payment').aggregate([
+                { $match: query },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%d',
+                                date: '$createdAt',
+                            },
+                        },
+                        revenue: { $sum: '$amount' },
+                        transactions: { $sum: 1 },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ]);
+
+            // Revenue by payment method (if tracked)
+            const byMethod = await this.repo('payment').aggregate([
+                { $match: query },
+                {
+                    $group: {
+                        _id: '$metadata.paymentMethod',
+                        revenue: { $sum: '$amount' },
+                        count: { $sum: 1 },
+                    },
+                },
+            ]);
+
+            return this.handleSuccess({
+                analytics: {
+                    total: totalRevenue[0]?.total || 0,
+                    transactions: totalRevenue[0]?.count || 0,
+                    average: totalRevenue[0]?.average || 0,
+                    byEvent,
+                    overTime,
+                    byMethod,
+                },
+            }, 'Revenue analytics retrieved successfully');
+        });
+    }
+
+    /**
+     * Get voting trends analytics
+     */
+    async getVotingTrends(period = 'week') {
+        return this.runInContext('getVotingTrends', async () => {
+            const dateRange = this.getDateRange(period);
+
+            // Votes over time
+            const votesOverTime = await this.repo('vote').aggregate([
+                {
+                    $match: {
+                        createdAt: { $gte: dateRange.start, $lte: dateRange.end },
+                    },
+                },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%d',
+                                date: '$createdAt',
+                            },
+                        },
+                        count: { $sum: 1 },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ]);
+
+            // Most active events
+            const mostActiveEvents = await this.repo('vote').aggregate([
+                {
+                    $match: {
+                        createdAt: { $gte: dateRange.start, $lte: dateRange.end },
+                    },
+                },
+                {
+                    $group: {
+                        _id: '$eventId',
+                        votes: { $sum: 1 },
+                    },
+                },
+                { $sort: { votes: -1 } },
+                { $limit: 5 },
+            ]);
+
+            // Peak voting hours
+            const peakHours = await this.repo('vote').aggregate([
+                {
+                    $match: {
+                        createdAt: { $gte: dateRange.start, $lte: dateRange.end },
+                    },
+                },
+                {
+                    $group: {
+                        _id: {
+                            $hour: '$createdAt',
+                        },
+                        votes: { $sum: 1 },
+                    },
+                },
+                { $sort: { votes: -1 } },
+            ]);
+
+            return this.handleSuccess({
+                period,
+                trends: {
+                    votesOverTime,
+                    mostActiveEvents,
+                    peakHours,
+                },
+            }, 'Voting trends retrieved successfully');
+        });
+    }
+
+    /**
+     * Generate comprehensive report
+     */
+    async generateReport(reportType, filters = {}) {
+        return this.runInContext('generateReport', async () => {
+            let reportData = {};
+
+            switch (reportType) {
+                case 'platform':
+                    reportData = await this.getPlatformOverview();
+                    break;
+
+                case 'revenue':
+                    reportData = await this.getRevenueAnalytics(filters);
+                    break;
+
+                case 'voting':
+                    reportData = await this.getVotingTrends(filters.period || 'month');
+                    break;
+
+                case 'event':
+                    if (!filters.eventId) {
+                        throw new Error('Event ID required for event report');
+                    }
+                    reportData = await this.getEventPerformanceAnalytics(filters.eventId);
+                    break;
+
+                case 'user':
+                    if (!filters.userId) {
+                        throw new Error('User ID required for user report');
+                    }
+                    reportData = await this.getUserActivityAnalytics(
+                        filters.userId,
+                        filters.period || 'month'
+                    );
+                    break;
+
+                default:
+                    throw new Error('Invalid report type');
+            }
+
+            return this.handleSuccess({
+                reportType,
+                generatedAt: new Date(),
+                filters,
+                data: reportData.data,
+            }, 'Report generated successfully');
+        });
+    }
+
+    /**
+     * Get system health metrics
+     */
+    async getSystemHealthMetrics() {
+        return this.runInContext('getSystemHealthMetrics', async () => {
+            // Recent error rate (from activity logs)
+            const recentErrors = await this.repo('activity').count({
+                action: 'error',
+                createdAt: { $gte: this.addDays(new Date(), -1) },
+            });
+
+            // Active sessions (approximate from recent activities)
+            const activeSessions = await this.repo('activity').distinct('userId', {
+                createdAt: { $gte: this.addDays(new Date(), 0, -1) }, // Last hour
+            });
+
+            // Database counts
+            const dbMetrics = {
+                users: await this.repo('user').count(),
+                events: await this.repo('event').count(),
+                votes: await this.repo('vote').count(),
+                payments: await this.repo('payment').count(),
+            };
+
+            return this.handleSuccess({
+                health: {
+                    status: 'healthy',
+                    errorRate: recentErrors,
+                    activeSessions: activeSessions.length,
+                    database: dbMetrics,
+                    timestamp: new Date(),
+                },
+            }, 'System health metrics retrieved');
+        });
     }
 }
-
-export default AnalyticsService;

@@ -1,93 +1,50 @@
 #!/usr/bin/env node
-
 /**
- * Activity Tracker
+ * Activity Model for tracking user actions
+ *
+ * @module Activity
+ * @version 2.0.0
  */
 
-import BaseModel from "./BaseModel.js";
 import mongoose from "mongoose";
+import BaseModel from "./BaseModel.js";
 
-class Activity extends BaseModel{
+const ActivitySchema = {
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
 
-    constructor(){
-        const schemaDefinition = {
-            user: {
-                type: mongoose.Schema.Types.ObjectId,
-                refPath: 'userModel',
-                required: false, // Made optional to support anonymous site visits
-            },
-            userModel: {
-                type: String,
-                default: 'User',
-                enum: ['User', 'Candidate'],
-                required: false
-            },
-            action: {
-                type: String,
-                required: true,
-                enum: ['create', 'update', 'delete', 'view', 'site_visit', 'login']
-            },
-            targetType: {
-                type: String,
-                required: true,
-                enum: ['user', 'candidate', 'event', 'votebundle', 'coupon', 'site', 'category', 'slide', 'form', 'form_submission']
-            },
-            targetId: {
-                type: mongoose.Schema.Types.ObjectId,
-                required: false
-            },
-            timestamp: {
-                type: Date,
-                default: Date.now
-            },
-            siteVisits: {
-                date: String,
-                totalVisits: {
-                    type: Number,
-                    default: 0
-                },
-                pages: {
-                    type: Map,
-                    of: Number,
-                    default: {}
-                },
-                hourly: {
-                    type: Map,
-                    of: Number,
-                    default: {}
-                },
-                users: [{
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'User'
-                }],
-                anonymousVisits: {
-                    type: Number,
-                    default: 0
-                },
-                lastUpdated: {
-                    type: Date,
-                    default: Date.now
-                },
-                metadata: [{
-                    type: mongoose.Schema.Types.Mixed,
-                    default: []
-                }]
-            }
-        }
+  action: {
+    type: String,
+    required: true,
+  },
 
-        super(schemaDefinition, {collection: 'activities'})
-    }
+  resource: {
+    type: String,
+    required: true,
+  },
 
-    getSchema(){
-        const schema = super.getSchema();
-        schema.index({ user: 1, timestamp: -1 });
-        schema.index({ action: 1, targetType: 1 });
-        schema.index({ action: 1, 'siteVisits.date': 1 }); // For site visit queries
-        schema.index({ targetType: 1, targetId: 1 });
-        schema.index({ timestamp: -1 }); // For recent activities
-        return schema;
-    }
-}
+  resourceId: mongoose.Schema.Types.ObjectId,
 
-export default mongoose.model('Activity', new Activity().getSchema());
+  description: String,
 
+  metadata: mongoose.Schema.Types.Mixed,
+
+  ipAddress: String,
+
+  userAgent: String,
+};
+
+const activityModel = new BaseModel(ActivitySchema, {
+  collection: "activities",
+  timestamps: true,
+});
+
+activityModel.addCompoundIndex([{ user: 1 }, { createdAt: -1 }]);
+activityModel.addCompoundIndex([{ resource: 1 }, { resourceId: 1 }]);
+activityModel.addIndex({ action: 1, createdAt: -1 });
+
+const Activity = activityModel.getModel("Activity");
+
+export default Activity;

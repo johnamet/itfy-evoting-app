@@ -1,404 +1,450 @@
-#!/usr/bin/env node
+import BaseRepository from '../BaseRepository.js';
+import Role from '../../models/Role.js';
+import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+
 /**
- * Role Repository
+ * RoleRepository
  * 
- * Extends BaseRepository to provide Role-specific database operations.
- * Includes role management, level-based operations, and permission handling.
+ * Manages user roles and permissions with intelligent caching. Roles are cached with a 2-hour TTL
+ * since they rarely change but are checked frequently for authorization.
+ * 
+ * Cache Strategy:
+ * - Read operations are cached with long TTL (2 hours)
+ * - Name-based lookups are heavily cached
+ * - Level-based queries are cached
+ * - Permission checks use cached role data
+ * 
+ * @extends BaseRepository
  */
-
-import BaseRepository from './BaseRepository.js';
-import Role from '../models/Role.js';
-
 class RoleRepository extends BaseRepository {
-    
     constructor() {
-        // Get the Role model
-        super(Role);
+        super(Role, {
+            enableCache: true,
+            cacheManager: mainCacheManager,
+            cacheTTL: 7200 // 2 hours
+        });
     }
 
     /**
      * Create a new role
+     * 
      * @param {Object} roleData - Role data
+     * @param {string} roleData.name - Role name (unique)
+     * @param {number} roleData.level - Authorization level (1-4)
+     * @param {Array<string>} [roleData.permissions=[]] - Array of permission strings
+     * @param {string} [roleData.description] - Role description
+     * @param {Object} [options={}] - Repository options
      * @returns {Promise<Object>} Created role
      */
-    async createRole(roleData) {
-        try {
-            // Check if role name already exists
-            const existingRole = await this.findByName(roleData.name);
-            if (existingRole) {
-                throw new Error(`Role with name '${roleData.name}' already exists`);
-            }
+    async createRole(roleData, options = {}) {
+        this._validateRequiredFields(roleData, ['name', 'level']);
 
-            // Check if role level already exists
-            const existingLevel = await this.findByLevel(roleData.level);
-            if (existingLevel) {
-                throw new Error(`Role with level '${roleData.level}' already exists`);
-            }
-
-            return await this.create(roleData);
-        } catch (error) {
-            throw this._handleError(error, 'createRole');
+        // Validate level range
+        if (roleData.level < 1 || roleData.level > 4) {
+            throw new Error('Role level must be between 1 and 4');
         }
+
+        // Check if role name already exists
+        const existing = await this.findByName(roleData.name, { skipCache: true });
+        if (existing) {
+            throw new Error('Role name already exists');
+        }
+
+        const roleToCreate = {
+            ...roleData,
+            permissions: roleData.permissions || []
+        };
+
+        return await this.create(roleToCreate, options);
     }
 
     /**
      * Find role by name
-     * @param {String} name - Role name
+     * Heavily cached for authorization checks
+     * 
+     * @param {string} name - Role name
+     * @param {Object} [options={}] - Query options
      * @returns {Promise<Object|null>} Role or null
      */
-    async findByName(name) {
-        try {
-            return await this.findOne({ name: name.trim() });
-        } catch (error) {
-            throw this._handleError(error, 'findByName');
+    async findByName(name, options = {}) {
+        if (!name) {
+            throw new Error('Role name is required');
         }
+
+        return await this.findOne({ name }, options);
     }
 
     /**
-     * Find role by level
-     * @param {Number} level - Role level
-     * @returns {Promise<Object|null>} Role or null
+     * Find roles by level
+     * 
+     * @param {number} level - Authorization level
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Roles at level
      */
-    async findByLevel(level) {
-        try {
-            return await this.findOne({ level: level });
-        } catch (error) {
-            throw this._handleError(error, 'findByLevel');
+    async findByLevel(level, options = {}) {
+        if (!level) {
+            throw new Error('Level is required');
         }
-    }
 
-    /**
-     * Get all roles ordered by level
-     * @param {String} order - Sort order ('asc' or 'desc')
-     * @returns {Promise<Array>} Roles ordered by level
-     */
-    async getAllRolesByLevel(order = 'asc') {
-        try {
-            const sortOrder = order === 'desc' ? -1 : 1;
-            return await this.find({}, {
-                sort: { level: sortOrder }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getAllRolesByLevel');
+        if (level < 1 || level > 4) {
+            throw new Error('Level must be between 1 and 4');
         }
-    }
 
-    /**
-     * Get roles by level range
-     * @param {Number} minLevel - Minimum level
-     * @param {Number} maxLevel - Maximum level
-     * @returns {Promise<Array>} Roles within level range
-     */
-    async getRolesByLevelRange(minLevel, maxLevel) {
-        try {
-            return await this.find({
-                level: { 
-                    $gte: minLevel, 
-                    $lte: maxLevel 
-                }
-            }, {
-                sort: { level: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getRolesByLevelRange');
-        }
-    }
-
-    /**
-     * Get roles above a certain level
-     * @param {Number} level - Minimum level (exclusive)
-     * @returns {Promise<Array>} Roles above the specified level
-     */
-    async getRolesAboveLevel(level) {
-        try {
-            return await this.find({
-                level: { $gt: level }
-            }, {
-                sort: { level: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getRolesAboveLevel');
-        }
-    }
-
-    /**
-     * Get roles below a certain level
-     * @param {Number} level - Maximum level (exclusive)
-     * @returns {Promise<Array>} Roles below the specified level
-     */
-    async getRolesBelowLevel(level) {
-        try {
-            return await this.find({
-                level: { $lt: level }
-            }, {
-                sort: { level: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getRolesBelowLevel');
-        }
-    }
-
-    /**
-     * Update role by name
-     * @param {String} name - Role name
-     * @param {Object} updateData - Data to update
-     * @returns {Promise<Object|null>} Updated role
-     */
-    async updateRoleByName(name, updateData) {
-        try {
-            const role = await this.findByName(name);
-            if (!role) {
-                throw new Error(`Role with name '${name}' not found`);
+        return await this.find(
+            { level },
+            {
+                ...options,
+                sort: options.sort || { name: 1 }
             }
-
-            // If updating name, check for conflicts
-            if (updateData.name && updateData.name !== name) {
-                const existingRole = await this.findByName(updateData.name);
-                if (existingRole) {
-                    throw new Error(`Role with name '${updateData.name}' already exists`);
-                }
-            }
-
-            // If updating level, check for conflicts
-            if (updateData.level && updateData.level !== role.level) {
-                const existingLevel = await this.findByLevel(updateData.level);
-                if (existingLevel) {
-                    throw new Error(`Role with level '${updateData.level}' already exists`);
-                }
-            }
-
-            return await this.updateById(role._id, updateData);
-        } catch (error) {
-            throw this._handleError(error, 'updateRoleByName');
-        }
+        );
     }
 
     /**
-     * Delete role by name
-     * @param {String} name - Role name
-     * @returns {Promise<Object|null>} Deleted role
+     * Find roles at or above a level
+     * 
+     * @param {number} minLevel - Minimum level
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Roles at or above level
      */
-    async deleteRoleByName(name) {
-        try {
-            const role = await this.findByName(name);
-            if (!role) {
-                throw new Error(`Role with name '${name}' not found`);
-            }
-
-            return await this.deleteById(role._id);
-        } catch (error) {
-            throw this._handleError(error, 'deleteRoleByName');
+    async findByMinLevel(minLevel, options = {}) {
+        if (!minLevel) {
+            throw new Error('Minimum level is required');
         }
+
+        if (minLevel < 1 || minLevel > 4) {
+            throw new Error('Level must be between 1 and 4');
+        }
+
+        return await this.find(
+            { level: { $gte: minLevel } },
+            {
+                ...options,
+                sort: options.sort || { level: 1, name: 1 }
+            }
+        );
     }
 
-    
+    /**
+     * Update role permissions
+     * 
+     * @param {string} roleId - Role ID
+     * @param {Array<string>} permissions - New permissions array
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated role
+     */
+    async updatePermissions(roleId, permissions, options = {}) {
+        if (!roleId) {
+            throw new Error('Role ID is required');
+        }
+
+        if (!Array.isArray(permissions)) {
+            throw new Error('Permissions must be an array');
+        }
+
+        return await this.updateById(roleId, { permissions }, options);
+    }
+
+    /**
+     * Add permission to role
+     * 
+     * @param {string} roleId - Role ID
+     * @param {string} permission - Permission to add
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated role
+     */
+    async addPermission(roleId, permission, options = {}) {
+        if (!roleId || !permission) {
+            throw new Error('Role ID and permission are required');
+        }
+
+        const role = await this.findById(roleId, { skipCache: true });
+        
+        if (!role) {
+            throw new Error('Role not found');
+        }
+
+        if (role.permissions.includes(permission)) {
+            return role; // Permission already exists
+        }
+
+        const updatedPermissions = [...role.permissions, permission];
+        return await this.updateById(roleId, { permissions: updatedPermissions }, options);
+    }
+
+    /**
+     * Remove permission from role
+     * 
+     * @param {string} roleId - Role ID
+     * @param {string} permission - Permission to remove
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated role
+     */
+    async removePermission(roleId, permission, options = {}) {
+        if (!roleId || !permission) {
+            throw new Error('Role ID and permission are required');
+        }
+
+        const role = await this.findById(roleId, { skipCache: true });
+        
+        if (!role) {
+            throw new Error('Role not found');
+        }
+
+        const updatedPermissions = role.permissions.filter(p => p !== permission);
+        return await this.updateById(roleId, { permissions: updatedPermissions }, options);
+    }
+
+    /**
+     * Check if role has permission
+     * 
+     * @param {string} roleId - Role ID
+     * @param {string} permission - Permission to check
+     * @returns {Promise<boolean>} True if role has permission
+     */
+    async hasPermission(roleId, permission) {
+        if (!roleId || !permission) {
+            throw new Error('Role ID and permission are required');
+        }
+
+        const role = await this.findById(roleId);
+        
+        if (!role) {
+            return false;
+        }
+
+        return role.permissions.includes(permission);
+    }
+
+    /**
+     * Update role level
+     * 
+     * @param {string} roleId - Role ID
+     * @param {number} newLevel - New level (1-4)
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated role
+     */
+    async updateLevel(roleId, newLevel, options = {}) {
+        if (!roleId) {
+            throw new Error('Role ID is required');
+        }
+
+        if (newLevel < 1 || newLevel > 4) {
+            throw new Error('Level must be between 1 and 4');
+        }
+
+        return await this.updateById(roleId, { level: newLevel }, options);
+    }
+
+    /**
+     * Update role
+     * Prevents updating name after creation
+     * 
+     * @param {string} roleId - Role ID
+     * @param {Object} updateData - Update data
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated role
+     */
+    async updateRole(roleId, updateData, options = {}) {
+        if (!roleId) {
+            throw new Error('Role ID is required');
+        }
+
+        // Prevent updating name (immutable)
+        const { name, ...safeUpdateData } = updateData;
+
+        return await this.updateById(roleId, safeUpdateData, options);
+    }
+
+    /**
+     * Delete a role
+     * Should check if role is assigned to users before deletion
+     * 
+     * @param {string} roleId - Role ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Deleted role
+     */
+    async deleteRole(roleId, options = {}) {
+        if (!roleId) {
+            throw new Error('Role ID is required');
+        }
+
+        return await this.deleteById(roleId, options);
+    }
+
+    /**
+     * Get all roles sorted by level
+     * 
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} All roles
+     */
+    async getAllRoles(options = {}) {
+        return await this.find(
+            {},
+            {
+                ...options,
+                sort: options.sort || { level: 1, name: 1 }
+            }
+        );
+    }
+
+    /**
+     * Get role hierarchy
+     * Returns roles organized by level
+     * 
+     * @returns {Promise<Object>} Role hierarchy
+     */
+    async getRoleHierarchy() {
+        const roles = await this.getAllRoles();
+
+        const hierarchy = {
+            level1: [],
+            level2: [],
+            level3: [],
+            level4: []
+        };
+
+        roles.forEach(role => {
+            hierarchy[`level${role.level}`].push({
+                id: role._id,
+                name: role.name,
+                permissions: role.permissions,
+                description: role.description
+            });
+        });
+
+        return hierarchy;
+    }
+
+    /**
+     * Get all unique permissions across all roles
+     * 
+     * @returns {Promise<Array<string>>} List of unique permissions
+     */
+    async getAllPermissions() {
+        const roles = await this.getAllRoles();
+        
+        const permissionsSet = new Set();
+        roles.forEach(role => {
+            role.permissions.forEach(permission => {
+                permissionsSet.add(permission);
+            });
+        });
+
+        return Array.from(permissionsSet).sort();
+    }
+
+    /**
+     * Find roles with specific permission
+     * 
+     * @param {string} permission - Permission to search for
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Roles with permission
+     */
+    async findByPermission(permission, options = {}) {
+        if (!permission) {
+            throw new Error('Permission is required');
+        }
+
+        return await this.find(
+            { permissions: permission },
+            {
+                ...options,
+                sort: options.sort || { level: 1, name: 1 }
+            }
+        );
+    }
+
+    /**
+     * Count roles by level
+     * 
+     * @param {number} level - Level to count
+     * @returns {Promise<number>} Role count
+     */
+    async countByLevel(level) {
+        if (!level) {
+            throw new Error('Level is required');
+        }
+
+        return await this.count({ level });
+    }
 
     /**
      * Get role statistics
+     * 
      * @returns {Promise<Object>} Role statistics
      */
-    async getRoleStatistics() {
-        try {         
-            const pipeline = [
+    async getRoleStats() {
+        const [totalRoles, levelCounts, allPermissions] = await Promise.all([
+            this.count({}),
+            this.Model.aggregate([
                 {
                     $group: {
-                        _id: null,
-                        totalRoles: { $sum: 1 },
-                        minLevel: { $min: '$level' },
-                        maxLevel: { $max: '$level' },
-                        avgLevel: { $avg: '$level' },
-                        roles: { $push: { name: '$name', level: '$level' } }
+                        _id: '$level',
+                        count: { $sum: 1 }
                     }
                 },
                 {
-                    $project: {
-                        _id: 0,
-                        totalRoles: 1,
-                        minLevel: 1,
-                        maxLevel: 1,
-                        avgLevel: { $round: ['$avgLevel', 2] },
-                        levelRange: { $subtract: ['$maxLevel', '$minLevel'] },
-                        roles: 1
-                    }
+                    $sort: { '_id': 1 }
                 }
-            ];
+            ]),
+            this.getAllPermissions()
+        ]);
 
-            const [stats] = await this.aggregate(pipeline);
-            
-            return stats || {
-                totalRoles: 0,
-                minLevel: null,
-                maxLevel: null,
-                avgLevel: null,
-                levelRange: null,
-                roles: []
-            };
-        } catch (error) {
-            throw this._handleError(error, 'getRoleStatistics');
-        }
+        const levelBreakdown = levelCounts.reduce((acc, item) => {
+            acc[`level${item._id}`] = item.count;
+            return acc;
+        }, {});
+
+        return {
+            totalRoles,
+            levelBreakdown,
+            totalUniquePermissions: allPermissions.length
+        };
     }
 
     /**
-     * Get highest level role
-     * @returns {Promise<Object|null>} Highest level role
+     * Clone role permissions to another role
+     * 
+     * @param {string} sourceRoleId - Source role ID
+     * @param {string} targetRoleId - Target role ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated target role
      */
-    async getHighestLevelRole() {
-        try {
-            const roles = await this.find({}, {
-                sort: { level: -1 },
-                limit: 1
-            });
-            
-            return roles.length > 0 ? roles[0] : null;
-        } catch (error) {
-            throw this._handleError(error, 'getHighestLevelRole');
+    async clonePermissions(sourceRoleId, targetRoleId, options = {}) {
+        if (!sourceRoleId || !targetRoleId) {
+            throw new Error('Source and target role IDs are required');
         }
+
+        const sourceRole = await this.findById(sourceRoleId);
+        
+        if (!sourceRole) {
+            throw new Error('Source role not found');
+        }
+
+        return await this.updatePermissions(targetRoleId, sourceRole.permissions, options);
     }
 
     /**
-     * Get lowest level role
-     * @returns {Promise<Object|null>} Lowest level role
+     * Validate role structure
+     * Ensures default roles exist
+     * 
+     * @param {Array<string>} requiredRoles - Array of required role names
+     * @returns {Promise<Object>} Validation result
      */
-    async getLowestLevelRole() {
-        try {
-            const roles = await this.find({}, {
-                sort: { level: 1 },
-                limit: 1
-            });
-            
-            return roles.length > 0 ? roles[0] : null;
-        } catch (error) {
-            throw this._handleError(error, 'getLowestLevelRole');
+    async validateRequiredRoles(requiredRoles) {
+        if (!Array.isArray(requiredRoles) || requiredRoles.length === 0) {
+            throw new Error('Required roles array is required');
         }
-    }
 
-    /**
-     * Search roles by name pattern
-     * @param {String} pattern - Search pattern
-     * @param {Object} options - Query options
-     * @returns {Promise<Array>} Matching roles
-     */
-    async searchRolesByName(pattern, options = {}) {
-        try {
-            const searchRegex = new RegExp(pattern, 'i');
-            return await this.find({
-                name: { $regex: searchRegex }
-            }, {
-                ...options,
-                sort: { level: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'searchRolesByName');
-        }
-    }
+        const existingRoles = await this.find({ name: { $in: requiredRoles } });
+        const existingNames = existingRoles.map(r => r.name);
+        const missingRoles = requiredRoles.filter(name => !existingNames.includes(name));
 
-    /**
-     * Validate role data
-     * @param {Object} roleData - Role data to validate
-     * @returns {Promise<Boolean>} True if valid
-     */
-    async validateRoleData(roleData) {
-        try {
-            const errors = [];
-
-            // Validate name
-            if (!roleData.name || typeof roleData.name !== 'string') {
-                errors.push('Role name is required and must be a string');
-            } else if (roleData.name.trim().length < 2) {
-                errors.push('Role name must be at least 2 characters long');
-            } else if (roleData.name.trim().length > 50) {
-                errors.push('Role name must be less than 50 characters');
-            }
-
-            // Validate level
-            if (roleData.level === undefined || roleData.level === null) {
-                errors.push('Role level is required');
-            } else if (!Number.isInteger(roleData.level)) {
-                errors.push('Role level must be an integer');
-            } else if (roleData.level < 0) {
-                errors.push('Role level must be non-negative');
-            } else if (roleData.level > 1000) {
-                errors.push('Role level must be less than or equal to 1000');
-            }
-
-            if (errors.length > 0) {
-                throw new Error(`Validation errors: ${errors.join(', ')}`);
-            }
-
-            return true;
-        } catch (error) {
-            throw this._handleError(error, 'validateRoleData');
-        }
-    }
-
-    /**
-     * Bulk create roles
-     * @param {Array} rolesData - Array of role data
-     * @returns {Promise<Array>} Created roles
-     */
-    async bulkCreateRoles(rolesData) {
-        try {
-            const createdRoles = [];
-            const errors = [];
-
-            for (const roleData of rolesData) {
-                try {
-                    await this.validateRoleData(roleData);
-                    const role = await this.createRole(roleData);
-                    createdRoles.push(role);
-                } catch (error) {
-                    errors.push({
-                        roleData,
-                        error: error.message
-                    });
-                }
-            }
-
-            return {
-                success: createdRoles,
-                errors: errors,
-                successCount: createdRoles.length,
-                errorCount: errors.length
-            };
-        } catch (error) {
-            throw this._handleError(error, 'bulkCreateRoles');
-        }
-    }
-
-    /**
-     * Get roles with pagination
-     * @param {Number} page - Page number (1-based)
-     * @param {Number} limit - Items per page
-     * @param {Object} filter - Filter criteria
-     * @returns {Promise<Object>} Paginated roles
-     */
-    async getRolesWithPagination(page = 1, limit = 10, filter = {}) {
-        try {
-            const skip = (page - 1) * limit;
-            
-            const roles = await this.find(filter, {
-                skip,
-                limit,
-                sort: { level: 1 }
-            });
-
-            const total = await this.countDocuments(filter);
-            const totalPages = Math.ceil(total / limit);
-
-            return {
-                roles,
-                pagination: {
-                    currentPage: page,
-                    totalPages,
-                    totalItems: total,
-                    itemsPerPage: limit,
-                    hasNextPage: page < totalPages,
-                    hasPrevPage: page > 1
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'getRolesWithPagination');
-        }
+        return {
+            valid: missingRoles.length === 0,
+            missingRoles,
+            existingRoles: existingNames
+        };
     }
 }
 

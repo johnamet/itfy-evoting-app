@@ -1,696 +1,487 @@
-#!/usr/bin/env node
-/**
- * VoteBundle Repository
- * 
- * Extends BaseRepository to provide VoteBundle-specific database operations.
- * Handles vote bundle packages, pricing, popularity, and coupon integration.
- * 
- * @module VoteBundleRepository
- */
-
-import mongoose from 'mongoose';
-import BaseRepository from './BaseRepository.js';
-import VoteBundle from '../models/VoteBundle.js';
+import BaseRepository from '../BaseRepository.js';
+import VoteBundle from '../../models/VoteBundle.js';
+import { mainCacheManager } from '../../utils/engine/CacheManager.js';
 
 /**
- * Repository class for managing VoteBundle operations.
+ * VoteBundleRepository
+ * 
+ * Manages vote bundles (packages of votes for purchase) with intelligent caching.
+ * Vote bundles are cached with a 30-minute TTL since they are accessed frequently
+ * but don't change often.
+ * 
+ * Cache Strategy:
+ * - Read operations are cached automatically
+ * - Price and vote count queries are cached
+ * - Purchase count updates invalidate entity caches
+ * - Active status changes invalidate caches
+ * 
  * @extends BaseRepository
  */
 class VoteBundleRepository extends BaseRepository {
-    /**
-     * Initializes the repository with the VoteBundle model.
-     */
     constructor() {
-        super(VoteBundle);
+        super(VoteBundle, {
+            enableCache: true,
+            cacheManager: mainCacheManager,
+            cacheTTL: 1800 // 30 minutes
+        });
     }
 
     /**
-     * Creates a new vote bundle with validated data.
-     * @param {Object} bundleData - The data for the new vote bundle.
-     * @param {Object} [options={}] - Additional Mongoose options (e.g., session).
-     * @returns {Promise<Object>} The created vote bundle.
-     * @throws {Error} If validation fails or the operation encounters an error.
+     * Create a new vote bundle
+     * 
+     * @param {Object} bundleData - Bundle data
+     * @param {string} bundleData.name - Bundle name
+     * @param {number} bundleData.voteCount - Number of votes in bundle
+     * @param {number} bundleData.price - Bundle price
+     * @param {string} [bundleData.description] - Bundle description
+     * @param {boolean} [bundleData.featured=false] - Whether bundle is featured
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Created vote bundle
      */
     async createBundle(bundleData, options = {}) {
-        try {
-            this._validateBundleData(bundleData);
+        this._validateRequiredFields(bundleData, ['name', 'voteCount', 'price']);
 
-            // Normalize input arrays and defaults
-            bundleData.features = Array.isArray(bundleData.features) ? bundleData.features : [bundleData.features].filter(Boolean);
-            bundleData.applicableEvents = Array.isArray(bundleData.applicableEvents) ? bundleData.applicableEvents : [bundleData.applicableEvents].filter(Boolean);
-            bundleData.applicableCategories = Array.isArray(bundleData.applicableCategories) ? bundleData.applicableCategories : [bundleData.applicableCategories].filter(Boolean);
-            bundleData.currency = bundleData.currency || 'GHS';
-
-            return await this.create(bundleData, options);
-        } catch (error) {
-            throw this._handleError(error, 'createBundle');
+        if (bundleData.voteCount <= 0) {
+            throw new Error('Vote count must be positive');
         }
+
+        if (bundleData.price < 0) {
+            throw new Error('Price cannot be negative');
+        }
+
+        const bundleToCreate = {
+            ...bundleData,
+            featured: bundleData.featured !== undefined ? bundleData.featured : false,
+            active: true,
+            purchaseCount: 0
+        };
+
+        return await this.create(bundleToCreate, options);
     }
 
     /**
-     * Finds vote bundles by popularity status.
-     * @param {boolean} [isPopular=true] - Whether to find popular bundles.
-     * @param {Object} [options={}] - Query options (e.g., populate, sort).
-     * @returns {Promise<Array>} Array of vote bundles.
-     * @throws {Error} If the operation encounters an error.
+     * Find active bundles
+     * 
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Active vote bundles
      */
-    async findByPopularity(isPopular = true, options = {}) {
-        try {
-            const criteria = { popular: isPopular, isActive: true };
-            return await this.find(criteria, {
+    async findActiveBundles(options = {}) {
+        return await this.find(
+            { active: true },
+            {
                 ...options,
-                sort: { votes: -1, price: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByPopularity');
-        }
+                sort: options.sort || { voteCount: 1 }
+            }
+        );
     }
 
     /**
-     * Finds vote bundles within a specified price range.
-     * @param {number} minPrice - Minimum price.
-     * @param {number} maxPrice - Maximum price.
-     * @param {string} [currency=null] - Currency filter.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of vote bundles.
-     * @throws {Error} If the operation encounters an error.
+     * Find featured bundles
+     * 
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Featured bundles
      */
-    async findByPriceRange(minPrice, maxPrice, currency = null, options = {}) {
-        try {
-            const criteria = {
-                price: { $gte: minPrice, $lte: maxPrice },
-                isActive: true
-            };
-            if (currency) criteria.currency = currency;
-
-            return await this.find(criteria, {
+    async findFeaturedBundles(options = {}) {
+        return await this.find(
+            { active: true, featured: true },
+            {
                 ...options,
-                sort: { price: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByPriceRange');
-        }
+                sort: options.sort || { voteCount: 1 }
+            }
+        );
     }
 
     /**
-     * Finds vote bundles within a specified vote count range.
-     * @param {number} minVotes - Minimum vote count.
-     * @param {number} [maxVotes=null] - Maximum vote count.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of vote bundles.
-     * @throws {Error} If the operation encounters an error.
+     * Find bundle by vote count
+     * 
+     * @param {number} voteCount - Exact vote count
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Object|null>} Vote bundle or null
      */
-    async findByVoteRange(minVotes, maxVotes = null, options = {}) {
-        try {
-            const criteria = { votes: { $gte: minVotes }, isActive: true };
-            if (maxVotes !== null) criteria.votes.$lte = maxVotes;
+    async findByVoteCount(voteCount, options = {}) {
+        if (!voteCount) {
+            throw new Error('Vote count is required');
+        }
 
-            return await this.find(criteria, {
+        return await this.findOne(
+            { voteCount, active: true },
+            options
+        );
+    }
+
+    /**
+     * Find bundles in price range
+     * 
+     * @param {number} minPrice - Minimum price
+     * @param {number} maxPrice - Maximum price
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Bundles in price range
+     */
+    async findByPriceRange(minPrice, maxPrice, options = {}) {
+        if (minPrice === undefined || maxPrice === undefined) {
+            throw new Error('Min and max price are required');
+        }
+
+        return await this.find(
+            {
+                active: true,
+                price: { $gte: minPrice, $lte: maxPrice }
+            },
+            {
                 ...options,
-                sort: { votes: 1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByVoteRange');
-        }
+                sort: options.sort || { price: 1 }
+            }
+        );
     }
 
     /**
-     * Finds vote bundles applicable to a specific event.
-     * @param {string|ObjectId} eventId - The event ID.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of vote bundles.
-     * @throws {Error} If the operation encounters an error.
+     * Update bundle
+     * 
+     * @param {string} bundleId - Bundle ID
+     * @param {Object} updateData - Update data
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated bundle
      */
-    async findByEvent(eventId, options = {}) {
-        try {
-            const criteria = {
-                applicableEvents: new mongoose.Types.ObjectId(eventId),
-                isActive: true
-            };
-            return await this.find(criteria, {
-                ...options,
-                populate: [
-                    { path: 'applicableEvents', select: 'name status' },
-                    { path: 'applicableCategories', select: 'name' },
-                    { path: 'createdBy', select: 'name email' }
-                ],
-                sort: { popular: -1, votes: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByEvent');
+    async updateBundle(bundleId, updateData, options = {}) {
+        if (!bundleId) {
+            throw new Error('Bundle ID is required');
         }
+
+        // Validate if voteCount or price is being updated
+        if (updateData.voteCount !== undefined && updateData.voteCount <= 0) {
+            throw new Error('Vote count must be positive');
+        }
+
+        if (updateData.price !== undefined && updateData.price < 0) {
+            throw new Error('Price cannot be negative');
+        }
+
+        // Prevent updating purchaseCount directly
+        const { purchaseCount, ...safeUpdateData } = updateData;
+
+        return await this.updateById(bundleId, safeUpdateData, options);
     }
 
     /**
-     * Finds vote bundles applicable to a specific category.
-     * @param {string|ObjectId} categoryId - The category ID.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of vote bundles.
-     * @throws {Error} If the operation encounters an error.
+     * Increment purchase count
+     * 
+     * @param {string} bundleId - Bundle ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated bundle
      */
-    async findByCategory(categoryId, options = {}) {
-        try {
-            const criteria = {
-                applicableCategories: new mongoose.Types.ObjectId(categoryId),
-                isActive: true
-            };
-            return await this.find(criteria, {
-                ...options,
-                populate: [
-                    { path: 'applicableEvents', select: 'name status' },
-                    { path: 'applicableCategories', select: 'name' },
-                    { path: 'createdBy', select: 'name email' }
-                ],
-                sort: { popular: -1, votes: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByCategory');
+    async incrementPurchaseCount(bundleId, options = {}) {
+        if (!bundleId) {
+            throw new Error('Bundle ID is required');
         }
+
+        const bundle = await this.Model.findByIdAndUpdate(
+            bundleId,
+            { $inc: { purchaseCount: 1 } },
+            { new: true, session: options.session }
+        ).lean();
+
+        // Manually invalidate cache
+        await this._invalidateCache('findById', bundleId, { entity: bundle });
+
+        return bundle;
     }
 
     /**
-     * Finds vote bundles applicable to both an event and category.
-     * @param {string|ObjectId} eventId - The event ID.
-     * @param {string|ObjectId} categoryId - The category ID.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of vote bundles.
-     * @throws {Error} If the operation encounters an error.
-     */
-    async findByEventAndCategory(eventId, categoryId, options = {}) {
-        try {
-            const criteria = {
-                applicableEvents: new mongoose.Types.ObjectId(eventId),
-                applicableCategories: new mongoose.Types.ObjectId(categoryId),
-                isActive: true
-            };
-            return await this.find(criteria, {
-                ...options,
-                populate: [
-                    { path: 'applicableEvents', select: 'name status' },
-                    { path: 'applicableCategories', select: 'name' }
-                ],
-                sort: { popular: -1, votes: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByEventAndCategory');
-        }
-    }
-
-    /**
-     * Finds vote bundles created by a specific user.
-     * @param {string|ObjectId} userId - The user ID.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of vote bundles.
-     * @throws {Error} If the operation encounters an error.
-     */
-    async findByCreator(userId, options = {}) {
-        try {
-            const criteria = { createdBy: new mongoose.Types.ObjectId(userId) };
-            return await this.find(criteria, {
-                ...options,
-                populate: [
-                    { path: 'applicableEvents', select: 'name status' },
-                    { path: 'applicableCategories', select: 'name' }
-                ],
-                sort: { createdAt: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByCreator');
-        }
-    }
-
-    /**
-     * Finds vote bundles with specific features.
-     * @param {string|string[]} features - Feature(s) to search for.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of vote bundles.
-     * @throws {Error} If the operation encounters an error.
-     */
-    async findByFeatures(features, options = {}) {
-        try {
-            const featureArray = Array.isArray(features) ? features : [features];
-            const criteria = { features: { $in: featureArray }, isActive: true };
-            return await this.find(criteria, {
-                ...options,
-                sort: { popular: -1, votes: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findByFeatures');
-        }
-    }
-
-    /**
-     * Finds active vote bundles.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of active vote bundles.
-     * @throws {Error} If the operation encounters an error.
-     */
-    async findActive(options = {}) {
-        try {
-            const criteria = { isActive: true };
-            return await this.find(criteria, {
-                ...options,
-                populate: [
-                    { path: 'applicableEvents', select: 'name status' },
-                    { path: 'applicableCategories', select: 'name' },
-                    { path: 'createdBy', select: 'name email' }
-                ],
-                sort: { popular: -1, votes: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findActive');
-        }
-    }
-
-    /**
-     * Finds inactive vote bundles.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of inactive vote bundles.
-     * @throws {Error} If the operation encounters an error.
-     */
-    async findInactive(options = {}) {
-        try {
-            const criteria = { isActive: false };
-            return await this.find(criteria, {
-                ...options,
-                populate: [{ path: 'createdBy', select: 'name email' }],
-                sort: { createdAt: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findInactive');
-        }
-    }
-
-    /**
-     * Finds vote bundles eligible for coupons.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of coupon-eligible vote bundles.
-     * @throws {Error} If the operation encounters an error.
-     */
-    async findCouponEligible(options = {}) {
-        try {
-            const criteria = {
-                $or: [
-                    { applicableCoupons: { $exists: true, $ne: [] } },
-                    { price: { $gte: 10 } }
-                ],
-                isActive: true
-            };
-            return await this.find(criteria, {
-                ...options,
-                populate: [
-                    { path: 'applicableCoupons', select: 'code discountType discount expiryDate isActive' },
-                    { path: 'applicableEvents', select: 'name status' },
-                    { path: 'applicableCategories', select: 'name' }
-                ],
-                sort: { price: -1, votes: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'findCouponEligible');
-        }
-    }
-
-    /**
-     * Retrieves the best value vote bundles based on votes per price ratio.
-     * @param {number} [limit=10] - Number of bundles to return.
-     * @param {string} [currency=null] - Currency filter.
-     * @returns {Promise<Array>} Array of best value vote bundles.
-     * @throws {Error} If the operation encounters an error.
-     */
-    async getBestValueBundles(limit = 10, currency = null) {
-        try {
-            const matchStage = { isActive: true };
-            if (currency) matchStage.currency = currency;
-
-            const pipeline = [
-                { $match: matchStage },
-                { $addFields: { valueRatio: { $divide: ['$votes', '$price'] } } },
-                { $sort: { valueRatio: -1, popular: -1 } },
-                { $limit: limit },
-                {
-                    $project: {
-                        name: 1,
-                        description: 1,
-                        votes: 1,
-                        price: 1,
-                        currency: 1,
-                        features: 1,
-                        popular: 1,
-                        applicableEvents: 1,
-                        applicableCategories: 1,
-                        valueRatio: { $round: ['$valueRatio', 2] }
-                    }
-                }
-            ];
-
-            return await this.aggregate(pipeline);
-        } catch (error) {
-            throw this._handleError(error, 'getBestValueBundles');
-        }
-    }
-
-    /**
-     * Updates the price of a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {number} newPrice - The new price.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the price is invalid or the operation encounters an error.
-     */
-    async updatePricing(bundleId, newPrice, options = {}) {
-        try {
-            if (newPrice < 0) throw new Error('Price cannot be negative');
-            return await this.updateById(bundleId, { price: newPrice }, options);
-        } catch (error) {
-            throw this._handleError(error, 'updatePricing');
-        }
-    }
-
-    /**
-     * Toggles the popularity status of a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the bundle is not found or the operation encounters an error.
-     */
-    async togglePopularity(bundleId, options = {}) {
-        try {
-            const bundle = await this.findById(bundleId);
-            if (!bundle) throw new Error('Vote bundle not found');
-            return await this.updateById(bundleId, { popular: !bundle.popular }, options);
-        } catch (error) {
-            throw this._handleError(error, 'togglePopularity');
-        }
-    }
-
-    /**
-     * Toggles the active status of a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the bundle is not found or the operation encounters an error.
-     */
-    async toggleActiveStatus(bundleId, options = {}) {
-        try {
-            const bundle = await this.findById(bundleId);
-            if (!bundle) throw new Error('Vote bundle not found');
-            return await this.updateById(bundleId, { isActive: !bundle.isActive }, options);
-        } catch (error) {
-            throw this._handleError(error, 'toggleActiveStatus');
-        }
-    }
-
-    /**
-     * Activates a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the operation encounters an error.
+     * Activate bundle
+     * 
+     * @param {string} bundleId - Bundle ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated bundle
      */
     async activateBundle(bundleId, options = {}) {
-        try {
-            return await this.updateById(bundleId, { isActive: true }, options);
-        } catch (error) {
-            throw this._handleError(error, 'activateBundle');
+        if (!bundleId) {
+            throw new Error('Bundle ID is required');
         }
+
+        return await this.updateById(bundleId, { active: true }, options);
     }
 
     /**
-     * Deactivates a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the operation encounters an error.
+     * Deactivate bundle
+     * 
+     * @param {string} bundleId - Bundle ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated bundle
      */
     async deactivateBundle(bundleId, options = {}) {
-        try {
-            return await this.updateById(bundleId, { isActive: false }, options);
-        } catch (error) {
-            throw this._handleError(error, 'deactivateBundle');
+        if (!bundleId) {
+            throw new Error('Bundle ID is required');
         }
+
+        return await this.updateById(bundleId, { active: false }, options);
     }
 
     /**
-     * Adds features to a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {string|string[]} newFeatures - Feature(s) to add.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the operation encounters an error.
+     * Set bundle as featured
+     * 
+     * @param {string} bundleId - Bundle ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated bundle
      */
-    async addFeatures(bundleId, newFeatures, options = {}) {
-        try {
-            const featureArray = Array.isArray(newFeatures) ? newFeatures : [newFeatures];
-            return await this.updateById(bundleId, { $addToSet: { features: { $each: featureArray } } }, options);
-        } catch (error) {
-            throw this._handleError(error, 'addFeatures');
+    async setFeatured(bundleId, options = {}) {
+        if (!bundleId) {
+            throw new Error('Bundle ID is required');
         }
+
+        return await this.updateById(bundleId, { featured: true }, options);
     }
 
     /**
-     * Removes features from a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {string|string[]} featuresToRemove - Feature(s) to remove.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the operation encounters an error.
+     * Unset bundle as featured
+     * 
+     * @param {string} bundleId - Bundle ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Updated bundle
      */
-    async removeFeatures(bundleId, featuresToRemove, options = {}) {
-        try {
-            const featureArray = Array.isArray(featuresToRemove) ? featuresToRemove : [featuresToRemove];
-            return await this.updateById(bundleId, { $pull: { features: { $in: featureArray } } }, options);
-        } catch (error) {
-            throw this._handleError(error, 'removeFeatures');
+    async unsetFeatured(bundleId, options = {}) {
+        if (!bundleId) {
+            throw new Error('Bundle ID is required');
         }
+
+        return await this.updateById(bundleId, { featured: false }, options);
     }
 
     /**
-     * Adds applicable events to a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {string|string[]|ObjectId|ObjectId[]} eventIds - Event ID(s) to add.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the operation encounters an error.
+     * Delete bundle
+     * 
+     * @param {string} bundleId - Bundle ID
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Deleted bundle
      */
-    async addApplicableEvents(bundleId, eventIds, options = {}) {
-        try {
-            const eventArray = Array.isArray(eventIds) ? eventIds : [eventIds];
-            const objectIdArray = eventArray.map(id => new mongoose.Types.ObjectId(id));
-            return await this.updateById(bundleId, { $addToSet: { applicableEvents: { $each: objectIdArray } } }, options);
-        } catch (error) {
-            throw this._handleError(error, 'addApplicableEvents');
+    async deleteBundle(bundleId, options = {}) {
+        if (!bundleId) {
+            throw new Error('Bundle ID is required');
         }
+
+        return await this.deleteById(bundleId, options);
     }
 
     /**
-     * Removes applicable events from a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {string|string[]|ObjectId|ObjectId[]} eventIds - Event ID(s) to remove.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the operation encounters an error.
+     * Get most popular bundles
+     * Based on purchase count
+     * 
+     * @param {number} [limit=5] - Number of bundles to return
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Most popular bundles
      */
-    async removeApplicableEvents(bundleId, eventIds, options = {}) {
-        try {
-            const eventArray = Array.isArray(eventIds) ? eventIds : [eventIds];
-            const objectIdArray = eventArray.map(id => new mongoose.Types.ObjectId(id));
-            return await this.updateById(bundleId, { $pull: { applicableEvents: { $in: objectIdArray } } }, options);
-        } catch (error) {
-            throw this._handleError(error, 'removeApplicableEvents');
-        }
+    async getMostPopular(limit = 5, options = {}) {
+        return await this.find(
+            { active: true },
+            {
+                ...options,
+                sort: { purchaseCount: -1 },
+                limit
+            }
+        );
     }
 
     /**
-     * Adds applicable categories to a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {string|string[]|ObjectId|ObjectId[]} categoryIds - Category ID(s) to add.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the operation encounters an error.
+     * Calculate value per vote
+     * Returns bundles sorted by best value (price per vote)
+     * 
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Bundles with value metrics
      */
-    async addApplicableCategories(bundleId, categoryIds, options = {}) {
-        try {
-            const categoryArray = Array.isArray(categoryIds) ? categoryIds : [categoryIds];
-            const objectIdArray = categoryArray.map(id => new mongoose.Types.ObjectId(id));
-            return await this.updateById(bundleId, { $addToSet: { applicableCategories: { $each: objectIdArray } } }, options);
-        } catch (error) {
-            throw this._handleError(error, 'addApplicableCategories');
-        }
+    async findBestValue(options = {}) {
+        const bundles = await this.Model.aggregate([
+            { $match: { active: true } },
+            {
+                $addFields: {
+                    pricePerVote: {
+                        $divide: ['$price', '$voteCount']
+                    }
+                }
+            },
+            {
+                $sort: { pricePerVote: 1 }
+            },
+            {
+                $limit: options.limit || 10
+            }
+        ]);
+
+        return bundles;
     }
 
     /**
-     * Removes applicable categories from a vote bundle.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {string|string[]|ObjectId|ObjectId[]} categoryIds - Category ID(s) to remove.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object|null>} The updated vote bundle.
-     * @throws {Error} If the operation encounters an error.
-     */
-    async removeApplicableCategories(bundleId, categoryIds, options = {}) {
-        try {
-            const categoryArray = Array.isArray(categoryIds) ? categoryIds : [categoryIds];
-            const objectIdArray = categoryArray.map(id => new mongoose.Types.ObjectId(id));
-            return await this.updateById(bundleId, { $pull: { applicableCategories: { $in: objectIdArray } } }, options);
-        } catch (error) {
-            throw this._handleError(error, 'removeApplicableCategories');
-        }
-    }
-
-    /**
-     * Retrieves statistics and analytics for vote bundles.
-     * @returns {Promise<Object>} Bundle statistics.
-     * @throws {Error} If the operation encounters an error.
+     * Get bundle statistics
+     * 
+     * @returns {Promise<Object>} Bundle statistics
      */
     async getBundleStats() {
-        try {
-            const pipeline = [
+        const [totalBundles, activeBundles, featuredBundles, stats] = await Promise.all([
+            this.count({}),
+            this.count({ active: true }),
+            this.count({ active: true, featured: true }),
+            this.Model.aggregate([
+                { $match: { active: true } },
                 {
                     $group: {
                         _id: null,
-                        totalBundles: { $sum: 1 },
-                        popularBundles: { $sum: { $cond: [{ $eq: ['$popular', true] }, 1, 0] } },
+                        totalPurchases: { $sum: '$purchaseCount' },
                         avgPrice: { $avg: '$price' },
-                        maxPrice: { $max: '$price' },
                         minPrice: { $min: '$price' },
-                        totalVotes: { $sum: '$votes' },
-                        avgVotes: { $avg: '$votes' },
-                        maxVotes: { $max: '$votes' },
-                        minVotes: { $min: '$votes' }
-                    }
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        totalBundles: 1,
-                        popularBundles: 1,
-                        nonPopularBundles: { $subtract: ['$totalBundles', '$popularBundles'] },
-                        avgPrice: { $round: ['$avgPrice', 2] },
-                        maxPrice: 1,
-                        minPrice: 1,
-                        priceRange: { $subtract: ['$maxPrice', '$minPrice'] },
-                        totalVotes: 1,
-                        avgVotes: { $round: ['$avgVotes', 0] },
-                        maxVotes: 1,
-                        minVotes: 1,
-                        voteRange: { $subtract: ['$maxVotes', '$minVotes'] }
+                        maxPrice: { $max: '$price' },
+                        totalVotes: { $sum: '$voteCount' }
                     }
                 }
-            ];
+            ])
+        ]);
 
-            const [stats] = await this.aggregate(pipeline);
-            return stats || {
-                totalBundles: 0,
-                popularBundles: 0,
-                nonPopularBundles: 0,
-                avgPrice: 0,
-                maxPrice: 0,
-                minPrice: 0,
-                priceRange: 0,
-                totalVotes: 0,
-                avgVotes: 0,
-                maxVotes: 0,
-                minVotes: 0,
-                voteRange: 0
-            };
-        } catch (error) {
-            throw this._handleError(error, 'getBundleStats');
-        }
+        return {
+            totalBundles,
+            activeBundles,
+            inactiveBundles: totalBundles - activeBundles,
+            featuredBundles,
+            totalPurchases: stats[0]?.totalPurchases || 0,
+            avgPrice: stats[0]?.avgPrice?.toFixed(2) || '0.00',
+            minPrice: stats[0]?.minPrice || 0,
+            maxPrice: stats[0]?.maxPrice || 0,
+            totalAvailableVotes: stats[0]?.totalVotes || 0
+        };
     }
 
     /**
-     * Searches vote bundles by name, description, or features.
-     * @param {string} searchTerm - The search term.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of matching vote bundles.
-     * @throws {Error} If the operation encounters an error.
+     * Get revenue by bundle
+     * Calculate total revenue generated by each bundle
+     * 
+     * @returns {Promise<Array>} Revenue breakdown by bundle
      */
-    async searchBundles(searchTerm, options = {}) {
-        try {
-            const searchRegex = new RegExp(searchTerm, 'i');
-            const criteria = {
-                $or: [
-                    { name: { $regex: searchRegex } },
-                    { description: { $regex: searchRegex } },
-                    { features: { $regex: searchRegex } }
-                ]
-            };
-            return await this.find(criteria, {
+    async getRevenueByBundle() {
+        const revenue = await this.Model.aggregate([
+            { $match: { active: true } },
+            {
+                $addFields: {
+                    totalRevenue: {
+                        $multiply: ['$price', '$purchaseCount']
+                    }
+                }
+            },
+            {
+                $sort: { totalRevenue: -1 }
+            },
+            {
+                $project: {
+                    name: 1,
+                    voteCount: 1,
+                    price: 1,
+                    purchaseCount: 1,
+                    totalRevenue: 1
+                }
+            }
+        ]);
+
+        return revenue;
+    }
+
+    /**
+     * Get total revenue from all bundles
+     * 
+     * @returns {Promise<number>} Total revenue
+     */
+    async getTotalRevenue() {
+        const result = await this.Model.aggregate([
+            {
+                $group: {
+                    _id: null,
+                    totalRevenue: {
+                        $sum: {
+                            $multiply: ['$price', '$purchaseCount']
+                        }
+                    }
+                }
+            }
+        ]);
+
+        return result[0]?.totalRevenue || 0;
+    }
+
+    /**
+     * Find bundles not purchased yet
+     * 
+     * @param {Object} [options={}] - Query options
+     * @returns {Promise<Array>} Unpurchased bundles
+     */
+    async findUnpurchased(options = {}) {
+        return await this.find(
+            { active: true, purchaseCount: 0 },
+            {
                 ...options,
-                sort: { popular: -1, votes: -1, name: 1 }
+                sort: options.sort || { voteCount: 1 }
+            }
+        );
+    }
+
+    /**
+     * Clone bundle
+     * Creates a copy with a new name
+     * 
+     * @param {string} bundleId - Source bundle ID
+     * @param {string} newName - Name for the cloned bundle
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Cloned bundle
+     */
+    async cloneBundle(bundleId, newName, options = {}) {
+        if (!bundleId || !newName) {
+            throw new Error('Bundle ID and new name are required');
+        }
+
+        const sourceBundle = await this.findById(bundleId);
+        
+        if (!sourceBundle) {
+            throw new Error('Source bundle not found');
+        }
+
+        const { _id, createdAt, updatedAt, purchaseCount, ...bundleData } = sourceBundle.toObject();
+
+        const clonedBundleData = {
+            ...bundleData,
+            name: newName,
+            purchaseCount: 0
+        };
+
+        return await this.createBundle(clonedBundleData, options);
+    }
+
+    /**
+     * Bulk update bundle prices
+     * Apply percentage increase/decrease to all active bundles
+     * 
+     * @param {number} percentageChange - Percentage to change (positive for increase, negative for decrease)
+     * @param {Object} [options={}] - Repository options
+     * @returns {Promise<Object>} Update result
+     */
+    async bulkUpdatePrices(percentageChange, options = {}) {
+        if (percentageChange === undefined) {
+            throw new Error('Percentage change is required');
+        }
+
+        const bundles = await this.findActiveBundles({ skipCache: true });
+        
+        return await this.withTransaction(async (session) => {
+            const updates = bundles.map(bundle => {
+                const newPrice = bundle.price * (1 + percentageChange / 100);
+                const roundedPrice = Math.round(newPrice * 100) / 100; // Round to 2 decimals
+                
+                return this.updateById(
+                    bundle._id,
+                    { price: roundedPrice },
+                    { ...options, session }
+                );
             });
-        } catch (error) {
-            throw this._handleError(error, 'searchBundles');
-        }
-    }
 
-    /**
-     * Finds vote bundles within a specific budget.
-     * @param {number} budget - The maximum budget.
-     * @param {Object} [options={}] - Query options.
-     * @returns {Promise<Array>} Array of vote bundles within budget.
-     * @throws {Error} If the operation encounters an error.
-     */
-    async getBundlesForBudget(budget, options = {}) {
-        try {
-            const criteria = { price: { $lte: budget }, isActive: true };
-            return await this.find(criteria, {
-                ...options,
-                sort: { votes: -1, price: -1 }
-            });
-        } catch (error) {
-            throw this._handleError(error, 'getBundlesForBudget');
-        }
-    }
+            await Promise.all(updates);
 
-    /**
-     * Updates the popularity status of multiple vote bundles.
-     * @param {Object} criteria - Selection criteria.
-     * @param {boolean} popular - The new popularity status.
-     * @param {Object} [options={}] - Update options.
-     * @returns {Promise<Object>} Update result.
-     * @throws {Error} If the operation encounters an error.
-     */
-    async bulkUpdatePopularity(criteria, popular, options = {}) {
-        try {
-            return await this.updateMany(criteria, { popular }, options);
-        } catch (error) {
-            throw this._handleError(error, 'bulkUpdatePopularity');
-        }
-    }
-
-    /**
-     * Deletes a vote bundle if not used in any votes.
-     * @param {string|ObjectId} bundleId - The vote bundle ID.
-     * @param {Object} [options={}] - Delete options.
-     * @returns {Promise<Object|null>} The deleted vote bundle.
-     * @throws {Error} If the bundle is used in votes or the operation encounters an error.
-     */
-    async deleteBundle(bundleId, options = {}) {
-        try {
-            const voteCount = await mongoose.model('Vote').countDocuments({ voteBundles: bundleId });
-            if (voteCount > 0) throw new Error('Cannot delete vote bundle used in existing votes');
-            return await this.deleteById(bundleId, options);
-        } catch (error) {
-            throw this._handleError(error, 'deleteBundle');
-        }
-    }
-
-    /**
-     * Validates vote bundle data.
-     * @private
-     * @param {Object} bundleData - The data to validate.
-     * @throws {Error} If validation fails.
-     */
-    _validateBundleData(bundleData) {
-        const { name, description, votes, price } = bundleData;
-
-        if (!name?.trim()) throw new Error('Name is required');
-        if (!description?.trim()) throw new Error('Description is required');
-        if (!Number.isFinite(votes) || votes <= 0) throw new Error('Votes must be a positive number');
-        if (!Number.isFinite(price) || price < 0) throw new Error('Price must be a non-negative number');
-        if (bundleData.features && !Array.isArray(bundleData.features) && typeof bundleData.features !== 'string') {
-            throw new Error('Features must be an array or string');
-        }
+            return {
+                success: true,
+                updatedCount: bundles.length
+            };
+        });
     }
 }
 

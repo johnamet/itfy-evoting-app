@@ -1,72 +1,65 @@
 #!/usr/bin/env node
-
 /**
- * Slide
+ * Slide Model for carousel/slideshow content
+ *
+ * @module Slide
+ * @version 2.0.0
  */
 
-import BaseModel from './BaseModel.js';
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
+import validator from "validator";
+import BaseModel from "./BaseModel.js";
 
-class Slide  extends BaseModel{
+const SlideSchema = {
+  title: {
+    type: String,
+    required: true,
+  },
 
-    constructor(){
-        const schemaDefinition = {
-            title: {
-                type: String,
-                required: true,
-                trim: true
-            },
+  description: String,
 
-            subtitle: {
-                type: String,
-                required: true,
-                trim: true
-            },
-            image: {
-                type: String,
-                required: true,
-                trim: true
-            },
-            button: {
-                label: {
-                    type: String,
-                    required: true,
-                    trim: true
-                },
-                link: {
-                    type: String,
-                    required: true,
-                    trim: true
-                }
-            },
-            isActive: {
-                type: Boolean,
-                default: true
-            },
-            published: {
-                type: Boolean,
-                default: false
-            },
-            settings: {
-                type: Object,
-                default: {}
-            },
-            order: {
-                type: Number,
-                required: true
-            }
-        }
+  image: {
+    type: String,
+    required: true,
+    validate: {
+      validator: validator.isURL,
+      message: "Invalid image URL",
+    },
+  },
 
-        super(schemaDefinition, {collection: 'slides'})
-    }
+  link: {
+    type: String,
+    validate: {
+      validator: (v) => !v || validator.isURL(v),
+      message: "Invalid link URL",
+    },
+  },
 
-    getSchema(){
-        const schema = super.getSchema()
-        schema.index({ title: 1 }, { unique: true });
-        schema.index({ subtitle: 1 });
-        schema.index({title: "text", subtitle: "text"}, {name: "text_index"});
-        return schema
-    }
-}
+  order: {
+    type: Number,
+    default: 0,
+  },
 
-export default mongoose.model('Slide', new Slide().getSchema())
+  status: {
+    type: String,
+    enum: ["active", "inactive"],
+    default: "active",
+  },
+
+  event: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Event",
+  },
+};
+
+const slideModel = new BaseModel(SlideSchema, {
+  collection: "slides",
+  timestamps: true,
+});
+
+slideModel.addIndex({ order: 1 });
+slideModel.addIndex({ status: 1, order: 1 });
+
+const Slide = slideModel.getModel("Slide");
+
+export default Slide;

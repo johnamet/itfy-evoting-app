@@ -11,50 +11,22 @@
     "admin": "nodemon admin-console.js",
     "test": "npx mocha --recursive --exit --timeout 5000 --require @babel/register ./app/test/**/*.js --reporter spec",
     "dev": "nodemon --exec babel-node --presets @babel/preset-env ./app/app.js",
-    "lint": "./node_modules/.bin/eslint .",
+    "lint": "eslint .",
     "seed": "node seed-database.js",
     "seed:clear": "node seed-database.js --clear-only"
   },
   "dependencies": {
-    "bcrypt": "^6.0.0",
-    "bcryptjs": "^3.0.2",
-    "bull": "^4.16.5",
-    "chalk": "^4.1.2",
-    "cors": "^2.8.5",
-    "dotenv": "^17.2.0",
-    "express": "^5.1.0",
-    "figlet": "^1.8.2",
-    "geoip-lite": "^1.4.10",
-    "handlebars": "^4.7.8",
-    "helmet": "^8.1.0",
-    "ioredis": "^5.7.0",
-    "jsonwebtoken": "^9.0.2",
-    "mongodb-memory-server": "^10.1.4",
-    "mongoose": "^8.16.3",
-    "morgan": "^1.10.1",
-    "multer": "^2.0.2",
-    "node-fetch": "^3.3.2",
-    "nodemailer": "^7.0.5",
-    "redis": "^5.8.2",
-    "socket.io": "^4.8.1",
-    "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1",
-    "validator": "^13.15.15",
-    "winston": "^3.17.0"
+    "mongoose-aggregate-paginate-v2": "^1.1.4",
+    "mongoose-autopopulate": "^1.2.1",
+    "mongoose-paginate-v2": "^1.9.1",
+    "validator": "^13.15.23"
   },
-  "devDependencies": {
-    "@babel/cli": "^7.28.0",
-    "@babel/core": "^7.28.0",
-    "@babel/node": "^7.28.0",
-    "@babel/preset-env": "^7.28.0",
-    "@babel/register": "^7.27.1",
-    "@eslint/js": "^9.31.0",
-    "@types/chai": "^5.2.2",
-    "@types/sinon": "^17.0.4",
-    "chai": "^5.2.1",
-    "chai-sinon": "^2.8.1",
-    "mocha": "^11.7.1",
-    "nodemon": "^3.1.10",
-    "sinon": "^21.0.0"
-  }
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnamet/itfy-evoting-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/johnamet/itfy-evoting-app/issues"
+  },
+  "homepage": "https://github.com/johnamet/itfy-evoting-app#readme"
 }

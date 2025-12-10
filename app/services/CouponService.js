@@ -1,703 +1,493 @@
-#!/usr/bin/env node
 /**
- * Coupon Service
+ * CouponService
  * 
- * Handles coupon management including creation, validation,
- * usage tracking, and coupon-related business logic.
+ * Handles coupon validation, discount calculation, usage tracking, and statistics.
+ * Combines operations for both coupons and coupon usage records.
+ * 
+ * @extends BaseService
+ * @module services/CouponService
+ * @version 2.0.0
  */
 
 import BaseService from './BaseService.js';
-import CouponRepository from '../repositories/CouponRepository.js';
-import CouponUsageRepository from '../repositories/CouponUsageRepository.js';
-import EventRepository from '../repositories/EventRepository.js';
-import UserRepository from '../repositories/UserRepository.js';
-import ActivityRepository from '../repositories/ActivityRepository.js';
-import CacheService from './CacheService.js';
 
-class CouponService extends BaseService {
-    constructor() {
-        super();
-        this.couponRepository = new CouponRepository();
-        this.couponUsageRepository = new CouponUsageRepository();
-        this.eventRepository = new EventRepository();
-        this.userRepository = new UserRepository();
-        this.activityRepository = new ActivityRepository();
+export default class CouponService extends BaseService {
+    constructor(repositories) {
+        super(repositories, {
+            serviceName: 'CouponService',
+            primaryRepository: 'coupon',
+        });
+
+        this.discountTypes = ['percentage', 'fixed'];
     }
 
     /**
      * Create a new coupon
-     * @param {Object} couponData - Coupon data
-     * @param {String} createdBy - ID of user creating the coupon
-     * @returns {Promise<Object>} Created coupon
      */
-    async createCoupon(couponData, createdBy) {
-        try {
-            this._log('create_coupon', { code: couponData.code, eventId: couponData.eventId, createdBy });
-
+    async createCoupon(couponData, creatorId) {
+        return this.runInContext('createCoupon', async () => {
             // Validate required fields
-            this._validateRequiredFields(couponData, ['code', 'type', 'eventId']);
-            this._validateObjectId(couponData.eventId, 'Event ID');
-            this._validateObjectId(createdBy, 'Created By User ID');
+            this.validateRequiredFields(couponData, [
+                'code', 'discountType', 'discountValue'
+            ]);
 
-            // Validate coupon type
-            const validTypes = ['voting_access', 'early_access', 'admin_access', 'special_privilege'];
-            if (!validTypes.includes(couponData.type)) {
-                throw new Error('Invalid coupon type');
+            // Validate discount type
+            if (!this.discountTypes.includes(couponData.discountType)) {
+                throw new Error(`Invalid discount type. Must be one of: ${this.discountTypes.join(', ')}`);
             }
 
-            // Check if event exists
-            const event = await this.eventRepository.findById(couponData.eventId);
-            if (!event) {
-                throw new Error('Event not found');
+            // Validate discount value
+            if (couponData.discountType === 'percentage') {
+                if (couponData.discountValue < 0 || couponData.discountValue > 100) {
+                    throw new Error('Percentage discount must be between 0 and 100');
+                }
+            } else {
+                if (couponData.discountValue < 0) {
+                    throw new Error('Fixed discount value must be positive');
+                }
             }
 
-            // Check for duplicate coupon code
-            const existingCoupon = await this.couponRepository.findByCode(couponData.code);
+            // Check for duplicate code
+            const existingCoupon = await this.repo('coupon').findOne({
+                code: couponData.code.toUpperCase(),
+            });
+
             if (existingCoupon) {
                 throw new Error('Coupon code already exists');
             }
 
             // Validate dates
-            if (couponData.expiresAt && new Date(couponData.expiresAt) <= new Date()) {
-                throw new Error('Expiration date must be in the future');
-            }
-
-            if (couponData.validFrom && couponData.expiresAt) {
-                this._validateDateRange(couponData.validFrom, couponData.expiresAt);
+            if (couponData.expiryDate && this.isDatePast(couponData.expiryDate)) {
+                throw new Error('Expiry date cannot be in the past');
             }
 
             // Create coupon
-            const couponToCreate = {
-                ...this._sanitizeData(couponData),
-                code: couponData.code.toUpperCase().trim(),
-                isActive: couponData.isActive !== false, // Default to true
+            const coupon = await this.repo('coupon').create({
+                ...couponData,
+                code: couponData.code.toUpperCase(),
                 usageCount: 0,
-                createdBy,
-                createdAt: new Date()
-            };
-
-            const coupon = await this.couponRepository.create(couponToCreate);
-
-            // Log activity
-            await this.activityRepository.logActivity({
-                user: createdBy,
-                action: 'coupon_create',
-                targetType: 'coupon',
-                targetId: coupon._id,
-                metadata: { 
-                    couponCode: coupon.code,
-                    couponType: coupon.type,
-                    eventId: coupon.eventId,
-                    eventName: event.name
-                }
+                totalDiscount: 0,
+                active: true,
+                createdBy: creatorId,
             });
 
-            // Invalidate event cache
-            CacheService.invalidateEvent(couponData.eventId);
+            await this.logActivity(creatorId, 'create', 'coupon', {
+                couponId: coupon._id,
+                code: coupon.code,
+            });
 
-            this._log('create_coupon_success', { couponId: coupon._id, code: coupon.code });
-
-            return {
-                success: true,
-                coupon: {
-                    id: coupon._id,
-                    code: coupon.code,
-                    type: coupon.type,
-                    description: coupon.description,
-                    eventId: coupon.eventId,
-                    maxUsage: coupon.maxUsage,
-                    usageCount: coupon.usageCount,
-                    validFrom: coupon.validFrom,
-                    expiresAt: coupon.expiresAt,
-                    isActive: coupon.isActive,
-                    createdAt: coupon.createdAt
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'create_coupon', { code: couponData.code });
-        }
+            return this.handleSuccess({ coupon }, 'Coupon created successfully');
+        });
     }
 
     /**
-     * Validate and use a coupon
-     * @param {String} couponCode - Coupon code
-     * @param {String} userId - User ID using the coupon
-     * @param {Object} context - Additional context for coupon usage
-     * @returns {Promise<Object>} Validation and usage result
+     * Validate and apply coupon
      */
-    async useCoupon(couponCode, userId, context = {}) {
-        try {
-            this._log('use_coupon', { code: couponCode, userId });
+    async validateCoupon(code, eventId = null, userId = null, amount = null) {
+        return this.runInContext('validateCoupon', async () => {
+            const coupon = await this.repo('coupon').findOne({
+                code: code.toUpperCase(),
+            });
 
-            if (!couponCode || couponCode.trim().length === 0) {
-                throw new Error('Coupon code is required');
-            }
-
-            this._validateObjectId(userId, 'User ID');
-
-            // Get coupon
-            const coupon = await this.couponRepository.findByCode(couponCode.toUpperCase().trim());
             if (!coupon) {
                 throw new Error('Invalid coupon code');
             }
 
-            // Check if coupon is active
-            if (!coupon.isActive) {
-                throw new Error('Coupon is no longer active');
+            // Check if active
+            if (!coupon.active) {
+                throw new Error('This coupon is no longer active');
             }
 
-            // Check if coupon has expired
-            if (coupon.expiresAt && new Date() > new Date(coupon.expiresAt)) {
-                throw new Error('Coupon has expired');
+            // Check expiry date
+            if (coupon.expiryDate && this.isDatePast(coupon.expiryDate)) {
+                throw new Error('This coupon has expired');
             }
 
-            // Check if coupon is valid yet
-            if (coupon.validFrom && new Date() < new Date(coupon.validFrom)) {
-                throw new Error('Coupon is not valid yet');
-            }
-
-            // Check usage limits
+            // Check usage limit
             if (coupon.maxUsage && coupon.usageCount >= coupon.maxUsage) {
-                throw new Error('Coupon usage limit exceeded');
+                throw new Error('This coupon has reached its usage limit');
             }
 
-            // Check if user already used this coupon
-            const existingUsage = await this.couponUsageRepository.findByCouponAndUser(coupon._id, userId);
-            if (existingUsage) {
-                throw new Error('You have already used this coupon');
-            }
-
-            // Verify user exists
-            const user = await this.userRepository.findById(userId);
-            if (!user) {
-                throw new Error('User not found');
-            }
-
-            // Record coupon usage
-            const usageData = {
-                couponId: coupon._id,
-                userId: userId,
-                usedAt: new Date(),
-                context: context,
-                ipAddress: context.ipAddress || null,
-                userAgent: context.userAgent || null
-            };
-
-            const usage = await this.couponUsageRepository.create(usageData);
-
-            // Update coupon usage count
-            await this.couponRepository.incrementUsage(coupon._id);
-
-            // Log activity
-            await this.activityRepository.logActivity({
-                user: userId,
-                action: 'coupon_use',
-                targetType: 'coupon',
-                targetId: coupon._id,
-                metadata: { 
-                    couponCode: coupon.code,
-                    couponType: coupon.type,
-                    eventId: coupon.eventId
-                }
-            });
-
-            // Invalidate coupon cache
-            CacheService.delete(`coupon:${couponCode.toUpperCase()}`);
-
-            this._log('use_coupon_success', { couponId: coupon._id, userId });
-
-            return {
-                success: true,
-                coupon: {
-                    id: coupon._id,
-                    code: coupon.code,
-                    type: coupon.type,
-                    description: coupon.description,
-                    eventId: coupon.eventId
-                },
-                usage: {
-                    id: usage._id,
-                    usedAt: usage.usedAt
-                },
-                message: 'Coupon applied successfully'
-            };
-        } catch (error) {
-            throw this._handleError(error, 'use_coupon', { code: couponCode, userId });
-        }
-    }
-
-    /**
-     * Validate a coupon without using it
-     * @param {String} couponCode - Coupon code
-     * @returns {Promise<Object>} Validation result
-     */
-    async validateCoupon(data) {
-        try {
-            this._log('validate_coupon', { code: data.code, eventId: data.eventId, bundles: data.bundles });
-
-            if (!data.code || data.code.trim().length === 0) {
-                throw new Error('Coupon code is required');
-            }
-
-            // Check cache first
-            const cacheKey = `coupon:${data.code.toUpperCase()}`;
-            let coupon = CacheService.get(cacheKey);
-
-            const categories = data.bundles.map(bundle => bundle.category._id);
-
-            if (!coupon) {
-                coupon = await this.couponRepository.findByCode(data.code.toUpperCase().trim(), {
-                    eventApplicable: data.eventId,
-                    categoriesApplicable: {"$in": categories},
-                    bundlesApplicable: {"$in": data.bundles.map(bundle => bundle.bundle._id)}
+            // Check per-user limit
+            if (userId && coupon.maxUsagePerUser) {
+                const userUsageCount = await this.repo('couponUsage').count({
+                    couponId: coupon._id,
+                    userId,
                 });
-                if (coupon) {
-                    CacheService.set(cacheKey, coupon, 300000); // 5 minutes
+
+                if (userUsageCount >= coupon.maxUsagePerUser) {
+                    throw new Error('You have reached the usage limit for this coupon');
                 }
             }
 
-            if (!coupon) {
-                return {
-                    success: false,
-                    valid: false,
-                    reason: 'Invalid coupon code'
-                };
+            // Check event restriction
+            if (coupon.eventId && eventId) {
+                if (coupon.eventId.toString() !== eventId.toString()) {
+                    throw new Error('This coupon is not valid for this event');
+                }
             }
 
-            // Check if coupon is active
-            if (!coupon.isActive) {
-                return {
-                    success: false,
-                    valid: false,
-                    reason: 'Coupon is no longer active'
-                };
+            // Check minimum purchase
+            if (amount && coupon.minPurchaseAmount) {
+                if (amount < coupon.minPurchaseAmount) {
+                    throw new Error(
+                        `Minimum purchase amount of ${coupon.minPurchaseAmount} required`
+                    );
+                }
             }
 
-            // Check if coupon has expired
-            if (coupon.expiresAt && new Date() > new Date(coupon.expiresAt)) {
-                return {
-                    success: false,
-                    valid: false,
-                    reason: 'Coupon has expired'
-                };
+            // Calculate discount
+            let discountAmount = 0;
+            if (amount) {
+                discountAmount = this.calculateDiscount(coupon, amount);
             }
 
-
-            if (coupon.maxUses && coupon.usedCount >= coupon.maxUses) {
-                return {
-                    success: false,
-                    valid: false,
-                    reason: 'Coupon usage limit exceeded'
-                };
-            }
-            this._log('validate_coupon_success', { code: coupon.code });
-
-            return {
-                success: true,
+            return this.handleSuccess({
                 valid: true,
                 coupon: {
                     id: coupon._id,
                     code: coupon.code,
                     discountType: coupon.discountType,
-                    discount: coupon.discount,
-                    eventApplicable: coupon.eventApplicable,
-                    maxUsage: coupon.maxUses,
-                    categoriesApplicable: coupon.categoriesApplicable,
-                    bundlesApplicable: coupon.bundlesApplicable,
-                    usageCount: coupon.usedCount,
-                    minOrderAmount: coupon.minOrderAmount,
-                    remainingUsage: coupon.maxUses ? coupon.maxUses - coupon.usedCount : null,
-                    validFrom: coupon.isActive && new Date(coupon.expiryDate) > new Date() ? new Date() : coupon.expiryDate,
-                    expiresAt: coupon.expiryDate
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'validate_coupon', { code: couponCode });
-        }
+                    discountValue: coupon.discountValue,
+                    minPurchaseAmount: coupon.minPurchaseAmount,
+                    maxDiscountAmount: coupon.maxDiscountAmount,
+                },
+                discountAmount,
+                finalAmount: amount ? amount - discountAmount : null,
+            }, 'Coupon is valid');
+        });
     }
 
     /**
-     * Update coupon details
-     * @param {String} couponId - Coupon ID
-     * @param {Object} updateData - Data to update
-     * @param {String} updatedBy - ID of user updating the coupon
-     * @returns {Promise<Object>} Updated coupon
+     * Calculate discount amount
      */
-    async updateCoupon(couponId, updateData, updatedBy) {
-        try {
-            this._log('update_coupon', { couponId, updatedBy });
+    calculateDiscount(coupon, amount) {
+        let discount = 0;
 
-            this._validateObjectId(couponId, 'Coupon ID');
-            this._validateObjectId(updatedBy, 'Updated By User ID');
+        if (coupon.discountType === 'percentage') {
+            discount = (amount * coupon.discountValue) / 100;
+        } else {
+            discount = coupon.discountValue;
+        }
 
-            // Get current coupon
-            const currentCoupon = await this.couponRepository.findById(couponId);
-            if (!currentCoupon) {
+        // Apply max discount cap if set
+        if (coupon.maxDiscountAmount && discount > coupon.maxDiscountAmount) {
+            discount = coupon.maxDiscountAmount;
+        }
+
+        // Ensure discount doesn't exceed amount
+        if (discount > amount) {
+            discount = amount;
+        }
+
+        return Math.round(discount * 100) / 100; // Round to 2 decimals
+    }
+
+    /**
+     * Record coupon usage
+     */
+    async recordCouponUsage(couponId, usageData, userId) {
+        return this.runInContext('recordCouponUsage', async () => {
+            this.validateRequiredFields(usageData, ['originalAmount', 'discountAmount']);
+
+            const coupon = await this.repo('coupon').findById(couponId);
+            
+            if (!coupon) {
                 throw new Error('Coupon not found');
             }
 
-            // Validate dates if being updated
-            if (updateData.validFrom || updateData.expiresAt) {
-                const validFrom = updateData.validFrom || currentCoupon.validFrom;
-                const expiresAt = updateData.expiresAt || currentCoupon.expiresAt;
-                
-                if (validFrom && expiresAt) {
-                    this._validateDateRange(validFrom, expiresAt);
-                }
-            }
-
-            // Check for duplicate code if code is being updated
-            if (updateData.code && updateData.code !== currentCoupon.code) {
-                const existingCoupon = await this.couponRepository.findByCode(updateData.code.toUpperCase());
-                if (existingCoupon) {
-                    throw new Error('Coupon code already exists');
-                }
-            }
-
-            // Sanitize update data
-            const sanitizedData = this._sanitizeData(updateData);
-            delete sanitizedData._id;
-            delete sanitizedData.usageCount;
-            delete sanitizedData.createdAt;
-            delete sanitizedData.createdBy;
-            sanitizedData.updatedAt = new Date();
-
-            if (sanitizedData.code) {
-                sanitizedData.code = sanitizedData.code.toUpperCase().trim();
-            }
-
-            // Update coupon
-            const updatedCoupon = await this.couponRepository.updateById(couponId, sanitizedData);
-
-            // Log activity
-            await this.activityRepository.logActivity({
-                user: updatedBy,
-                action: 'coupon_update',
-                targetType: 'coupon',
-                targetId: couponId,
-                metadata: { 
-                    couponCode: updatedCoupon.code,
-                    updatedFields: Object.keys(sanitizedData)
-                }
+            // Create usage record
+            const usage = await this.repo('couponUsage').create({
+                couponId,
+                userId,
+                eventId: usageData.eventId || null,
+                paymentId: usageData.paymentId || null,
+                originalAmount: usageData.originalAmount,
+                discountAmount: usageData.discountAmount,
+                finalAmount: usageData.originalAmount - usageData.discountAmount,
             });
 
-            // Invalidate cache
-            CacheService.delete(`coupon:${currentCoupon.code}`);
-            if (updatedCoupon.code !== currentCoupon.code) {
-                CacheService.delete(`coupon:${updatedCoupon.code}`);
-            }
+            // Update coupon statistics
+            await this.repo('coupon').update(couponId, {
+                $inc: {
+                    usageCount: 1,
+                    totalDiscount: usageData.discountAmount,
+                },
+            });
 
-            this._log('update_coupon_success', { couponId });
+            await this.logActivity(userId, 'use', 'coupon', {
+                couponId,
+                usageId: usage._id,
+                code: coupon.code,
+                discountAmount: usageData.discountAmount,
+            });
 
-            return {
-                success: true,
-                coupon: {
-                    id: updatedCoupon._id,
-                    code: updatedCoupon.code,
-                    type: updatedCoupon.type,
-                    description: updatedCoupon.description,
-                    eventId: updatedCoupon.eventId,
-                    maxUsage: updatedCoupon.maxUsage,
-                    usageCount: updatedCoupon.usageCount,
-                    validFrom: updatedCoupon.validFrom,
-                    expiresAt: updatedCoupon.expiresAt,
-                    isActive: updatedCoupon.isActive,
-                    updatedAt: updatedCoupon.updatedAt
-                }
-            };
-        } catch (error) {
-            throw this._handleError(error, 'update_coupon', { couponId });
-        }
+            return this.handleSuccess({ usage }, 'Coupon usage recorded');
+        });
     }
 
     /**
-     * Delete a coupon
-     * @param {String} couponId - Coupon ID
-     * @param {String} deletedBy - ID of user deleting the coupon
-     * @returns {Promise<Object>} Deletion result
+     * Update coupon
      */
-    async deleteCoupon(couponId, deletedBy) {
-        try {
-            this._log('delete_coupon', { couponId, deletedBy });
+    async updateCoupon(couponId, updates, userId) {
+        return this.runInContext('updateCoupon', async () => {
+            const coupon = await this.repo('coupon').findById(couponId);
+            
+            if (!coupon) {
+                throw new Error('Coupon not found');
+            }
 
-            this._validateObjectId(couponId, 'Coupon ID');
-            this._validateObjectId(deletedBy, 'Deleted By User ID');
+            // Prevent updating certain fields
+            const restrictedFields = ['code', 'usageCount', 'totalDiscount'];
+            for (const field of restrictedFields) {
+                if (updates[field] !== undefined) {
+                    delete updates[field];
+                }
+            }
 
-            // Get coupon
-            const coupon = await this.couponRepository.findById(couponId);
+            // Validate discount type if being updated
+            if (updates.discountType && !this.discountTypes.includes(updates.discountType)) {
+                throw new Error(`Invalid discount type. Must be one of: ${this.discountTypes.join(', ')}`);
+            }
+
+            // Validate discount value if being updated
+            if (updates.discountValue !== undefined) {
+                const discountType = updates.discountType || coupon.discountType;
+                
+                if (discountType === 'percentage') {
+                    if (updates.discountValue < 0 || updates.discountValue > 100) {
+                        throw new Error('Percentage discount must be between 0 and 100');
+                    }
+                } else {
+                    if (updates.discountValue < 0) {
+                        throw new Error('Fixed discount value must be positive');
+                    }
+                }
+            }
+
+            const updatedCoupon = await this.repo('coupon').update(couponId, updates);
+
+            await this.logActivity(userId, 'update', 'coupon', {
+                couponId,
+                fields: Object.keys(updates),
+            });
+
+            return this.handleSuccess(
+                { coupon: updatedCoupon },
+                'Coupon updated successfully'
+            );
+        });
+    }
+
+    /**
+     * Deactivate coupon
+     */
+    async deactivateCoupon(couponId, userId) {
+        return this.runInContext('deactivateCoupon', async () => {
+            const coupon = await this.repo('coupon').findById(couponId);
+            
+            if (!coupon) {
+                throw new Error('Coupon not found');
+            }
+
+            const updatedCoupon = await this.repo('coupon').update(couponId, {
+                active: false,
+            });
+
+            await this.logActivity(userId, 'deactivate', 'coupon', {
+                couponId,
+                code: coupon.code,
+            });
+
+            return this.handleSuccess(
+                { coupon: updatedCoupon },
+                'Coupon deactivated successfully'
+            );
+        });
+    }
+
+    /**
+     * List coupons with filters
+     */
+    async listCoupons(filters = {}, pagination = {}) {
+        return this.runInContext('listCoupons', async () => {
+            const { page, limit } = this.parsePagination(pagination);
+
+            const query = {};
+
+            // Filter by active status
+            if (filters.active !== undefined) {
+                query.active = filters.active === 'true';
+            }
+
+            // Filter by event
+            if (filters.eventId) {
+                query.eventId = filters.eventId;
+            }
+
+            // Filter by discount type
+            if (filters.discountType) {
+                query.discountType = filters.discountType;
+            }
+
+            // Search by code
+            if (filters.search) {
+                query.code = { $regex: filters.search, $options: 'i' };
+            }
+
+            // Filter by expiry
+            if (filters.expired !== undefined) {
+                const now = new Date();
+                query.expiryDate = filters.expired === 'true'
+                    ? { $lt: now }
+                    : { $gte: now };
+            }
+
+            const coupons = await this.repo('coupon').findWithPagination(query, {
+                page,
+                limit,
+                sort: filters.sort || { createdAt: -1 },
+            });
+
+            return this.handleSuccess(
+                this.createPaginatedResponse(coupons.docs, coupons.total, page, limit),
+                'Coupons retrieved successfully'
+            );
+        });
+    }
+
+    /**
+     * Get coupon statistics
+     */
+    async getCouponStatistics(couponId) {
+        return this.runInContext('getCouponStatistics', async () => {
+            const coupon = await this.repo('coupon').findById(couponId);
+            
+            if (!coupon) {
+                throw new Error('Coupon not found');
+            }
+
+            // Usage statistics
+            const usages = await this.repo('couponUsage').find({ couponId });
+
+            // Total revenue saved
+            const totalSaved = usages.reduce((sum, u) => sum + u.discountAmount, 0);
+
+            // Unique users
+            const uniqueUsers = new Set(usages.map(u => u.userId?.toString())).size;
+
+            // Usage over time
+            const usageOverTime = await this.repo('couponUsage').aggregate([
+                { $match: { couponId } },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%d',
+                                date: '$createdAt',
+                            },
+                        },
+                        count: { $sum: 1 },
+                        totalDiscount: { $sum: '$discountAmount' },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ]);
+
+            // Usage by event
+            const usageByEvent = await this.repo('couponUsage').aggregate([
+                { $match: { couponId } },
+                {
+                    $group: {
+                        _id: '$eventId',
+                        count: { $sum: 1 },
+                        totalDiscount: { $sum: '$discountAmount' },
+                    },
+                },
+                { $sort: { count: -1 } },
+            ]);
+
+            return this.handleSuccess({
+                coupon: {
+                    id: coupon._id,
+                    code: coupon.code,
+                    active: coupon.active,
+                },
+                statistics: {
+                    totalUsage: coupon.usageCount,
+                    maxUsage: coupon.maxUsage,
+                    remainingUsage: coupon.maxUsage ? coupon.maxUsage - coupon.usageCount : null,
+                    totalSaved,
+                    averageDiscount: usages.length > 0 ? totalSaved / usages.length : 0,
+                    uniqueUsers,
+                    usageOverTime,
+                    usageByEvent,
+                },
+            }, 'Statistics retrieved successfully');
+        });
+    }
+
+    /**
+     * Get user's coupon usage history
+     */
+    async getUserCouponUsage(userId, pagination = {}) {
+        return this.runInContext('getUserCouponUsage', async () => {
+            const { page, limit } = this.parsePagination(pagination);
+
+            const usages = await this.repo('couponUsage').findWithPagination(
+                { userId },
+                { page, limit, sort: { createdAt: -1 } }
+            );
+
+            // Enrich with coupon details
+            const enrichedUsages = await Promise.all(
+                usages.docs.map(async (usage) => {
+                    const coupon = await this.repo('coupon').findById(usage.couponId);
+                    
+                    return {
+                        ...usage.toObject(),
+                        coupon: coupon ? {
+                            code: coupon.code,
+                            discountType: coupon.discountType,
+                            discountValue: coupon.discountValue,
+                        } : null,
+                    };
+                })
+            );
+
+            return this.handleSuccess(
+                this.createPaginatedResponse(enrichedUsages, usages.total, page, limit),
+                'Usage history retrieved successfully'
+            );
+        });
+    }
+
+    /**
+     * Delete coupon
+     */
+    async deleteCoupon(couponId, userId) {
+        return this.runInContext('deleteCoupon', async () => {
+            const coupon = await this.repo('coupon').findById(couponId);
+            
             if (!coupon) {
                 throw new Error('Coupon not found');
             }
 
             // Check if coupon has been used
-            const usageCount = await this.couponUsageRepository.countByCoupon(couponId);
+            const usageCount = await this.repo('couponUsage').count({ couponId });
+            
             if (usageCount > 0) {
-                throw new Error('Cannot delete coupon that has been used');
+                throw new Error('Cannot delete coupon that has been used. Deactivate instead.');
             }
 
-            // Delete coupon
-            await this.couponRepository.deleteById(couponId);
+            await this.repo('coupon').delete(couponId);
 
-            // Log activity
-            await this.activityRepository.logActivity({
-                user: deletedBy,
-                action: 'coupon_delete',
-                targetType: 'coupon',
-                targetId: couponId,
-                metadata: { 
-                    couponCode: coupon.code,
-                    couponType: coupon.type
-                }
+            await this.logActivity(userId, 'delete', 'coupon', {
+                couponId,
+                code: coupon.code,
             });
 
-            // Invalidate cache
-            CacheService.delete(`coupon:${coupon.code}`);
-
-            this._log('delete_coupon_success', { couponId });
-
-            return {
-                success: true,
-                message: 'Coupon deleted successfully'
-            };
-        } catch (error) {
-            throw this._handleError(error, 'delete_coupon', { couponId });
-        }
-    }
-
-    /**
-     * Get coupons with filtering and pagination
-     * @param {Object} query - Query parameters
-     * @returns {Promise<Object>} Paginated coupons
-     */
-    async getCoupons(query = {}) {
-        try {
-            this._log('get_coupons', { query });
-
-            const { page, limit } = this._generatePaginationOptions(
-                query.page, 
-                query.limit, 
-                50
-            );
-
-            // Create filter based on query
-            const filter = this._createSearchFilter(query, ['code', 'description']);
-
-            // Add specific filters
-            if (query.eventId) {
-                this._validateObjectId(query.eventId, 'Event ID');
-                filter.eventId = query.eventId;
-            }
-
-            if (query.type) {
-                filter.type = query.type;
-            }
-
-            if (query.isActive !== undefined) {
-                filter.isActive = query.isActive === 'true';
-            }
-
-            // Date filters
-            if (query.validFrom) {
-                filter.validFrom = { $gte: new Date(query.validFrom) };
-            }
-
-            if (query.expiresAt) {
-                filter.expiresAt = { $lte: new Date(query.expiresAt) };
-            }
-
-            const coupons = await this.couponRepository.find(filter, {
-                skip: (page - 1) * limit,
-                limit,
-                sort: { createdAt: -1 }
-            });
-
-            // Get total count for pagination
-            const total = await this.couponRepository.countDocuments(filter);
-
-            // Format coupons with additional information
-            const formattedCoupons = await Promise.all(
-                coupons.map(async (coupon) => {
-                    const usageCount = await this.couponUsageRepository.countDocuments({ couponId: coupon._id });
-                    return {
-                        id: coupon._id,
-                        code: coupon.code,
-                        type: coupon.type,
-                        description: coupon.description,
-                        eventId: coupon.eventId,
-                        maxUsage: coupon.maxUsage,
-                        usageCount,
-                        remainingUsage: coupon.maxUsage ? coupon.maxUsage - usageCount : null,
-                        validFrom: coupon.validFrom,
-                        expiresAt: coupon.expiresAt,
-                        isActive: coupon.isActive,
-                        createdAt: coupon.createdAt
-                    };
-                })
-            );
-
-            return {
-                success: true,
-                data: this._formatPaginationResponse(formattedCoupons, total, page, limit)
-            };
-        } catch (error) {
-            throw this._handleError(error, 'get_coupons', { query });
-        }
-    }
-
-    /**
-     * Get coupon usage history
-     * @param {String} couponId - Coupon ID
-     * @param {Object} query - Query parameters
-     * @returns {Promise<Object>} Coupon usage history
-     */
-    async getCouponUsage(couponId, query = {}) {
-        try {
-            this._log('get_coupon_usage', { couponId, query });
-
-            this._validateObjectId(couponId, 'Coupon ID');
-
-            const { page, limit } = this._generatePaginationOptions(
-                query.page, 
-                query.limit, 
-                50
-            );
-
-            const usageHistory = await this.couponUsageRepository.findByCoupon(couponId, {
-                skip: (page - 1) * limit,
-                limit,
-                sort: { usedAt: -1 },
-                populate: [
-                    { path: 'userId', select: 'username email profile.firstName profile.lastName' }
-                ]
-            });
-
-            const total = await this.couponUsageRepository.countByCoupon(couponId);
-
-            // Format usage history
-            const formattedUsage = usageHistory.map(usage => ({
-                id: usage._id,
-                user: {
-                    id: usage.userId._id,
-                    username: usage.userId.username,
-                    email: usage.userId.email,
-                    name: usage.userId.profile ? 
-                        `${usage.userId.profile.firstName} ${usage.userId.profile.lastName}`.trim() 
-                        : usage.userId.username
-                },
-                usedAt: usage.usedAt,
-                context: usage.context,
-                ipAddress: usage.ipAddress
-            }));
-
-            return {
-                success: true,
-                data: this._formatPaginationResponse(formattedUsage, total, page, limit)
-            };
-        } catch (error) {
-            throw this._handleError(error, 'get_coupon_usage', { couponId });
-        }
-    }
-
-    /**
-     * Generate bulk coupons
-     * @param {Object} couponTemplate - Template for coupon generation
-     * @param {Number} count - Number of coupons to generate
-     * @param {String} createdBy - ID of user creating the coupons
-     * @returns {Promise<Object>} Generated coupons
-     */
-    async generateBulkCoupons(couponTemplate, count, createdBy) {
-        try {
-            this._log('generate_bulk_coupons', { count, eventId: couponTemplate.eventId, createdBy });
-
-            if (count < 1 || count > 1000) {
-                throw new Error('Count must be between 1 and 1000');
-            }
-
-            this._validateRequiredFields(couponTemplate, ['type', 'eventId']);
-            this._validateObjectId(couponTemplate.eventId, 'Event ID');
-            this._validateObjectId(createdBy, 'Created By User ID');
-
-            // Check if event exists
-            const event = await this.eventRepository.findById(couponTemplate.eventId);
-            if (!event) {
-                throw new Error('Event not found');
-            }
-
-            const generatedCoupons = [];
-            const codePrefix = couponTemplate.codePrefix || 'COUP';
-
-            for (let i = 0; i < count; i++) {
-                // Generate unique code
-                let code;
-                let attempts = 0;
-                do {
-                    code = `${codePrefix}${this._generateRandomString(8)}`;
-                    attempts++;
-                    if (attempts > 10) {
-                        throw new Error('Unable to generate unique coupon codes');
-                    }
-                } while (await this.couponRepository.findByCode(code));
-
-                const couponData = {
-                    ...this._sanitizeData(couponTemplate),
-                    code,
-                    usageCount: 0,
-                    createdBy,
-                    createdAt: new Date()
-                };
-
-                delete couponData.codePrefix;
-
-                const coupon = await this.couponRepository.create(couponData);
-                generatedCoupons.push({
-                    id: coupon._id,
-                    code: coupon.code,
-                    type: coupon.type,
-                    description: coupon.description
-                });
-            }
-
-            // Log activity
-            await this.activityRepository.logActivity({
-                user: createdBy,
-                action: 'coupon_bulk_generate',
-                targetType: 'event',
-                targetId: couponTemplate.eventId,
-                metadata: { 
-                    count,
-                    eventName: event.name,
-                    couponType: couponTemplate.type
-                }
-            });
-
-            this._log('generate_bulk_coupons_success', { count: generatedCoupons.length });
-
-            return {
-                success: true,
-                data: {
-                    generated: generatedCoupons.length,
-                    coupons: generatedCoupons
-                },
-                message: `Successfully generated ${generatedCoupons.length} coupons`
-            };
-        } catch (error) {
-            throw this._handleError(error, 'generate_bulk_coupons', { count });
-        }
-    }
-
-    /**
-     * Generate random string for coupon codes
-     * @param {Number} length - Length of random string
-     * @returns {String} Random string
-     */
-    _generateRandomString(length) {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        let result = '';
-        for (let i = 0; i < length; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return result;
+            return this.handleSuccess(null, 'Coupon deleted successfully');
+        });
     }
 }
-
-export default CouponService;

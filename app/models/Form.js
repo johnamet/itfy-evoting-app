@@ -1,117 +1,62 @@
 #!/usr/bin/env node
 /**
- * Forms model class for the application.
- * This file defines the Forms class which extends the BaseModel class.
+ * Form Model for dynamic forms
+ *
+ * @module Form
+ * @version 2.0.0
  */
-import BaseModel from "./BaseModel.js";
+
 import mongoose from "mongoose";
+import BaseModel from "./BaseModel.js";
 
-class Form extends BaseModel {
-     
-    constructor(){
-        const submissionSchema = new mongoose.Schema({
-            submittedBy: {
-            type:  String,
-            required: false
-            },
-            submittedAt: {
-            type: Date,
-            default: Date.now
-            },
-            data: {
-            type: Object,
-            required: true
-            },
-            ipAddress: {
-            type: String,
-            required: true
-            },
-            userAgent: {
-            type: String,
-            required: false
-            },
-            createdAt: {
-            type: Date,
-            default: Date.now
-            },
-            status: {
-            type: String,
-            default: "pending",
-            enum: ["pending", "approved", "rejected"]
-            },
-            updatedBy: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User'
-            },
-            updatedAt: {
-            type: Date
-            }
-        });
+const FormSchema = {
+  name: {
+    type: String,
+    required: true,
+  },
 
-        const schemaDefinition = {
-            title: {
-                type: String,
-                required: true,
-                trim: true
-            },
-            description:{
-                type: String,
-                required: false,
-            },
-            modelId: {
-            type: mongoose.Schema.Types.ObjectId,
-            required: true,
-            trim: true
-            },
-            model: {
-            type: String,
-            required: true,
-            trim: true,
-            enum: ['Event', 'Candidate', 'Category'] // Restrict to known models
-            },
-            fields: {
-            type: [Object],
-            default: [{label:"Your Name", type: "text", options: [], required: true}]
-            },
-            isActive: {
-            type: Boolean,
-            default: true
-            },
-            isDeleted: {
-            type: Boolean,
-            default: false
-            },
-            createdBy: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User',
-            required: true
-            },
-            updatedBy: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User'
-            },
-            submissionCount: {
-            type: Number,
-            default: 0
-            },
-            submissions: [submissionSchema],
-            maxSubmissions: {
-                type: Number,
-                default: 0
-            }
-        }
+  description: String,
 
-        super(schemaDefinition, {collection: "forms"});
-    }
+  fields: [
+    {
+      name: String,
+      label: String,
+      type: {
+        type: String,
+        enum: ["text", "email", "number", "textarea", "select", "checkbox", "radio", "date"],
+      },
+      required: Boolean,
+      options: [String],
+      validation: mongoose.Schema.Types.Mixed,
+      order: Number,
+    },
+  ],
 
-    getSchema(){
-        const schema = super.getSchema();
-        schema.index({ modelId: 1, model: 1 }, { unique: true});
+  event: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Event",
+  },
 
-        schema.index({ isActive: 1, isDeleted: 1 });
-        schema.index({ createdBy: 1, updatedBy: 1 });   
-        return schema;
-    }
-}
+  status: {
+    type: String,
+    enum: ["draft", "active", "inactive"],
+    default: "draft",
+  },
 
-export default mongoose.model('Form', new Form().getSchema());
+  submissions: {
+    type: Number,
+    default: 0,
+  },
+};
+
+const formModel = new BaseModel(FormSchema, {
+  collection: "forms",
+  timestamps: true,
+});
+
+formModel.addIndex({ event: 1, status: 1 });
+formModel.addIndex({ status: 1 });
+
+const Form = formModel.getModel("Form");
+
+export default Form;
