@@ -2,46 +2,81 @@
 /**
  * Controllers Index
  * 
- * Exports all controllers for easy importing.
+ * Central export point for all controllers.
+ * All controllers follow domain-based pattern with thin controller layer
+ * that delegates business logic to service layer.
+ * 
+ * @module controllers/index
+ * @version 2.0.0
  */
 
-import ActivityController from './ActivityController.js';
-import AuthController from './AuthController.js';
+// Import base controller
 import BaseController from './BaseController.js';
-import CacheController from './CacheController.js';
-import CandidateController from './CandidateController.js';
-import CategoryController from './CategoryController.js';
-import CouponController from './CouponController.js';
-import EventController from './EventController.js';
-import FileController from './FileController.js';
-import FormController from './FormController.js';
-import SlideController from './SlideController.js';
+
+// Import domain controllers
+import AuthController from './AuthController.js';
 import UserController from './UserController.js';
+import EventController from './EventController.js';
+import CandidateController from './CandidateController.js';
 import VotingController from './VotingController.js';
+import PaymentController from './PaymentController.js';
+import CouponController from './CouponController.js';
 import NotificationController from './NotificationController.js';
+import AnalyticsController from './AnalyticsController.js';
 import SettingsController from './SettingsController.js';
 
+// Create controller instances
+const authController = new AuthController();
+const userController = new UserController();
+const eventController = new EventController();
+const candidateController = new CandidateController();
+const votingController = new VotingController();
+const paymentController = new PaymentController();
+const couponController = new CouponController();
+const notificationController = new NotificationController();
+const analyticsController = new AnalyticsController();
+const settingsController = new SettingsController();
+
+// Export class definitions
 export {
-    ActivityController,
-    AuthController,
     BaseController,
-    CacheController,
-    CandidateController,
-    CategoryController,
-    CouponController,
-    EventController,
-    FileController,
-    FormController,
-    SlideController,
+    AuthController,
     UserController,
+    EventController,
+    CandidateController,
     VotingController,
+    PaymentController,
+    CouponController,
     NotificationController,
+    AnalyticsController,
     SettingsController
 };
 
+// Export controller instances for route usage
+export {
+    authController,
+    userController,
+    eventController,
+    candidateController,
+    votingController,
+    paymentController,
+    couponController,
+    notificationController,
+    analyticsController,
+    settingsController
+};
+
+// Default export for convenience
 export default {
     BaseController,
-    FormController,
-    NotificationController,
-    SettingsController
+    auth: authController,
+    user: userController,
+    event: eventController,
+    candidate: candidateController,
+    voting: votingController,
+    payment: paymentController,
+    coupon: couponController,
+    notification: notificationController,
+    analytics: analyticsController,
+    settings: settingsController
 };

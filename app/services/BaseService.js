@@ -11,7 +11,7 @@
  * - Validation utilities
  * 
  * @module services/BaseService
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import config from '../config/ConfigManager.js';
@@ -27,6 +27,14 @@ class BaseService {
         this.serviceName = this.constructor.name;
         this._settingsCache = new Map();
         this._settingsCacheTTL = 60000; // 1 minute
+
+        // Optional: Enable automatic cache cleanup
+        if (options.enableCacheCleanup) {
+            this._cacheCleanupInterval = setInterval(
+                () => this._cleanExpiredCache(),
+                this._settingsCacheTTL
+            );
+        }
     }
 
     // ================================
@@ -112,6 +120,29 @@ class BaseService {
      */
     clearSettingsCache() {
         this._settingsCache.clear();
+    }
+
+    /**
+     * Clean expired cache entries
+     * @private
+     */
+    _cleanExpiredCache() {
+        const now = Date.now();
+        for (const [key, cached] of this._settingsCache.entries()) {
+            if (now - cached.timestamp >= this._settingsCacheTTL) {
+                this._settingsCache.delete(key);
+            }
+        }
+    }
+
+    /**
+     * Cleanup method to be called when service is destroyed
+     */
+    destroy() {
+        if (this._cacheCleanupInterval) {
+            clearInterval(this._cacheCleanupInterval);
+        }
+        this.clearSettingsCache();
     }
 
     // ================================
@@ -408,46 +439,157 @@ class BaseService {
     }
 
     /**
-     * Add days to date
+     * Add time to date (supports days, hours, minutes, seconds)
+     * @param {Date} date - Base date
+     * @param {number} [days=0] - Days to add
+     * @param {number} [hours=0] - Hours to add
+     * @param {number} [minutes=0] - Minutes to add
+     * @param {number} [seconds=0] - Seconds to add
+     * @returns {Date} New date
+     */
+    addTime(date, days = 0, hours = 0, minutes = 0, seconds = 0) {
+        const result = new Date(date);
+        
+        // Calculate total milliseconds to add
+        const msToAdd = (
+            (days * 24 * 60 * 60 * 1000) +
+            (hours * 60 * 60 * 1000) +
+            (minutes * 60 * 1000) +
+            (seconds * 1000)
+        );
+        
+        result.setTime(result.getTime() + msToAdd);
+        return result;
+    }
+
+    /**
+     * Add days to date (backward compatibility)
      * @param {Date} date - Base date
      * @param {number} days - Days to add
      * @returns {Date}
      */
     addDays(date, days) {
-        const result = new Date(date);
-        result.setDate(result.getDate() + days);
-        return result;
+        return this.addTime(date, days, 0, 0, 0);
+    }
+
+    /**
+     * Add hours to date
+     * @param {Date} date - Base date
+     * @param {number} hours - Hours to add
+     * @returns {Date}
+     */
+    addHours(date, hours) {
+        return this.addTime(date, 0, hours, 0, 0);
+    }
+
+    /**
+     * Add minutes to date
+     * @param {Date} date - Base date
+     * @param {number} minutes - Minutes to add
+     * @returns {Date}
+     */
+    addMinutes(date, minutes) {
+        return this.addTime(date, 0, 0, minutes, 0);
+    }
+
+    /**
+     * Subtract time from date
+     * @param {Date} date - Base date
+     * @param {number} [days=0] - Days to subtract
+     * @param {number} [hours=0] - Hours to subtract
+     * @param {number} [minutes=0] - Minutes to subtract
+     * @param {number} [seconds=0] - Seconds to subtract
+     * @returns {Date}
+     */
+    subtractTime(date, days = 0, hours = 0, minutes = 0, seconds = 0) {
+        return this.addTime(date, -days, -hours, -minutes, -seconds);
     }
 
     /**
      * Get date range for queries
-     * @param {string} period - Period (today, week, month, year)
-     * @returns {Object} { startDate, endDate }
+     * @param {string} period - Period (today, week, month, year, hour)
+     * @returns {Object} { start: Date, end: Date }
      */
     getDateRange(period) {
         const now = new Date();
-        const startDate = new Date(now);
-        const endDate = new Date(now);
+        let start = new Date(now);
+        const end = new Date(now);
 
-        switch (period) {
+        switch (period.toLowerCase()) {
+            case 'hour':
+                start = this.addHours(now, -1);
+                break;
             case 'today':
-                startDate.setHours(0, 0, 0, 0);
-                endDate.setHours(23, 59, 59, 999);
+                start.setHours(0, 0, 0, 0);
+                end.setHours(23, 59, 59, 999);
                 break;
             case 'week':
-                startDate.setDate(now.getDate() - 7);
+                start = this.addDays(now, -7);
                 break;
             case 'month':
-                startDate.setMonth(now.getMonth() - 1);
+                start = this.addDays(now, -30);
                 break;
             case 'year':
-                startDate.setFullYear(now.getFullYear() - 1);
+                start = this.addDays(now, -365);
                 break;
             default:
-                throw new Error(`Invalid period: ${period}`);
+                throw new Error(`Invalid period: ${period}. Valid options: hour, today, week, month, year`);
         }
 
-        return { startDate, endDate };
+        return { start, end };
+    }
+
+    /**
+     * Format date for display
+     * @param {Date|string} date - Date to format
+     * @param {string} [format='datetime'] - Format type (date, time, datetime)
+     * @returns {string} Formatted date
+     */
+    formatDate(date, format = 'datetime') {
+        const d = new Date(date);
+        
+        if (isNaN(d.getTime())) {
+            return 'Invalid Date';
+        }
+
+        switch (format) {
+            case 'date':
+                return d.toLocaleDateString();
+            case 'time':
+                return d.toLocaleTimeString();
+            case 'datetime':
+                return d.toLocaleString();
+            case 'iso':
+                return d.toISOString();
+            default:
+                return d.toLocaleString();
+        }
+    }
+
+    /**
+     * Calculate difference between dates
+     * @param {Date} date1 - First date
+     * @param {Date} date2 - Second date
+     * @param {string} [unit='days'] - Unit (days, hours, minutes, seconds)
+     * @returns {number} Difference
+     */
+    dateDiff(date1, date2, unit = 'days') {
+        const d1 = new Date(date1);
+        const d2 = new Date(date2);
+        const diffMs = Math.abs(d1 - d2);
+
+        switch (unit) {
+            case 'seconds':
+                return Math.floor(diffMs / 1000);
+            case 'minutes':
+                return Math.floor(diffMs / (1000 * 60));
+            case 'hours':
+                return Math.floor(diffMs / (1000 * 60 * 60));
+            case 'days':
+                return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+            default:
+                throw new Error(`Invalid unit: ${unit}. Valid options: seconds, minutes, hours, days`);
+        }
     }
 
     // ================================
@@ -456,26 +598,27 @@ class BaseService {
 
     /**
      * Run operation with context (error boundary)
-     * @param {Object} context - Operation context
+     * @param {string|Object} context - Operation context (string or object with action property)
      * @param {Function} callback - Async operation
      * @returns {Promise<*>}
      */
     async runInContext(context, callback) {
         const startTime = Date.now();
+        const contextStr = typeof context === 'string' ? context : (context.action || 'unknown');
         
         try {
-            this.log('debug', `Starting operation: ${context.action || 'unknown'}`, context);
+            this.log('debug', `Starting operation: ${contextStr}`, 
+                typeof context === 'object' ? context : {});
             
             const result = await callback();
             
             const duration = Date.now() - startTime;
-            this.log('debug', `Completed operation: ${context.action || 'unknown'}`, { ...context, duration });
+            this.log('debug', `Completed operation: ${contextStr}`, { duration });
             
             return result;
         } catch (error) {
             const duration = Date.now() - startTime;
-            this.log('error', `Failed operation: ${context.action || 'unknown'}`, { 
-                ...context, 
+            this.log('error', `Failed operation: ${contextStr}`, { 
                 duration,
                 error: error.message 
             });
@@ -508,12 +651,14 @@ class BaseService {
                 lastError = error;
                 
                 if (attempt < maxAttempts) {
-                    this.log('warn', `Retry attempt ${attempt} failed, retrying in ${delay}ms`, { error: error.message });
+                    this.log('warn', `Retry attempt ${attempt} failed, retrying in ${delay}ms`, 
+                        { error: error.message });
                     
                     await new Promise(resolve => setTimeout(resolve, delay));
                     delay = Math.min(delay * factor, maxDelay);
                 } else {
-                    this.log('error', `All ${maxAttempts} retry attempts failed`, { error: error.message });
+                    this.log('error', `All ${maxAttempts} retry attempts failed`, 
+                        { error: error.message });
                 }
             }
         }
@@ -544,6 +689,75 @@ class BaseService {
         }
 
         return results;
+    }
+
+    /**
+     * Process items in batches with progress tracking
+     * @param {Array} items - Items to process
+     * @param {Function} processor - Async function to process each item
+     * @param {Object} [options={}] - Processing options
+     * @returns {Promise<Object>} { results, successful, failed, duration }
+     */
+    async processBatchWithProgress(items, processor, options = {}) {
+        const {
+            batchSize = 10,
+            onProgress = null,
+            stopOnError = false
+        } = options;
+
+        const startTime = Date.now();
+        const results = [];
+        let successful = 0;
+        let failed = 0;
+
+        for (let i = 0; i < items.length; i += batchSize) {
+            const batch = items.slice(i, i + batchSize);
+            
+            const batchResults = await Promise.all(
+                batch.map(async (item, index) => {
+                    try {
+                        const result = await processor(item);
+                        successful++;
+                        return { success: true, item, result, index: i + index };
+                    } catch (error) {
+                        failed++;
+                        if (stopOnError) {
+                            throw error;
+                        }
+                        return { 
+                            success: false, 
+                            item, 
+                            error: error.message, 
+                            index: i + index 
+                        };
+                    }
+                })
+            );
+
+            results.push(...batchResults);
+
+            // Call progress callback if provided
+            if (onProgress) {
+                onProgress({
+                    processed: i + batch.length,
+                    total: items.length,
+                    successful,
+                    failed,
+                    percentage: ((i + batch.length) / items.length * 100).toFixed(2)
+                });
+            }
+        }
+
+        const duration = Date.now() - startTime;
+
+        return {
+            results,
+            successful,
+            failed,
+            total: items.length,
+            duration,
+            summary: `Processed ${items.length} items in ${duration}ms: ${successful} successful, ${failed} failed`
+        };
     }
 }
 

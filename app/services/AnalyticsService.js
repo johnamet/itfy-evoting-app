@@ -519,7 +519,7 @@ export default class AnalyticsService extends BaseService {
 
             // Active sessions (approximate from recent activities)
             const activeSessions = await this.repo('activity').distinct('userId', {
-                createdAt: { $gte: this.addDays(new Date(), 0, -1) }, // Last hour
+                createdAt: { $gte: this.addHours(new Date(), -1) }, // Last hour
             });
 
             // Database counts

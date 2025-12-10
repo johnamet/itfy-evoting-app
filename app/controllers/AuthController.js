@@ -1,16 +1,15 @@
 /**
  * AuthController
  * 
- * Handles authentication and authorization operations including:
- * - User and candidate registration
- * - Login and logout
+ * Handles authentication and authorization for both users and candidates:
+ * - User registration and login
+ * - Candidate authentication
  * - Email verification
- * - Password management (reset, change)
+ * - Password reset/change
  * - Token refresh
+ * - Logout
  * 
- * @extends BaseController
  * @module controllers/AuthController
- * @version 2.0.0
  */
 
 import BaseController from './BaseController.js';
@@ -19,274 +18,366 @@ import { authService } from '../services/index.js';
 class AuthController extends BaseController {
     constructor() {
         super();
-        this.authService = authService;
     }
-
-    // ================================
-    // USER AUTHENTICATION
-    // ================================
 
     /**
-     * Register new user
+     * Register new user account
      * POST /api/v1/auth/register
+     * Access: Public
      */
-    async registerUser(req, res) {
-        try {
-            const metadata = {
-                ip: req.ip,
-                userAgent: req.headers['user-agent'],
-            };
+    register = this.asyncHandler(async (req, res) => {
+        const { email, password, firstName, lastName, phone } = this.getRequestBody(req);
 
-            const result = await this.authService.registerUser(req.body, metadata);
-            
-            return this.sendSuccess(res, result.data, result.message, 201);
-        } catch (error) {
-            return this.sendError(res, error.message, 400);
+        // Validate required fields
+        const missing = this.validateRequiredFields(
+            { email, password, firstName, lastName },
+            ['email', 'password', 'firstName', 'lastName']
+        );
+
+        if (missing.length > 0) {
+            return this.sendBadRequest(res, `Missing required fields: ${missing.join(', ')}`);
         }
-    }
+
+        // Validate email format
+        if (!this.validateEmail(email)) {
+            return this.sendBadRequest(res, 'Invalid email format');
+        }
+
+        // Validate password strength (min 8 chars)
+        if (password.length < 8) {
+            return this.sendBadRequest(res, 'Password must be at least 8 characters long');
+        }
+
+        try {
+            const result = await authService.register({
+                email,
+                password,
+                firstName,
+                lastName,
+                phone
+            });
+
+            return this.sendCreated(res, result, 'User registered successfully. Please check your email to verify your account.');
+        } catch (error) {
+            if (error.message.includes('already exists')) {
+                return this.sendConflict(res, error.message);
+            }
+            return this.sendError(res, error);
+        }
+    });
 
     /**
      * User login
      * POST /api/v1/auth/login
+     * Access: Public
      */
-    async loginUser(req, res) {
-        try {
-            const metadata = {
-                ip: req.ip,
-                userAgent: req.headers['user-agent'],
-            };
+    login = this.asyncHandler(async (req, res) => {
+        const { email, password } = this.getRequestBody(req);
 
-            const result = await this.authService.loginUser(
-                req.body.email,
-                req.body.password,
-                metadata
-            );
-            
-            return this.sendSuccess(res, result.data, result.message);
-        } catch (error) {
-            return this.sendError(res, error.message, 401);
+        // Validate required fields
+        const missing = this.validateRequiredFields(
+            { email, password },
+            ['email', 'password']
+        );
+
+        if (missing.length > 0) {
+            return this.sendBadRequest(res, `Missing required fields: ${missing.join(', ')}`);
         }
-    }
 
-    /**
-     * Verify user email
-     * POST /api/v1/auth/verify-email
-     */
-    async verifyUserEmail(req, res) {
-        try {
-            const { token } = req.body;
-            
-            const result = await this.authService.verifyUserEmail(token);
-            
-            return this.sendSuccess(res, result.data, result.message);
-        } catch (error) {
-            return this.sendError(res, error.message, 400);
+        // Validate email format
+        if (!this.validateEmail(email)) {
+            return this.sendBadRequest(res, 'Invalid email format');
         }
-    }
 
-    // ================================
-    // CANDIDATE AUTHENTICATION
-    // ================================
-
-    /**
-     * Register new candidate
-     * POST /api/v1/auth/candidate/register
-     */
-    async registerCandidate(req, res) {
         try {
-            const metadata = {
-                ip: req.ip,
-                userAgent: req.headers['user-agent'],
-            };
+            const metadata = this.getRequestMetadata(req);
+            const result = await authService.login(email, password, metadata);
 
-            const result = await this.authService.registerCandidate(req.body, metadata);
-            
-            return this.sendSuccess(res, result.data, result.message, 201);
+            return this.sendSuccess(res, result, 'Login successful');
         } catch (error) {
-            return this.sendError(res, error.message, 400);
+            if (error.message.includes('Invalid credentials') || 
+                error.message.includes('not found') ||
+                error.message.includes('not verified')) {
+                return this.sendUnauthorized(res, error.message);
+            }
+            if (error.message.includes('locked')) {
+                return this.sendForbidden(res, error.message);
+            }
+            return this.sendError(res, error);
         }
-    }
+    });
 
     /**
      * Candidate login
      * POST /api/v1/auth/candidate/login
+     * Access: Public
      */
-    async loginCandidate(req, res) {
-        try {
-            const metadata = {
-                ip: req.ip,
-                userAgent: req.headers['user-agent'],
-            };
+    candidateLogin = this.asyncHandler(async (req, res) => {
+        const { email, password, eventId } = this.getRequestBody(req);
 
-            const result = await this.authService.loginCandidate(
-                req.body.email,
-                req.body.password,
-                metadata
-            );
-            
-            return this.sendSuccess(res, result.data, result.message);
-        } catch (error) {
-            return this.sendError(res, error.message, 401);
+        // Validate required fields
+        const missing = this.validateRequiredFields(
+            { email, password, eventId },
+            ['email', 'password', 'eventId']
+        );
+
+        if (missing.length > 0) {
+            return this.sendBadRequest(res, `Missing required fields: ${missing.join(', ')}`);
         }
-    }
+
+        // Validate email format
+        if (!this.validateEmail(email)) {
+            return this.sendBadRequest(res, 'Invalid email format');
+        }
+
+        // Validate MongoDB ID
+        if (!this.validateMongoId(eventId)) {
+            return this.sendBadRequest(res, 'Invalid event ID format');
+        }
+
+        try {
+            const metadata = this.getRequestMetadata(req);
+            const result = await authService.candidateLogin(email, password, eventId, metadata);
+
+            return this.sendSuccess(res, result, 'Candidate login successful');
+        } catch (error) {
+            if (error.message.includes('Invalid credentials') || 
+                error.message.includes('not found')) {
+                return this.sendUnauthorized(res, error.message);
+            }
+            if (error.message.includes('not approved') || 
+                error.message.includes('suspended')) {
+                return this.sendForbidden(res, error.message);
+            }
+            return this.sendError(res, error);
+        }
+    });
 
     /**
-     * Verify candidate email
-     * POST /api/v1/auth/candidate/verify-email
+     * Verify email address
+     * POST /api/v1/auth/verify-email
+     * Access: Public
      */
-    async verifyCandidateEmail(req, res) {
-        try {
-            const { token } = req.body;
-            
-            const result = await this.authService.verifyCandidateEmail(token);
-            
-            return this.sendSuccess(res, result.data, result.message);
-        } catch (error) {
-            return this.sendError(res, error.message, 400);
+    verifyEmail = this.asyncHandler(async (req, res) => {
+        const { token } = this.getRequestBody(req);
+
+        if (!token) {
+            return this.sendBadRequest(res, 'Verification token is required');
         }
-    }
 
-    /**
-     * Approve candidate (admin only)
-     * POST /api/v1/auth/candidate/:candidateId/approve
-     */
-    async approveCandidate(req, res) {
         try {
-            const { candidateId } = req.params;
-            const approverId = req.user.userId;
-
-            const result = await this.authService.approveCandidate(candidateId, approverId);
-            
-            return this.sendSuccess(res, result.data, result.message);
+            const result = await authService.verifyEmail(token);
+            return this.sendSuccess(res, result, 'Email verified successfully');
         } catch (error) {
-            return this.sendError(res, error.message, 400);
+            if (error.message.includes('Invalid') || 
+                error.message.includes('expired')) {
+                return this.sendBadRequest(res, error.message);
+            }
+            return this.sendError(res, error);
         }
-    }
-
-    // ================================
-    // PASSWORD MANAGEMENT
-    // ================================
+    });
 
     /**
      * Request password reset
-     * POST /api/v1/auth/password/reset-request
+     * POST /api/v1/auth/forgot-password
+     * Access: Public
      */
-    async requestPasswordReset(req, res) {
-        try {
-            const { email } = req.body;
-            
-            const result = await this.authService.requestPasswordReset(email);
-            
-            return this.sendSuccess(res, result.data, result.message);
-        } catch (error) {
-            return this.sendError(res, error.message, 400);
+    forgotPassword = this.asyncHandler(async (req, res) => {
+        const { email } = this.getRequestBody(req);
+
+        if (!email) {
+            return this.sendBadRequest(res, 'Email is required');
         }
-    }
+
+        if (!this.validateEmail(email)) {
+            return this.sendBadRequest(res, 'Invalid email format');
+        }
+
+        try {
+            await authService.forgotPassword(email);
+            return this.sendSuccess(
+                res, 
+                null, 
+                'If an account exists with this email, a password reset link has been sent'
+            );
+        } catch (error) {
+            // Don't reveal if user exists
+            return this.sendSuccess(
+                res, 
+                null, 
+                'If an account exists with this email, a password reset link has been sent'
+            );
+        }
+    });
 
     /**
      * Reset password with token
-     * POST /api/v1/auth/password/reset
+     * POST /api/v1/auth/reset-password
+     * Access: Public
      */
-    async resetPassword(req, res) {
-        try {
-            const { token, newPassword } = req.body;
-            
-            const result = await this.authService.resetPassword(token, newPassword);
-            
-            return this.sendSuccess(res, result.data, result.message);
-        } catch (error) {
-            return this.sendError(res, error.message, 400);
+    resetPassword = this.asyncHandler(async (req, res) => {
+        const { token, password } = this.getRequestBody(req);
+
+        // Validate required fields
+        const missing = this.validateRequiredFields(
+            { token, password },
+            ['token', 'password']
+        );
+
+        if (missing.length > 0) {
+            return this.sendBadRequest(res, `Missing required fields: ${missing.join(', ')}`);
         }
-    }
+
+        // Validate password strength
+        if (password.length < 8) {
+            return this.sendBadRequest(res, 'Password must be at least 8 characters long');
+        }
+
+        try {
+            await authService.resetPassword(token, password);
+            return this.sendSuccess(res, null, 'Password reset successfully');
+        } catch (error) {
+            if (error.message.includes('Invalid') || 
+                error.message.includes('expired')) {
+                return this.sendBadRequest(res, error.message);
+            }
+            return this.sendError(res, error);
+        }
+    });
 
     /**
-     * Change password (authenticated user)
-     * POST /api/v1/auth/password/change
+     * Change password (authenticated)
+     * POST /api/v1/auth/change-password
+     * Access: Authenticated users
      */
-    async changePassword(req, res) {
-        try {
-            const userId = req.user.userId;
-            const { currentPassword, newPassword } = req.body;
-            
-            const result = await this.authService.changePassword(
-                userId,
-                currentPassword,
-                newPassword
-            );
-            
-            return this.sendSuccess(res, result.data, result.message);
-        } catch (error) {
-            return this.sendError(res, error.message, 400);
-        }
-    }
+    changePassword = this.asyncHandler(async (req, res) => {
+        const { currentPassword, newPassword } = this.getRequestBody(req);
+        const userId = this.getUserId(req);
 
-    // ================================
-    // TOKEN MANAGEMENT
-    // ================================
+        // Validate required fields
+        const missing = this.validateRequiredFields(
+            { currentPassword, newPassword },
+            ['currentPassword', 'newPassword']
+        );
+
+        if (missing.length > 0) {
+            return this.sendBadRequest(res, `Missing required fields: ${missing.join(', ')}`);
+        }
+
+        // Validate new password strength
+        if (newPassword.length < 8) {
+            return this.sendBadRequest(res, 'New password must be at least 8 characters long');
+        }
+
+        // Prevent same password
+        if (currentPassword === newPassword) {
+            return this.sendBadRequest(res, 'New password must be different from current password');
+        }
+
+        try {
+            await authService.changePassword(userId, currentPassword, newPassword);
+            return this.sendSuccess(res, null, 'Password changed successfully');
+        } catch (error) {
+            if (error.message.includes('Invalid') || 
+                error.message.includes('Incorrect')) {
+                return this.sendUnauthorized(res, error.message);
+            }
+            return this.sendError(res, error);
+        }
+    });
 
     /**
      * Refresh access token
-     * POST /api/v1/auth/token/refresh
+     * POST /api/v1/auth/refresh-token
+     * Access: Public (requires valid refresh token)
      */
-    async refreshAccessToken(req, res) {
-        try {
-            const { refreshToken } = req.body;
-            
-            const result = await this.authService.refreshAccessToken(refreshToken);
-            
-            return this.sendSuccess(res, result.data, result.message);
-        } catch (error) {
-            return this.sendError(res, error.message, 401);
+    refreshToken = this.asyncHandler(async (req, res) => {
+        const { refreshToken } = this.getRequestBody(req);
+
+        if (!refreshToken) {
+            return this.sendBadRequest(res, 'Refresh token is required');
         }
-    }
+
+        try {
+            const result = await authService.refreshToken(refreshToken);
+            return this.sendSuccess(res, result, 'Token refreshed successfully');
+        } catch (error) {
+            if (error.message.includes('Invalid') || 
+                error.message.includes('expired')) {
+                return this.sendUnauthorized(res, error.message);
+            }
+            return this.sendError(res, error);
+        }
+    });
 
     /**
-     * Verify token validity
-     * POST /api/v1/auth/token/verify
-     */
-    async verifyToken(req, res) {
-        try {
-            const { token } = req.body;
-            
-            const result = await this.authService.verifyToken(token);
-            
-            return this.sendSuccess(res, result.data, result.message);
-        } catch (error) {
-            return this.sendError(res, error.message, 401);
-        }
-    }
-
-    /**
-     * Logout (client-side token removal)
+     * Logout user
      * POST /api/v1/auth/logout
+     * Access: Authenticated users
      */
-    async logout(req, res) {
+    logout = this.asyncHandler(async (req, res) => {
+        const userId = this.getUserId(req);
+        const { refreshToken } = this.getRequestBody(req);
+
         try {
-            // In a stateless JWT system, logout is primarily client-side
-            // Server can optionally blacklist tokens or log the action
-            
+            await authService.logout(userId, refreshToken);
             return this.sendSuccess(res, null, 'Logged out successfully');
         } catch (error) {
-            return this.sendError(res, error.message, 400);
+            return this.sendError(res, error);
         }
-    }
+    });
 
     /**
-     * Get current authenticated user
+     * Get current user profile
      * GET /api/v1/auth/me
+     * Access: Authenticated users
      */
-    async getCurrentUser(req, res) {
+    getCurrentUser = this.asyncHandler(async (req, res) => {
+        const userId = this.getUserId(req);
+
         try {
-            const userId = req.user.userId;
-            
-            // Get user from repository (through auth service)
-            const result = await this.authService.getCurrentUser(userId);
-            
-            return this.sendSuccess(res, result.data, result.message);
+            const user = await authService.getCurrentUser(userId);
+            return this.sendSuccess(res, this.sanitizeUser(user), 'User profile retrieved');
         } catch (error) {
-            return this.sendError(res, error.message, 404);
+            if (error.message.includes('not found')) {
+                return this.sendNotFound(res, error.message);
+            }
+            return this.sendError(res, error);
         }
-    }
+    });
+
+    /**
+     * Resend verification email
+     * POST /api/v1/auth/resend-verification
+     * Access: Public
+     */
+    resendVerification = this.asyncHandler(async (req, res) => {
+        const { email } = this.getRequestBody(req);
+
+        if (!email) {
+            return this.sendBadRequest(res, 'Email is required');
+        }
+
+        if (!this.validateEmail(email)) {
+            return this.sendBadRequest(res, 'Invalid email format');
+        }
+
+        try {
+            await authService.resendVerificationEmail(email);
+            return this.sendSuccess(
+                res, 
+                null, 
+                'If an account exists with this email, a verification link has been sent'
+            );
+        } catch (error) {
+            // Don't reveal if user exists
+            return this.sendSuccess(
+                res, 
+                null, 
+                'If an account exists with this email, a verification link has been sent'
+            );
+        }
+    });
 }
 
-export default new AuthController();
+export default AuthController;

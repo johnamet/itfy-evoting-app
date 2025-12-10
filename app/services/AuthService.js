@@ -15,21 +15,14 @@
  */
 
 import BaseService from './BaseService.js';
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
 import config from '../config/ConfigManager.js';
 import emailService from './EmailService.js';
 import { emailQueue } from '../config/queue.js';
+import AuthHelpers from '../utils/authHelpers.js';
 
 class AuthService extends BaseService {
     constructor(repositories) {
         super(repositories);
-        
-        this.JWT_SECRET = config.get('jwt.secret');
-        this.JWT_EXPIRES_IN = config.get('jwt.expiresIn') || '24h';
-        this.JWT_REFRESH_EXPIRES_IN = config.get('jwt.refreshExpiresIn') || '7d';
-        this.JWT_ISSUER = config.get('jwt.issuer') || 'itfy-evoting';
-        this.JWT_AUDIENCE = config.get('jwt.audience') || 'itfy-evoting-users';
         
         this.MAX_LOGIN_ATTEMPTS = 5;
         this.ACCOUNT_LOCK_DURATION = 15; // minutes
@@ -68,14 +61,8 @@ class AuthService extends BaseService {
                     throw new Error('Email already registered');
                 }
 
-                // Hash password
-                const hashedPassword = await bcrypt.hash(
-                    userData.password,
-                    await this.getSetting('security.bcrypt.rounds', 10)
-                );
-
-                // Create user
-                const user = await this.repo('user').createUser({
+                // Hash password using AuthHelpers
+                const hashedPassword = await AuthHelpers.hashPassword(candidateData.password);nst user = await this.repo('user').createUser({
                     email: userData.email,
                     password: hashedPassword,
                     level: userData.level || 1,
@@ -85,8 +72,12 @@ class AuthService extends BaseService {
                     active: true
                 });
 
-                // Generate verification token
-                const verificationToken = this.generateToken(user._id, user.email, 'email-verification', '7d');
+                // Generate and store verification token using AuthHelpers
+                const verificationToken = await AuthHelpers.generateAndStoreVerificationToken(
+                    user._id.toString(),
+                    user.email,
+                    false
+                );
                 const verificationUrl = `${config.get('app.url')}/verify-email?token=${verificationToken}`;
 
                 // Queue welcome + verification email
@@ -787,9 +778,22 @@ class AuthService extends BaseService {
     async refreshAccessToken(refreshToken) {
         return this.runInContext({ action: 'refreshAccessToken' }, async () => {
             try {
-                const payload = this.verifyToken(refreshToken);
+                // Verify token using AuthHelpers
+                const payload = AuthHelpers.verifyToken(refreshToken);
 
                 if (payload.type !== 'refresh') {
+                    throw new Error('Invalid refresh token');
+                }
+
+                // Check if token is blacklisted
+                const isBlacklisted = await AuthHelpers.isTokenBlacklisted(refreshToken);
+                if (isBlacklisted) {
+                    throw new Error('Token has been revoked');
+                }
+
+                // Validate stored refresh token
+                const storedToken = await AuthHelpers.getStoredRefreshToken(payload.sub);
+                if (storedToken !== refreshToken) {
                     throw new Error('Invalid refresh token');
                 }
 
