@@ -13,7 +13,7 @@
 import BaseService from './BaseService.js';
 
 export default class EventService extends BaseService {
-    constructor(repositories) {
+    constructor(repositories, options = {}) {
         super(repositories, {
             serviceName: 'EventService',
             primaryRepository: 'event',
@@ -28,6 +28,9 @@ export default class EventService extends BaseService {
             archived: [],
             cancelled: [],
         };
+        
+        this.emailService = options.emailService || null;
+        this.notificationService = options.notificationService || null;
     }
 
     /**
@@ -220,7 +223,33 @@ export default class EventService extends BaseService {
      * Activate event (published → active)
      */
     async activateEvent(eventId, userId) {
-        return this.updateEventStatus(eventId, 'active', userId, 'Activated for voting');
+        const result = await this.updateEventStatus(eventId, 'active', userId, 'Activated for voting');
+        
+        // Send notifications to interested users (event creator and followers)
+        if (this.notificationService && result.success) {
+            try {
+                const event = await this.repo('event').findById(eventId);
+                
+                // Notify event creator
+                if (event && event.createdBy) {
+                    await this.notificationService.createNotification({
+                        userId: event.createdBy,
+                        type: 'event',
+                        title: 'Event Now Active',
+                        message: `${event.name} is now active and accepting votes!`,
+                        priority: 'high',
+                        metadata: { eventId: event._id, status: 'active' },
+                    });
+                }
+            } catch (notifError) {
+                this.log('warn', 'Failed to send event activation notification', { 
+                    error: notifError.message,
+                    eventId 
+                });
+            }
+        }
+        
+        return result;
     }
 
     /**
@@ -231,7 +260,62 @@ export default class EventService extends BaseService {
             const result = await this.updateEventStatus(eventId, 'closed', userId, 'Voting period ended');
 
             // Trigger results calculation
-            await this.calculateEventResults(eventId);
+            const resultsData = await this.calculateEventResults(eventId);
+            
+            // Get event details and top candidates
+            const event = await this.repo('event').findById(eventId);
+            const topCandidates = await this.repo('candidate').find(
+                { eventId },
+                { sort: { rank: 1 }, limit: 3 }
+            );
+            
+            // Send results email to event creator
+            if (this.emailService && event && event.createdBy) {
+                try {
+                    const creator = await this.repo('user').findById(event.createdBy);
+                    if (creator && creator.email) {
+                        await this.emailService.sendEventResultsEmail({
+                            email: creator.email,
+                            name: `${creator.firstName || ''} ${creator.lastName || ''}`.trim() || creator.email,
+                            eventName: event.name,
+                            totalVotes: resultsData.data?.totalVotes || 0,
+                            topCandidates: topCandidates.map(c => ({
+                                name: c.name,
+                                votes: c.votes,
+                                rank: c.rank,
+                            })),
+                        });
+                    }
+                } catch (emailError) {
+                    this.log('warn', 'Failed to send event results email', { 
+                        error: emailError.message,
+                        eventId 
+                    });
+                }
+            }
+            
+            // Send notification to event creator
+            if (this.notificationService && event && event.createdBy) {
+                try {
+                    await this.notificationService.createNotification({
+                        userId: event.createdBy,
+                        type: 'event',
+                        title: 'Event Closed - Results Available',
+                        message: `${event.name} has ended. Total votes: ${resultsData.data?.totalVotes || 0}. Check the results now!`,
+                        priority: 'high',
+                        metadata: { 
+                            eventId: event._id, 
+                            status: 'closed',
+                            totalVotes: resultsData.data?.totalVotes || 0 
+                        },
+                    });
+                } catch (notifError) {
+                    this.log('warn', 'Failed to send event closed notification', { 
+                        error: notifError.message,
+                        eventId 
+                    });
+                }
+            }
 
             return result;
         });

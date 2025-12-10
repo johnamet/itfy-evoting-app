@@ -12,11 +12,14 @@
 import BaseService from './BaseService.js';
 
 export default class VotingService extends BaseService {
-    constructor(repositories) {
+    constructor(repositories, options = {}) {
         super(repositories, {
             serviceName: 'VotingService',
             primaryRepository: 'vote',
         });
+        
+        this.emailService = options.emailService || null;
+        this.notificationService = options.notificationService || null;
     }
 
     /**
@@ -146,6 +149,50 @@ export default class VotingService extends BaseService {
                 eventId,
                 candidateId,
             });
+
+            // Send vote confirmation email
+            if (this.emailService) {
+                try {
+                    const voter = await this.repo('user').findById(voterId);
+                    if (voter && voter.email) {
+                        await this.emailService.sendVoteCastConfirmationEmail({
+                            email: voter.email,
+                            name: `${voter.firstName || ''} ${voter.lastName || ''}`.trim() || voter.email,
+                            eventName: event.name,
+                            candidateName: candidate.name,
+                            voteDate: vote.createdAt,
+                        });
+                    }
+                } catch (emailError) {
+                    this.log('warn', 'Failed to send vote confirmation email', { 
+                        error: emailError.message,
+                        voteId: vote._id 
+                    });
+                }
+            }
+
+            // Send notification
+            if (this.notificationService) {
+                try {
+                    await this.notificationService.createNotification({
+                        userId: voterId,
+                        type: 'vote',
+                        title: 'Vote Cast Successfully',
+                        message: `Your vote for ${candidate.name} in ${event.name} has been recorded.`,
+                        priority: 'normal',
+                        metadata: {
+                            eventId: event._id,
+                            candidateId: candidate._id,
+                            voteId: vote._id,
+                        },
+                    });
+                } catch (notifError) {
+                    this.log('warn', 'Failed to send vote notification', { 
+                        error: notifError.message,
+                        voteId: vote._id 
+                    });
+                }
+            }
 
             return this.handleSuccess(
                 { vote },

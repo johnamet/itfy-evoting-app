@@ -12,13 +12,16 @@
 import BaseService from './BaseService.js';
 
 export default class CandidateService extends BaseService {
-    constructor(repositories) {
+    constructor(repositories, options = {}) {
         super(repositories, {
             serviceName: 'CandidateService',
             primaryRepository: 'candidate',
         });
 
         this.validStatuses = ['pending', 'approved', 'rejected', 'suspended'];
+        
+        this.emailService = options.emailService || null;
+        this.notificationService = options.notificationService || null;
     }
 
     /**
@@ -183,7 +186,61 @@ export default class CandidateService extends BaseService {
                 throw new Error('Rejection reason is required');
             }
 
-            return this.updateCandidateStatus(candidateId, 'rejected', rejecterId, reason);
+            const result = await this.updateCandidateStatus(candidateId, 'rejected', rejecterId, reason);
+            
+            // Send rejection email
+            if (this.emailService && result.success) {
+                try {
+                    const candidate = await this.repo('candidate').findById(candidateId);
+                    const event = await this.repo('event').findById(candidate.eventId);
+                    
+                    if (candidate && candidate.email) {
+                        await this.emailService.sendEmail({
+                            to: candidate.email,
+                            subject: 'Candidate Application Status',
+                            template: 'candidate-rejected',
+                            context: {
+                                name: candidate.name,
+                                eventName: event ? event.name : 'the event',
+                                reason: reason,
+                                supportEmail: 'support@itfy-evoting.com',
+                            },
+                        });
+                    }
+                } catch (emailError) {
+                    this.log('warn', 'Failed to send rejection email', { 
+                        error: emailError.message,
+                        candidateId 
+                    });
+                }
+            }
+            
+            // Send notification if candidate is also a user
+            if (this.notificationService && result.success) {
+                try {
+                    const candidate = await this.repo('candidate').findById(candidateId);
+                    // Try to find user by email to send notification
+                    const user = await this.repo('user').findByEmail(candidate.email);
+                    
+                    if (user) {
+                        await this.notificationService.createNotification({
+                            userId: user._id,
+                            type: 'candidate',
+                            title: 'Candidate Application Rejected',
+                            message: `Your application for ${candidate.name} has been rejected. Reason: ${reason}`,
+                            priority: 'high',
+                            metadata: { candidateId, status: 'rejected', reason },
+                        });
+                    }
+                } catch (notifError) {
+                    this.log('warn', 'Failed to send rejection notification', { 
+                        error: notifError.message,
+                        candidateId 
+                    });
+                }
+            }
+
+            return result;
         });
     }
 
@@ -196,7 +253,60 @@ export default class CandidateService extends BaseService {
                 throw new Error('Suspension reason is required');
             }
 
-            return this.updateCandidateStatus(candidateId, 'suspended', suspenderId, reason);
+            const result = await this.updateCandidateStatus(candidateId, 'suspended', suspenderId, reason);
+            
+            // Send suspension email
+            if (this.emailService && result.success) {
+                try {
+                    const candidate = await this.repo('candidate').findById(candidateId);
+                    const event = await this.repo('event').findById(candidate.eventId);
+                    
+                    if (candidate && candidate.email) {
+                        await this.emailService.sendEmail({
+                            to: candidate.email,
+                            subject: 'Candidate Account Suspended',
+                            template: 'candidate-suspended',
+                            context: {
+                                name: candidate.name,
+                                eventName: event ? event.name : 'the event',
+                                reason: reason,
+                                supportEmail: 'support@itfy-evoting.com',
+                            },
+                        });
+                    }
+                } catch (emailError) {
+                    this.log('warn', 'Failed to send suspension email', { 
+                        error: emailError.message,
+                        candidateId 
+                    });
+                }
+            }
+            
+            // Send notification if candidate is also a user
+            if (this.notificationService && result.success) {
+                try {
+                    const candidate = await this.repo('candidate').findById(candidateId);
+                    const user = await this.repo('user').findByEmail(candidate.email);
+                    
+                    if (user) {
+                        await this.notificationService.createNotification({
+                            userId: user._id,
+                            type: 'candidate',
+                            title: 'Candidate Account Suspended',
+                            message: `Your candidate profile ${candidate.name} has been suspended. Reason: ${reason}`,
+                            priority: 'urgent',
+                            metadata: { candidateId, status: 'suspended', reason },
+                        });
+                    }
+                } catch (notifError) {
+                    this.log('warn', 'Failed to send suspension notification', { 
+                        error: notifError.message,
+                        candidateId 
+                    });
+                }
+            }
+
+            return result;
         });
     }
 

@@ -14,7 +14,7 @@ import crypto from 'crypto';
 import config from '../config/ConfigManager.js';
 
 export default class PaymentService extends BaseService {
-    constructor(repositories) {
+    constructor(repositories, options = {}) {
         super(repositories, {
             serviceName: 'PaymentService',
             primaryRepository: 'payment',
@@ -23,6 +23,9 @@ export default class PaymentService extends BaseService {
         this.paystackSecretKey = config.get('paystack.secretKey');
         this.paystackPublicKey = config.get('paystack.publicKey');
         this.validStatuses = ['pending', 'successful', 'failed', 'refunded'];
+        
+        this.emailService = options.emailService || null;
+        this.notificationService = options.notificationService || null;
     }
 
     /**
@@ -158,6 +161,59 @@ export default class PaymentService extends BaseService {
                     reference,
                     status: 'successful',
                 });
+
+                // Get user and event details for notifications
+                const user = await this.repo('user').findById(payment.userId);
+                const event = await this.repo('event').findById(payment.eventId);
+
+                // Send payment receipt email
+                if (this.emailService && user && user.email) {
+                    try {
+                        await this.emailService.sendEmail({
+                            to: user.email,
+                            subject: 'Payment Receipt - Vote Purchase Successful',
+                            template: 'payment-receipt',
+                            context: {
+                                name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
+                                reference: payment.reference,
+                                amount: payment.amount,
+                                originalAmount: payment.originalAmount,
+                                discountAmount: payment.discountAmount,
+                                eventName: event ? event.name : 'Event',
+                                paymentDate: new Date(),
+                            },
+                        });
+                    } catch (emailError) {
+                        this.log('warn', 'Failed to send payment receipt email', { 
+                            error: emailError.message,
+                            paymentId: payment._id 
+                        });
+                    }
+                }
+
+                // Send notification
+                if (this.notificationService) {
+                    try {
+                        await this.notificationService.createNotification({
+                            userId: payment.userId,
+                            type: 'payment',
+                            title: 'Payment Successful',
+                            message: `Your payment of ₦${payment.amount.toLocaleString()} for ${event ? event.name : 'event'} was successful.`,
+                            priority: 'high',
+                            metadata: {
+                                paymentId: payment._id,
+                                reference: payment.reference,
+                                amount: payment.amount,
+                                eventId: payment.eventId,
+                            },
+                        });
+                    } catch (notifError) {
+                        this.log('warn', 'Failed to send payment notification', { 
+                            error: notifError.message,
+                            paymentId: payment._id 
+                        });
+                    }
+                }
 
                 return this.handleSuccess({
                     verified: true,

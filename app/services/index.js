@@ -72,7 +72,7 @@ const eventService = new EventService({
     payment: paymentRepository,
     activity: activityRepository,
     settings: settingsRepository,
-});
+}, { emailService, notificationService: null }); // notificationService set after instantiation
 
 // VotingService - handles vote casting and analytics
 const votingService = new VotingService({
@@ -83,7 +83,7 @@ const votingService = new VotingService({
     user: userRepository,
     activity: activityRepository,
     settings: settingsRepository,
-});
+}, { emailService, notificationService: null }); // notificationService set after instantiation
 
 // CandidateService - handles candidate management
 const candidateService = new CandidateService({
@@ -92,7 +92,7 @@ const candidateService = new CandidateService({
     category: categoryRepository,
     vote: voteRepository,
     activity: activityRepository,
-});
+}, { emailService, notificationService: null }); // notificationService set after instantiation
 
 // CouponService - handles coupons and usage tracking
 const couponService = new CouponService({
@@ -111,7 +111,7 @@ const paymentService = new PaymentService({
     coupon: couponRepository,
     couponUsage: couponUsageRepository,
     activity: activityRepository,
-});
+}, { emailService, notificationService: null }); // notificationService set after instantiation
 
 // NotificationService - handles notification creation and delivery
 const notificationService = new NotificationService({
@@ -139,6 +139,16 @@ const settingsService = new SettingsService({
     settings: settingsRepository,
     activity: activityRepository,
 });
+
+/**
+ * Set notificationService references after instantiation to avoid circular dependencies
+ */
+if (notificationService) {
+    eventService.notificationService = notificationService;
+    votingService.notificationService = notificationService;
+    candidateService.notificationService = notificationService;
+    paymentService.notificationService = notificationService;
+}
 
 /**
  * Export service instances (recommended for use in controllers)
