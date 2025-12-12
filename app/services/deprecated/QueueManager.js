@@ -11,7 +11,7 @@ import { voteJobs } from '../processors/voteProcessor.js';
 import { analyticsJobs } from '../processors/analyticsProcessor.js';
 import { paymentJobs } from '../processors/paymentProcessor.js';
 import { notificationJobs } from '../processors/notificationProcessor.js';
-import logger from '../utils/logger.js';
+import logger from '../utils/Logger.js';
 
 class QueueManager {
     constructor() {

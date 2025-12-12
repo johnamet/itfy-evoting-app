@@ -1,6 +1,6 @@
 import { analyticsQueue } from '../config/queue.js';
 import AnalyticsService from '../services/AnalyticsService.js';
-import logger from '../utils/logger.js';
+import logger from '../utils/Logger.js';
 
 // Analytics job processor
 analyticsQueue.process('track-user-activity', async (job) => {

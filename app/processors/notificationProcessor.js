@@ -1,6 +1,6 @@
 import { notificationQueue } from '../config/queue.js';
 import NotificationService from '../services/NotificationService.js';
-import logger from '../utils/logger.js';
+import logger from '../utils/Logger.js';
 
 // Notification job processor
 notificationQueue.process('send-push-notification', async (job) => {

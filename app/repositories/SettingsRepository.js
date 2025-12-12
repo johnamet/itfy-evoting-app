@@ -1,6 +1,6 @@
 import BaseRepository from '../BaseRepository.js';
-import Settings from '../../models/Settings.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Settings from '../models/Settings.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 /**
  * SettingsRepository

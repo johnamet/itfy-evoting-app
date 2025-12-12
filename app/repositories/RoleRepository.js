@@ -1,6 +1,6 @@
 import BaseRepository from '../BaseRepository.js';
-import Role from '../../models/Role.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Role from '../models/Role.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 /**
  * RoleRepository

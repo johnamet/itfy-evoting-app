@@ -1,6 +1,6 @@
 import BaseRepository from '../BaseRepository.js';
-import Slide from '../../models/Slide.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Slide from '../models/Slide.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 /**
  * SlideRepository

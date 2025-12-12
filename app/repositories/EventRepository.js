@@ -10,8 +10,8 @@
  */
 
 import BaseRepository from '../BaseRepository.js';
-import Event from '../../models/Event.js';
-import { eventCacheManager } from '../../utils/engine/CacheManager.js';
+import Event from '../models/Event.js';
+import { eventCacheManager } from '../utils/engine/CacheManager.js';
 
 class EventRepository extends BaseRepository {
     constructor() {

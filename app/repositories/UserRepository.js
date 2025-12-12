@@ -10,9 +10,9 @@
  */
 
 import BaseRepository from '../BaseRepository.js';
-import User from '../../models/User.js';
+import User from '../models/User.js';
 import bcrypt from 'bcrypt';
-import { userCacheManager } from '../../utils/engine/CacheManager.js';
+import { userCacheManager } from '../utils/engine/CacheManager.js';
 
 class UserRepository extends BaseRepository {
     constructor() {

@@ -1,6 +1,6 @@
 import { paymentQueue } from '../config/queue.js';
 import PaymentService from '../services/PaymentService.js';
-import logger from '../utils/logger.js';
+import logger from '../utils/Logger.js';
 
 // Payment job processor
 paymentQueue.process('process-payment', async (job) => {

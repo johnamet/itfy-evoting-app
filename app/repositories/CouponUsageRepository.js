@@ -1,6 +1,6 @@
 import BaseRepository from '../BaseRepository.js';
-import CouponUsage from '../../models/CouponUsage.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import CouponUsage from '../models/CouponUsage.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 /**
  * CouponUsageRepository

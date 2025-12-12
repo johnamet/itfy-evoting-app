@@ -10,8 +10,8 @@
  */
 
 import BaseRepository from '../BaseRepository.js';
-import Vote from '../../models/Vote.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Vote from '../models/Vote.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 class VoteRepository extends BaseRepository {
     constructor() {

@@ -1,6 +1,6 @@
 import BaseRepository from '../BaseRepository.js';
-import Form from '../../models/Form.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Form from '../models/Form.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 /**
  * FormsRepository
