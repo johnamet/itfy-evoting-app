@@ -7,7 +7,7 @@
  */
 
 import mongoose from "mongoose";
-import BaseModel from "./deprecated/BaseModel2.js";
+import BaseModel from "./BaseModel.js";
 
 const PaymentSchema = {
   // Reference
@@ -195,6 +195,25 @@ const PaymentSchema = {
       type: Boolean,
       default: true,
     },
+  },
+
+  // Usage Tracking
+  usage: {
+    used: {
+      type: Boolean,
+      default: false,
+    },
+    usedAt: Date,
+    votesCast: {
+      type: Number,
+      default: 0,
+    },
+    votes: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Vote",
+      },
+    ],
   },
 
   // Refund

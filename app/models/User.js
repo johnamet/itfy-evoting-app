@@ -9,7 +9,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 import validator from "validator";
-import BaseModel from "./deprecated/BaseModel2.js";
+import BaseModel from "./BaseModel.js";
 import config from "../config/ConfigManager.js";
 
 const UserSchema = {

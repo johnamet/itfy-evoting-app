@@ -15,6 +15,7 @@
  */
 
 import config from '../config/ConfigManager.js';
+import logger from '../utils/Logger.js';
 
 class BaseService {
     /**
@@ -313,41 +314,32 @@ class BaseService {
      * @param {Object} [meta={}] - Additional metadata
      */
     log(level, message, meta = {}) {
-        const logEntry = {
+        const context = {
             service: this.serviceName,
-            level,
-            message,
-            timestamp: new Date().toISOString(),
             ...meta
         };
 
-        // Use appropriate console method
-        switch (level) {
-            case 'error':
-                console.error(`[${this.serviceName}] ERROR:`, message, meta);
-                break;
-            case 'warn':
-                console.warn(`[${this.serviceName}] WARN:`, message, meta);
-                break;
-            case 'debug':
-                if (config.get('env') === 'development') {
-                    console.debug(`[${this.serviceName}] DEBUG:`, message, meta);
-                }
-                break;
-            default:
-                console.log(`[${this.serviceName}] INFO:`, message, meta);
-        }
+        // Use centralized logger
+        logger.log(level, message, context);
 
-        // Log to activity repository if available
+        // Log to activity repository if available for errors
         if (this.hasRepo('activity') && level === 'error') {
             this.repo('activity').logActivity({
                 action: 'service_error',
                 resource: this.serviceName,
                 metadata: { message, ...meta }
             }).catch(err => {
-                console.error('Failed to log to activity repository:', err);
+                logger.error('Failed to log to activity repository', { error: err });
             });
         }
+    }
+
+    /**
+     * Get child logger with service context
+     * @returns {Object} Child logger instance
+     */
+    getLogger() {
+        return logger.child({ service: this.serviceName });
     }
 
     /**

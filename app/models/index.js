@@ -11,6 +11,7 @@ export { default as Role } from './Role.js';
 export { default as Event } from './Event.js';
 export { default as Category } from './Category.js';
 export { default as Candidate } from './Candidate.js';
+export { default as Nomination } from './Nomination.js';
 
 // Voting Models
 export { default as Vote } from './Vote.js';

@@ -7,7 +7,7 @@
  */
 
 import mongoose from "mongoose";
-import BaseModel from "./deprecated/BaseModel2.js";
+import BaseModel from "./BaseModel.js";
 
 const VoteSchema = {
   // Candidate Reference
@@ -25,10 +25,7 @@ const VoteSchema = {
       lowercase: true,
     },
     name: String,
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-    },
+  
   },
 
   // Event and Category

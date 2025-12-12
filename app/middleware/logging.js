@@ -7,6 +7,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import logger, { Logger } from '../utils/Logger.js';
 
 class LoggingMiddleware {
     static logDirectory = path.join(process.cwd(), 'logs');
@@ -34,55 +35,70 @@ class LoggingMiddleware {
         } = options;
 
         return (req, res, next) => {
-            const startTime = Date.now();
-            const timestamp = new Date().toISOString();
+            const startTime = logger.startTimer();
+            
+            // Generate and set correlation ID for request tracing
+            const correlationId = Logger.generateCorrelationId();
+            req.correlationId = correlationId;
+            Logger.setCorrelationId(correlationId);
             
             // Skip health check endpoints if configured
             if (skipHealthChecks && (req.path === '/health' || req.path === '/status')) {
                 return next();
             }
 
-            // Log request
-            const requestLog = {
-                timestamp,
-                requestId: req.requestId,
-                method: req.method,
-                url: req.originalUrl,
-                userAgent: req.headers['user-agent'],
-                ip: req.ip || req.connection.remoteAddress,
-                userId: req.user?.id || null,
-                body: this._sanitizeLogData(req.body, sensitiveFields),
-                query: req.query,
-                headers: this._sanitizeLogData(req.headers, sensitiveFields)
-            };
-
+            // Log request start
             if (logToConsole) {
-                console.log(`[REQUEST] ${req.method} ${req.originalUrl} - ${req.ip}`);
+                logger.debug(`Incoming request: ${req.method} ${req.originalUrl}`, {
+                    correlationId,
+                    ip: req.ip || req.connection.remoteAddress,
+                    userAgent: req.headers['user-agent'],
+                    userId: req.user?.id || null
+                });
             }
 
             // Override res.json to capture response
             const originalJson = res.json;
             res.json = function(data) {
-                const endTime = Date.now();
-                const duration = endTime - startTime;
+                const duration = logger.endTimer(startTime);
 
-                const responseLog = {
-                    ...requestLog,
-                    responseTime: duration,
-                    statusCode: res.statusCode,
-                    success: data?.success || res.statusCode < 400,
-                    error: data?.error || null
-                };
+                // Use centralized logger for HTTP requests
+                logger.request(
+                    req.method,
+                    req.originalUrl,
+                    res.statusCode,
+                    duration,
+                    {
+                        correlationId,
+                        ip: req.ip || req.connection.remoteAddress,
+                        userId: req.user?.userId || req.user?.id || null,
+                        userAgent: req.headers['user-agent'],
+                        success: data?.success || res.statusCode < 400,
+                        error: data?.error || null
+                    }
+                );
 
-                if (logToConsole) {
-                    const statusColor = res.statusCode >= 400 ? '\x1b[31m' : '\x1b[32m';
-                    const resetColor = '\x1b[0m';
-                    console.log(`[RESPONSE] ${statusColor}${res.statusCode}${resetColor} ${req.method} ${req.originalUrl} - ${duration}ms`);
-                }
-
+                // Also write to file for backward compatibility
                 if (logToFile) {
+                    const responseLog = {
+                        timestamp: new Date().toISOString(),
+                        correlationId,
+                        method: req.method,
+                        url: req.originalUrl,
+                        statusCode: res.statusCode,
+                        responseTime: duration,
+                        ip: req.ip || req.connection.remoteAddress,
+                        userId: req.user?.userId || req.user?.id || null,
+                        success: data?.success || res.statusCode < 400,
+                        error: data?.error || null,
+                        body: LoggingMiddleware._sanitizeLogData(req.body, sensitiveFields),
+                        query: req.query
+                    };
                     LoggingMiddleware._writeToLogFile('requests', responseLog);
                 }
+
+                // Clear correlation context
+                Logger.clearCorrelationId();
 
                 return originalJson.call(this, data);
             };
@@ -97,11 +113,24 @@ class LoggingMiddleware {
      */
     static errorLogger() {
         return (error, req, res, next) => {
-            const timestamp = new Date().toISOString();
-            
+            // Use centralized logger
+            logger.error(error.message, {
+                error,
+                correlationId: req.correlationId || Logger.getCorrelationId(),
+                method: req.method,
+                url: req.originalUrl,
+                path: req.path,
+                ip: req.ip || req.connection.remoteAddress,
+                userAgent: req.headers['user-agent'],
+                userId: req.user?.userId || req.user?.id || null,
+                body: req.body,
+                query: req.query
+            });
+
+            // Also write to file for backward compatibility
             const errorLog = {
-                timestamp,
-                requestId: req.requestId,
+                timestamp: new Date().toISOString(),
+                correlationId: req.correlationId,
                 error: {
                     message: error.message,
                     stack: error.stack,
@@ -110,13 +139,11 @@ class LoggingMiddleware {
                 request: {
                     method: req.method,
                     url: req.originalUrl,
-                    ip: req.ip,
+                    ip: req.ip || req.connection.remoteAddress,
                     userAgent: req.headers['user-agent'],
-                    userId: req.user?.id || null
+                    userId: req.user?.userId || req.user?.id || null
                 }
             };
-
-            console.error(`[ERROR] ${error.message}`, errorLog);
             this._writeToLogFile('errors', errorLog);
 
             next(error);
@@ -129,29 +156,42 @@ class LoggingMiddleware {
      */
     static performanceMonitor() {
         return (req, res, next) => {
-            const startTime = process.hrtime();
+            const startTime = logger.startTimer();
             const startMemory = process.memoryUsage();
 
             res.on('finish', () => {
-                const [seconds, nanoseconds] = process.hrtime(startTime);
-                const duration = seconds * 1000 + nanoseconds / 1000000; // Convert to milliseconds
+                const duration = logger.endTimer(startTime);
                 const endMemory = process.memoryUsage();
 
                 if (duration > 1000) { // Log slow requests (>1s)
+                    const memoryDelta = {
+                        rss: endMemory.rss - startMemory.rss,
+                        heapUsed: endMemory.heapUsed - startMemory.heapUsed
+                    };
+
+                    // Use centralized logger
+                    logger.performance(
+                        `${req.method} ${req.originalUrl}`,
+                        duration,
+                        {
+                            correlationId: req.correlationId,
+                            statusCode: res.statusCode,
+                            memoryDelta,
+                            ip: req.ip || req.connection.remoteAddress,
+                            userId: req.user?.userId || req.user?.id || null
+                        }
+                    );
+
+                    // Also write to file for backward compatibility
                     const performanceLog = {
                         timestamp: new Date().toISOString(),
-                        requestId: req.requestId,
+                        correlationId: req.correlationId,
                         method: req.method,
                         url: req.originalUrl,
                         duration: Math.round(duration),
                         statusCode: res.statusCode,
-                        memoryDelta: {
-                            rss: endMemory.rss - startMemory.rss,
-                            heapUsed: endMemory.heapUsed - startMemory.heapUsed
-                        }
+                        memoryDelta
                     };
-
-                    console.warn(`[SLOW REQUEST] ${req.method} ${req.originalUrl} - ${Math.round(duration)}ms`);
                     this._writeToLogFile('performance', performanceLog);
                 }
             });
@@ -167,20 +207,30 @@ class LoggingMiddleware {
      * @param {Object} req - Request object
      */
     static logSecurityEvent(event, details, req) {
+        // Use centralized logger
+        logger.security(event, {
+            ...details,
+            correlationId: req.correlationId || Logger.getCorrelationId(),
+            ip: req.ip || req.connection.remoteAddress,
+            userAgent: req.headers['user-agent'],
+            url: req.originalUrl,
+            method: req.method,
+            userId: req.user?.userId || req.user?.id || null
+        });
+
+        // Also write to file for backward compatibility
         const securityLog = {
             timestamp: new Date().toISOString(),
             event,
             details,
             request: {
-                ip: req.ip,
+                ip: req.ip || req.connection.remoteAddress,
                 userAgent: req.headers['user-agent'],
                 url: req.originalUrl,
                 method: req.method,
-                userId: req.user?.id || null
+                userId: req.user?.userId || req.user?.id || null
             }
         };
-
-        console.warn(`[SECURITY] ${event}`, securityLog);
         this._writeToLogFile('security', securityLog);
     }
 

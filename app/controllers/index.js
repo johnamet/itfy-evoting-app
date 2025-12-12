@@ -24,6 +24,8 @@ import CouponController from './CouponController.js';
 import NotificationController from './NotificationController.js';
 import AnalyticsController from './AnalyticsController.js';
 import SettingsController from './SettingsController.js';
+import NominationController from './NominationController.js';
+import SlideController from './SlideController.js';
 
 // Create controller instances
 const authController = new AuthController();
@@ -36,6 +38,8 @@ const couponController = new CouponController();
 const notificationController = new NotificationController();
 const analyticsController = new AnalyticsController();
 const settingsController = new SettingsController();
+const nominationController = new NominationController();
+const slideController = new SlideController();
 
 // Export class definitions
 export {
@@ -49,7 +53,9 @@ export {
     CouponController,
     NotificationController,
     AnalyticsController,
-    SettingsController
+    SettingsController,
+    NominationController,
+    SlideController
 };
 
 // Export controller instances for route usage
@@ -63,7 +69,9 @@ export {
     couponController,
     notificationController,
     analyticsController,
-    settingsController
+    settingsController,
+    nominationController,
+    slideController
 };
 
 // Default export for convenience
@@ -78,5 +86,7 @@ export default {
     coupon: couponController,
     notification: notificationController,
     analytics: analyticsController,
-    settings: settingsController
+    settings: settingsController,
+    nomination: nominationController,
+    slide: slideController
 };

@@ -47,7 +47,7 @@ const CategorySchema = {
     },
     allowMultiple: {
       type: Boolean,
-      default: false,
+      default: true,
     },
     requirePayment: {
       type: Boolean,
@@ -92,6 +92,52 @@ const CategorySchema = {
       default: 0,
     },
     totalRevenue: {
+      type: Number,
+      default: 0,
+    },
+  },
+
+  // Voting Control Configuration (for nomination system)
+  votingConfig: {
+    minCandidatesRequired: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+    autoOpenVoting: {
+      type: Boolean,
+      default: false,
+    },
+    openVotingDate: Date,
+    closeVotingDate: Date,
+  },
+
+  // Voting Status (for nomination workflow)
+  votingStatus: {
+    type: String,
+    enum: ["accepting_nominations", "ready", "voting_open", "closed"],
+    default: "accepting_nominations",
+  },
+
+  // Nomination Stats
+  nominationStats: {
+    totalNominations: {
+      type: Number,
+      default: 0,
+    },
+    pendingNominations: {
+      type: Number,
+      default: 0,
+    },
+    approvedNominations: {
+      type: Number,
+      default: 0,
+    },
+    activeCandidates: {
+      type: Number,
+      default: 0,
+    },
+    awaitingVerification: {
       type: Number,
       default: 0,
     },
@@ -248,6 +294,81 @@ categoryModel.addStaticMethod("getCategoryStats", async function (categoryId) {
 
   await category.save();
   return category.metrics;
+});
+
+// Nomination System Instance Methods
+
+categoryModel.addInstanceMethod("checkReadyForVoting", function () {
+  const hasEnoughCandidates = this.nominationStats.activeCandidates >= this.votingConfig.minCandidatesRequired;
+  const hasPendingNominations = this.nominationStats.pendingNominations > 0;
+  const hasAwaitingVerification = this.nominationStats.awaitingVerification > 0;
+
+  return {
+    ready: hasEnoughCandidates && !hasPendingNominations && !hasAwaitingVerification,
+    hasEnoughCandidates,
+    hasPendingNominations,
+    hasAwaitingVerification,
+    required: this.votingConfig.minCandidatesRequired,
+    current: this.nominationStats.activeCandidates
+  };
+});
+
+categoryModel.addInstanceMethod("markReadyForVoting", async function () {
+  const readyCheck = this.checkReadyForVoting();
+  
+  if (!readyCheck.ready) {
+    throw new Error('Category is not ready for voting. Check pending nominations and candidate requirements.');
+  }
+
+  this.votingStatus = "ready";
+  return await this.save();
+});
+
+categoryModel.addInstanceMethod("openVotingForNominations", async function () {
+  const readyCheck = this.checkReadyForVoting();
+  
+  if (!readyCheck.ready) {
+    throw new Error(`Cannot open voting: ${!readyCheck.hasEnoughCandidates ? 'Not enough active candidates' : 'Has pending nominations or unverified candidates'}`);
+  }
+
+  this.votingStatus = "voting_open";
+  this.status = "voting_open"; // Also update legacy status field
+  return await this.save();
+});
+
+categoryModel.addInstanceMethod("closeVotingForNominations", async function () {
+  this.votingStatus = "closed";
+  this.status = "voting_closed"; // Also update legacy status field
+  return await this.save();
+});
+
+categoryModel.addInstanceMethod("updateNominationStats", async function () {
+  const Nomination = mongoose.model("Nomination");
+  const Candidate = mongoose.model("Candidate");
+
+  const [
+    totalNominations,
+    pendingNominations,
+    approvedNominations,
+    activeCandidates,
+    awaitingVerification
+  ] = await Promise.all([
+    Nomination.countDocuments({ categoryId: this._id }),
+    Nomination.countDocuments({ categoryId: this._id, status: "pending" }),
+    Nomination.countDocuments({ categoryId: this._id, status: "approved" }),
+    Candidate.countDocuments({ categories: this._id, status: "active" }),
+    Candidate.countDocuments({ categories: this._id, status: "awaiting_verification" })
+  ]);
+
+  this.nominationStats = {
+    totalNominations,
+    pendingNominations,
+    approvedNominations,
+    activeCandidates,
+    awaitingVerification
+  };
+
+  return await this.save();
 });
 
 // Middleware

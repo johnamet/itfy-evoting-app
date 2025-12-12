@@ -636,4 +636,193 @@ export default class CandidateService extends BaseService {
             return this.handleSuccess(null, 'Candidate deleted successfully');
         });
     }
+
+    /**
+     * Calculate and update profile completion percentage
+     * @param {string} candidateId - Candidate ID
+     * @returns {Promise<Object>} Profile completion data
+     */
+    async calculateAndUpdateProfileCompletion(candidateId) {
+        return this.runInContext('calculateAndUpdateProfileCompletion', async () => {
+            const candidate = await this.repo('candidate').findById(candidateId);
+            
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            // Use model instance method
+            const completionPercentage = candidate.calculateProfileCompletion();
+
+            return this.handleSuccess({
+                candidateId,
+                profileCompletion: completionPercentage,
+                status: candidate.status
+            }, 'Profile completion calculated');
+        });
+    }
+
+    /**
+     * Get profile completion status
+     * @param {string} candidateId - Candidate ID
+     * @returns {Promise<Object>} Completion status with breakdown
+     */
+    async getProfileCompletionStatus(candidateId) {
+        return this.runInContext('getProfileCompletionStatus', async () => {
+            const candidate = await this.repo('candidate').findById(candidateId);
+            
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            const completionPercentage = candidate.calculateProfileCompletion();
+
+            // Build completion breakdown
+            const breakdown = {
+                basicInfo: {
+                    complete: !!(candidate.name && candidate.email),
+                    weight: 20
+                },
+                bio: {
+                    complete: !!(candidate.bio && candidate.bio.length >= 100),
+                    weight: 15,
+                    current: candidate.bio?.length || 0,
+                    required: 100
+                },
+                profileImage: {
+                    complete: !!candidate.profileImage,
+                    weight: 10
+                },
+                skills: {
+                    complete: candidate.skills?.length >= 3,
+                    weight: 20,
+                    current: candidate.skills?.length || 0,
+                    required: 3
+                },
+                projects: {
+                    complete: candidate.projects?.length >= 1,
+                    weight: 25,
+                    current: candidate.projects?.length || 0,
+                    required: 1
+                },
+                socialMedia: {
+                    complete: !!(candidate.socialMedia?.linkedin || candidate.socialMedia?.twitter),
+                    weight: 10
+                }
+            };
+
+            const canBeActivated = completionPercentage >= 80;
+
+            return this.handleSuccess({
+                candidateId,
+                profileCompletion: completionPercentage,
+                status: candidate.status,
+                canBeActivated,
+                breakdown
+            }, 'Profile completion status retrieved');
+        });
+    }
+
+    /**
+     * Activate candidate (change status from profile_complete to active)
+     * @param {string} candidateId - Candidate ID
+     * @param {string} adminId - Admin ID performing activation
+     * @returns {Promise<Object>}
+     */
+    async activateCandidate(candidateId, adminId) {
+        return this.runInContext('activateCandidate', async () => {
+            const candidate = await this.repo('candidate').findById(candidateId);
+            
+            if (!candidate) {
+                throw new Error('Candidate not found');
+            }
+
+            // Check current status
+            if (candidate.status === 'active') {
+                return this.handleSuccess(
+                    { candidate },
+                    'Candidate is already active'
+                );
+            }
+
+            // Verify profile completion
+            const completionPercentage = candidate.calculateProfileCompletion();
+            if (completionPercentage < 80) {
+                throw new Error(`Profile completion must be at least 80% (current: ${completionPercentage}%)`);
+            }
+
+            // Only allow activation from certain statuses
+            const allowedStatuses = ['verified', 'profile_complete', 'approved'];
+            if (!allowedStatuses.includes(candidate.status)) {
+                throw new Error(`Cannot activate candidate with status: ${candidate.status}`);
+            }
+
+            // Update status to active
+            const updatedCandidate = await this.repo('candidate').updateById(candidateId, {
+                status: 'active'
+            });
+
+            // Send notification if email service available
+            if (this.emailService) {
+                await this.emailService.sendEmail({
+                    to: candidate.email,
+                    subject: 'Your Profile Has Been Activated',
+                    template: 'candidate-activated',
+                    data: {
+                        name: candidate.name,
+                        eventId: candidate.eventId
+                    }
+                });
+            }
+
+            await this.logActivity(adminId, 'activate', 'candidate', {
+                candidateId,
+                candidateName: candidate.name,
+                eventId: candidate.eventId,
+                profileCompletion: completionPercentage
+            });
+
+            return this.handleSuccess(
+                { candidate: updatedCandidate },
+                'Candidate activated successfully'
+            );
+        });
+    }
+
+    /**
+     * Get candidates by status
+     * @param {string} eventId - Event ID
+     * @param {string} status - Candidate status
+     * @param {Object} options - Pagination options
+     * @returns {Promise<Object>}
+     */
+    async getCandidatesByStatus(eventId, status, options = {}) {
+        return this.runInContext('getCandidatesByStatus', async () => {
+            // Validate status
+            const validStatuses = [
+                'pending', 'approved', 'rejected', 'suspended',
+                'awaiting_verification', 'verified', 'profile_complete', 'active'
+            ];
+            
+            if (!validStatuses.includes(status)) {
+                throw new Error(`Invalid status: ${status}`);
+            }
+
+            const { page = 1, limit = 20 } = options;
+
+            const result = await this.repo('candidate').findPaginated(
+                { eventId, status },
+                { page, limit }
+            );
+
+            return this.handleSuccess({
+                candidates: result.data,
+                pagination: {
+                    total: result.total,
+                    page: result.page,
+                    limit: result.limit,
+                    pages: result.pages
+                }
+            }, `Retrieved ${result.data.length} candidates with status: ${status}`);
+        });
+    }
 }

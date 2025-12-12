@@ -23,6 +23,7 @@ import voteBundleRoutes from './voteBundleRoutes.js';
 import notificationRoutes from './notifications.js';
 import settingsRoutes from './settings.js';
 import analyticsRoutes from './analyticsRoutes.js';
+import nominationRoutes from './nominationRoutes.js';
 
 const router = express.Router();
 
@@ -44,6 +45,7 @@ router.use('/vote-bundles', voteBundleRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/analytics', analyticsRoutes);
+router.use('/nominations', nominationRoutes);
 
 // Health check for API routes
 router.get('/health', (req, res) => {

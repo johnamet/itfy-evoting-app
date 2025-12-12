@@ -57,4 +57,10 @@ router.delete('/:id/photo', requireLevel(2), (req, res) => candidateController.r
 // Status operations
 router.patch('/:id/status', requireLevel(2), (req, res) => candidateController.updateCandidateStatus(req, res));
 
+// Profile management (new nomination system endpoints)
+router.get('/status/:status', requireLevel(2), (req, res) => candidateController.getCandidatesByStatus(req, res));
+router.get('/:candidateId/completion', optionalAuth, (req, res) => candidateController.getProfileCompletion(req, res));
+router.put('/:candidateId/profile', authenticate, (req, res) => candidateController.updateProfile(req, res));
+router.post('/:candidateId/activate', requireLevel(3), (req, res) => candidateController.activateCandidate(req, res));
+
 export default router;

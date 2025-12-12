@@ -485,6 +485,136 @@ class CandidateController extends BaseController {
             return this.sendError(res, error);
         }
     });
+
+    /**
+     * Get profile completion status
+     * GET /api/v1/candidates/:candidateId/completion
+     * Access: Candidate or Admin
+     */
+    getProfileCompletion = this.asyncHandler(async (req, res) => {
+        const { candidateId } = this.getRequestParams(req);
+
+        if (!this.validateMongoId(candidateId)) {
+            return this.sendBadRequest(res, 'Invalid candidate ID format');
+        }
+
+        try {
+            const result = await candidateService.getProfileCompletionStatus(candidateId);
+            return this.sendSuccess(res, result, 'Profile completion status retrieved');
+        } catch (error) {
+            return this.sendError(res, error);
+        }
+    });
+
+    /**
+     * Update candidate profile
+     * PUT /api/v1/candidates/:candidateId/profile
+     * Access: Candidate owner or Admin
+     */
+    updateProfile = this.asyncHandler(async (req, res) => {
+        const { candidateId } = this.getRequestParams(req);
+        const updateData = this.getRequestBody(req);
+
+        if (!this.validateMongoId(candidateId)) {
+            return this.sendBadRequest(res, 'Invalid candidate ID format');
+        }
+
+        // Whitelist allowed profile fields
+        const allowedFields = [
+            'bio', 'profileImage', 'skills', 'projects', 
+            'socialMedia', 'phone', 'location'
+        ];
+
+        const profileData = {};
+        for (const field of allowedFields) {
+            if (updateData[field] !== undefined) {
+                profileData[field] = updateData[field];
+            }
+        }
+
+        if (Object.keys(profileData).length === 0) {
+            return this.sendBadRequest(res, 'No valid profile fields provided');
+        }
+
+        try {
+            const result = await candidateService.updateCandidate(
+                candidateId,
+                profileData,
+                req.user?.userId || req.candidate?.candidateId
+            );
+
+            // Recalculate profile completion
+            const completionResult = await candidateService.calculateAndUpdateProfileCompletion(candidateId);
+
+            return this.sendSuccess(res, {
+                ...result,
+                profileCompletion: completionResult.profileCompletion
+            }, 'Profile updated successfully');
+        } catch (error) {
+            return this.sendError(res, error);
+        }
+    });
+
+    /**
+     * Activate candidate
+     * POST /api/v1/candidates/:candidateId/activate
+     * Access: Admin only
+     */
+    activateCandidate = this.asyncHandler(async (req, res) => {
+        const { candidateId } = this.getRequestParams(req);
+        const adminId = req.user?.userId;
+
+        if (!this.validateMongoId(candidateId)) {
+            return this.sendBadRequest(res, 'Invalid candidate ID format');
+        }
+
+        if (!adminId) {
+            return this.sendUnauthorized(res, 'Admin authentication required');
+        }
+
+        try {
+            const result = await candidateService.activateCandidate(candidateId, adminId);
+            return this.sendSuccess(res, result, 'Candidate activated successfully');
+        } catch (error) {
+            return this.sendError(res, error);
+        }
+    });
+
+    /**
+     * Get candidates by status
+     * GET /api/v1/candidates/status/:status
+     * Access: Admin only
+     */
+    getCandidatesByStatus = this.asyncHandler(async (req, res) => {
+        const { status } = this.getRequestParams(req);
+        const { eventId } = this.getRequestQuery(req);
+        const pagination = this.getPagination(req);
+
+        if (!eventId) {
+            return this.sendBadRequest(res, 'eventId is required');
+        }
+
+        if (!this.validateMongoId(eventId)) {
+            return this.sendBadRequest(res, 'Invalid event ID format');
+        }
+
+        try {
+            const result = await candidateService.getCandidatesByStatus(
+                eventId,
+                status,
+                pagination
+            );
+
+            return this.sendPaginatedResponse(
+                res,
+                result.candidates,
+                result.pagination,
+                `Candidates with status '${status}' retrieved`
+            );
+        } catch (error) {
+            return this.sendError(res, error);
+        }
+    });
 }
 
 export default CandidateController;

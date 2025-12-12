@@ -16,6 +16,7 @@
  */
 
 import config from '../config/ConfigManager.js';
+import logger, { Logger } from '../utils/Logger.js';
 
 class BaseController {
     constructor() {
@@ -68,9 +69,17 @@ class BaseController {
         const errorMessage = error instanceof Error ? error.message : error;
         const errorStack = error instanceof Error ? error.stack : undefined;
 
-        if (config.get('env') !== 'production') {
-            console.error(`[${this.controllerName}] Error:`, errorStack || errorMessage);
-        }
+        // Log error with context
+        const req = res.req; // Express attaches req to res
+        logger.error(errorMessage, {
+            controller: this.controllerName,
+            error,
+            statusCode,
+            correlationId: req?.correlationId || Logger.getCorrelationId(),
+            path: req?.path,
+            method: req?.method,
+            userId: req?.user?.userId
+        });
 
         return res.status(statusCode).json({
             success: false,
@@ -385,7 +394,11 @@ class BaseController {
             const fs = await import('fs/promises');
             await fs.unlink(filePath);
         } catch (error) {
-            console.error('Failed to cleanup file:', error);
+            logger.error('Failed to cleanup file', {
+                controller: this.controllerName,
+                error,
+                filePath
+            });
         }
     }
 
@@ -405,12 +418,23 @@ class BaseController {
         return sanitized;
     }
 
-    log(action, metadata = {}) {
-        console.log(`[${this.controllerName}] ${action}`, metadata);
+    log(level, message, metadata = {}) {
+        logger.log(level, message, {
+            controller: this.controllerName,
+            ...metadata
+        });
+    }
+
+    /**
+     * Get child logger with controller context
+     * @returns {Object} Child logger instance
+     */
+    getLogger() {
+        return logger.child({ controller: this.controllerName });
     }
 
     generateRequestId() {
-        return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        return Logger.generateCorrelationId();
     }
 }
 

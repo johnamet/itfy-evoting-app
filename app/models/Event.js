@@ -8,7 +8,7 @@
 
 import mongoose from "mongoose";
 import validator from "validator";
-import BaseModel from "./deprecated/BaseModel2.js";
+import BaseModel from "./BaseModel.js";
 
 const EventSchema = {
   // Basic Info

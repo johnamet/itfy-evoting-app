@@ -9,7 +9,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 import validator from "validator";
-import BaseModel from "./deprecated/BaseModel2.js";
+import BaseModel from "./BaseModel.js";
 import config from "../config/ConfigManager.js";
 
 const CandidateSchema = {
@@ -36,6 +36,7 @@ const CandidateSchema = {
     title: String,
     bio: {
       type: String,
+      minlength: [100, "Bio must be at least 100 characters for profile completion"],
       maxlength: [1000, "Bio cannot exceed 1000 characters"],
     },
     company: String,
@@ -69,6 +70,53 @@ const CandidateSchema = {
       },
     ],
     achievements: [String],
+    // New fields for awards system
+    skills: {
+      type: [String],
+      validate: {
+        validator: (v) => !v || v.length >= 3,
+        message: "At least 3 skills are required for profile completion",
+      },
+    },
+    projects: [
+      {
+        title: {
+          type: String,
+          required: true,
+        },
+        description: {
+          type: String,
+          required: true,
+          maxlength: [500, "Project description cannot exceed 500 characters"],
+        },
+        url: {
+          type: String,
+          validate: {
+            validator: (v) => !v || validator.isURL(v),
+            message: "Invalid project URL",
+          },
+        },
+        images: [String],
+        technologies: [String],
+        completedDate: Date,
+      },
+    ],
+    contactEmail: {
+      type: String,
+      lowercase: true,
+      trim: true,
+      validate: {
+        validator: (v) => !v || validator.isEmail(v),
+        message: "Invalid contact email format",
+      },
+    },
+    demoVideoUrl: {
+      type: String,
+      validate: {
+        validator: (v) => !v || validator.isURL(v),
+        message: "Invalid demo video URL",
+      },
+    },
   },
 
   // Media
@@ -112,6 +160,61 @@ const CandidateSchema = {
     },
   },
 
+  // Profile Completion Tracking
+  profileCompletion: {
+    percentage: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    completedFields: [String],
+    missingFields: [String],
+    lastUpdated: Date,
+  },
+
+  profileCompletedAt: Date,
+  
+  profileStatus: {
+    type: String,
+    enum: ["incomplete", "complete", "under_review"],
+    default: "incomplete",
+  },
+
+  // Verification & Acceptance (for nomination flow)
+  verification: {
+    token: String,
+    sentAt: Date,
+    expiresAt: Date,
+    verifiedAt: Date,
+    acceptedTerms: {
+      type: Boolean,
+      default: false,
+    },
+    ipAddress: String,
+    userAgent: String,
+  },
+
+  // Nomination tracking
+  nominationForm: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Nomination",
+  },
+
+  nominatedCategories: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Category",
+    },
+  ],
+
+  acceptedCategories: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Category",
+    },
+  ],
+
   // Voting Stats
   voting: {
     totalVotes: {
@@ -142,7 +245,21 @@ const CandidateSchema = {
   // Status
   status: {
     type: String,
-    enum: ["draft", "pending_approval", "approved", "rejected", "active", "disqualified"],
+    enum: [
+      "draft",                  // Initial state for self-created profiles
+      "awaiting_verification",  // Nomination approved, awaiting email verification
+      "verified",              // Email verified, can set password
+      "profile_incomplete",    // Email verified but profile not complete
+      "profile_complete",      // Profile complete, awaiting admin activation
+      "pending_approval",      // Admin review pending (legacy)
+      "approved",             // Admin approved (legacy, use active)
+      "active",               // Active and can receive votes
+      "declined",             // Nominee declined nomination
+      "expired",              // Verification deadline passed
+      "rejected",             // Admin rejected
+      "disqualified",         // Disqualified after being active
+      "suspended"             // Temporarily suspended
+    ],
     default: "draft",
   },
 
@@ -234,6 +351,89 @@ candidateModel.addInstanceMethod("comparePassword", async function (candidatePas
   return await bcrypt.compare(candidatePassword, this.credentials.passwordHash);
 });
 
+// New instance methods for nomination workflow
+
+candidateModel.addInstanceMethod("verifyEmail", async function () {
+  this.credentials.emailVerified = true;
+  this.verification = this.verification || {};
+  this.verification.verifiedAt = new Date();
+  this.status = "verified";
+  return await this.save();
+});
+
+candidateModel.addInstanceMethod("declineNomination", async function () {
+  this.status = "declined";
+  return await this.save();
+});
+
+candidateModel.addInstanceMethod("markAsExpired", async function () {
+  this.status = "expired";
+  return await this.save();
+});
+
+candidateModel.addInstanceMethod("suspend", async function (reason) {
+  this.status = "suspended";
+  this.metadata = this.metadata || {};
+  this.metadata.disqualificationReason = reason; // Reuse field for suspension reason
+  return await this.save();
+});
+
+candidateModel.addInstanceMethod("calculateProfileCompletion", function () {
+  const requiredFields = {
+    bio: this.profile?.bio && this.profile.bio.length >= 100,
+    skills: this.profile?.skills && this.profile.skills.length >= 3,
+    projects: this.profile?.projects && this.profile.projects.length >= 1,
+    photo: this.media?.photo,
+    contactEmail: this.profile?.contactEmail,
+  };
+
+  const completed = Object.keys(requiredFields).filter(field => requiredFields[field]);
+  const missing = Object.keys(requiredFields).filter(field => !requiredFields[field]);
+  const percentage = Math.round((completed.length / Object.keys(requiredFields).length) * 100);
+
+  this.profileCompletion = {
+    percentage,
+    completedFields: completed,
+    missingFields: missing,
+    lastUpdated: new Date(),
+  };
+
+  // Update profile status based on completion
+  if (percentage === 100) {
+    this.profileStatus = "complete";
+    this.credentials.profileCompleted = true;
+    this.profileCompletedAt = this.profileCompletedAt || new Date();
+    
+    // Update status if currently profile_incomplete
+    if (this.status === "profile_incomplete") {
+      this.status = "profile_complete";
+    }
+  } else {
+    this.profileStatus = "incomplete";
+    this.credentials.profileCompleted = false;
+    
+    // Update status if currently verified or profile_complete
+    if (["verified", "profile_complete"].includes(this.status)) {
+      this.status = "profile_incomplete";
+    }
+  }
+
+  return this.profileCompletion;
+});
+
+candidateModel.addInstanceMethod("acceptNomination", async function (categoryIds, ipAddress, userAgent) {
+  this.acceptedCategories = categoryIds;
+  this.verification = this.verification || {};
+  this.verification.acceptedTerms = true;
+  this.verification.ipAddress = ipAddress;
+  this.verification.userAgent = userAgent;
+  
+  // Calculate initial profile completion
+  this.calculateProfileCompletion();
+  
+  return await this.save();
+});
+
 // Static Methods
 
 candidateModel.addStaticMethod("findByEvent", async function (eventId, filters = {}) {
@@ -284,6 +484,19 @@ candidateModel.addStaticMethod("searchCandidates", async function (query, filter
 });
 
 // Middleware
+
+// Auto-calculate profile completion before saving
+candidateModel.addPreHook("save", function (next) {
+  // Only calculate if profile fields have been modified
+  const profileFields = ['profile', 'media'];
+  const hasProfileChanges = profileFields.some(field => this.isModified(field));
+  
+  if (hasProfileChanges && ["verified", "profile_incomplete", "profile_complete"].includes(this.status)) {
+    this.calculateProfileCompletion();
+  }
+  
+  next();
+});
 
 // Hash password before saving
 candidateModel.addPreHook("save", async function (next) {

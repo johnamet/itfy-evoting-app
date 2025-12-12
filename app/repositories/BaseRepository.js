@@ -19,6 +19,7 @@ import mongoose from 'mongoose';
 import pRetry from 'p-retry';
 import _ from 'lodash';
 import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import logger from '../utils/Logger.js';
 
 /**
  * Base Repository Class
@@ -56,6 +57,8 @@ class BaseRepository {
      * @returns {Promise<Document>}
      */
     async create(data, options = {}) {
+        const startTime = logger.startTimer();
+        
         try {
             this.validateRequiredFields(data, []);
             
@@ -90,10 +93,13 @@ class BaseRepository {
             // Invalidate query-based caches for this entity type
             await this._invalidateCache('create', null, { entityId: document._id });
 
-            this.log('create', { id: document._id, success: true });
+            const duration = logger.endTimer(startTime);
+            this._logQuery('create', duration, { id: document._id });
             
             return result;
         } catch (error) {
+            const duration = logger.endTimer(startTime);
+            this.log('error', `Failed to create ${this.modelName}`, { error, duration });
             throw this.handleError(error, 'create', { data });
         }
     }
@@ -143,6 +149,8 @@ class BaseRepository {
      * @returns {Promise<Document|null>}
      */
     async findById(id, options = {}) {
+        const startTime = logger.startTimer();
+        
         try {
             this.validateObjectId(id, `${this.modelName} ID`);
 
@@ -158,7 +166,8 @@ class BaseRepository {
             if (!skipCache) {
                 const cached = await this._getFromCache('findById', id);
                 if (cached !== null) {
-                    this.log('findById', { id, found: true, cached: true });
+                    const duration = logger.endTimer(startTime);
+                    this._logQuery('findById', duration, { id, cached: true });
                     return cached;
                 }
             }
@@ -177,10 +186,13 @@ class BaseRepository {
                 await this._setCache('findById', id, result);
             }
 
-            this.log('findById', { id, found: !!result });
+            const duration = logger.endTimer(startTime);
+            this._logQuery('findById', duration, { id, found: !!result });
 
             return result;
         } catch (error) {
+            const duration = logger.endTimer(startTime);
+            this.log('error', `Failed to find ${this.modelName} by ID`, { error, id, duration });
             throw this.handleError(error, 'findById', { id });
         }
     }
@@ -1607,11 +1619,11 @@ class BaseRepository {
     handleError(error, operation, context = {}) {
         const errorMessage = `${this.modelName}Repository.${operation} failed`;
         
-        // Log error
-        console.error(errorMessage, {
-            error: error.message,
-            stack: error.stack,
-            context
+        // Log error with structured logging
+        this.log('error', errorMessage, {
+            error,
+            operation,
+            ...context
         });
 
         // Mongoose validation error
@@ -1667,11 +1679,27 @@ class BaseRepository {
      * @param {String} operation
      * @param {Object} data
      */
-    log(operation, data = {}) {
-        // Basic logging - can be extended with proper logging library
-        if (process.env.NODE_ENV === 'development') {
-            console.log(`[${this.modelName}Repository.${operation}]`, data);
-        }
+    log(level, message, data = {}) {
+        logger.log(level, message, {
+            repository: `${this.modelName}Repository`,
+            ...data
+        });
+    }
+
+    /**
+     * Get child logger with repository context
+     * @returns {Object} Child logger instance
+     */
+    getLogger() {
+        return logger.child({ repository: `${this.modelName}Repository` });
+    }
+
+    /**
+     * Log query performance
+     * @private
+     */
+    _logQuery(operation, duration, filter = {}) {
+        logger.query(operation, this.modelName, duration, { filter });
     }
 
     // ============================================

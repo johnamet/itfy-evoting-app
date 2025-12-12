@@ -26,6 +26,7 @@ import {
     slideRepository,
     voteBundleRepository,
     formsRepository,
+    nominationRepository,
 } from '../repositories/index.js';
 
 // Import all service classes
@@ -40,6 +41,8 @@ import PaymentService from './PaymentService.js';
 import NotificationService from './NotificationService.js';
 import AnalyticsService from './AnalyticsService.js';
 import SettingsService from './SettingsService.js';
+import NominationService from './NominationService.js';
+import SlideService from './SlideService.js';
 import { emailService } from './EmailService.js';
 import { fileService } from './FileService.js';
 
@@ -140,6 +143,23 @@ const settingsService = new SettingsService({
     activity: activityRepository,
 });
 
+// NominationService - handles candidate nominations and admin review
+const nominationService = new NominationService({
+    nomination: nominationRepository,
+    candidate: candidateRepository,
+    event: eventRepository,
+    category: categoryRepository,
+    user: userRepository,
+    activity: activityRepository,
+}, { emailService, notificationService: null }); // notificationService set after instantiation
+
+// SlideService - handles presentation slides/carousels
+const slideService = new SlideService({
+    slide: slideRepository,
+    event: eventRepository,
+    activity: activityRepository,
+});
+
 /**
  * Set notificationService references after instantiation to avoid circular dependencies
  */
@@ -148,6 +168,7 @@ if (notificationService) {
     votingService.notificationService = notificationService;
     candidateService.notificationService = notificationService;
     paymentService.notificationService = notificationService;
+    nominationService.notificationService = notificationService;
 }
 
 /**
@@ -164,6 +185,8 @@ export {
     notificationService,
     analyticsService,
     settingsService,
+    nominationService,
+    slideService,
     emailService,
     fileService,
 };
@@ -183,6 +206,8 @@ export {
     NotificationService,
     AnalyticsService,
     SettingsService,
+    NominationService,
+    SlideService,
 };
 
 /**
@@ -199,6 +224,8 @@ export default {
     notification: notificationService,
     analytics: analyticsService,
     settings: settingsService,
+    nomination: nominationService,
+    slide: slideService,
     email: emailService,
     file: fileService,
 };

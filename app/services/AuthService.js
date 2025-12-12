@@ -4,14 +4,14 @@
  * 
  * Handles user and candidate authentication with:
  * - Registration and login for both users and candidates
- * - Email verification with 3-day reminder system
- * - Password reset flows
- * - Token management (access & refresh tokens)
- * - Account locking after failed attempts
- * - Multi-device tracking
+ * - Email verification with 3-day reminder system using Redis
+ * - Password reset flows with Redis token storage
+ * - Token management (access & refresh tokens) via AuthHelpers
+ * - Account locking after failed attempts using Redis
+ * - Multi-device tracking and token blacklisting
  * 
  * @module services/AuthService
- * @version 2.0.0
+ * @version 3.0.0
  */
 
 import BaseService from './BaseService.js';
@@ -24,8 +24,8 @@ class AuthService extends BaseService {
     constructor(repositories) {
         super(repositories);
         
-        this.MAX_LOGIN_ATTEMPTS = 5;
-        this.ACCOUNT_LOCK_DURATION = 15; // minutes
+        this.MAX_LOGIN_ATTEMPTS = config.get('security.maxLoginAttempts', 5);
+        this.ACCOUNT_LOCK_DURATION = config.get('security.accountLockDuration', 15); // minutes
         this.EMAIL_VERIFICATION_DAYS = 3;
     }
 
@@ -62,7 +62,10 @@ class AuthService extends BaseService {
                 }
 
                 // Hash password using AuthHelpers
-                const hashedPassword = await AuthHelpers.hashPassword(candidateData.password);nst user = await this.repo('user').createUser({
+                const hashedPassword = await AuthHelpers.hashPassword(userData.password);
+
+                // Create user
+                const user = await this.repo('user').createUser({
                     email: userData.email,
                     password: hashedPassword,
                     level: userData.level || 1,
@@ -90,16 +93,24 @@ class AuthService extends BaseService {
                 // Schedule 3-day reminder if not verified
                 await this.scheduleVerificationReminder(user._id, user.email, verificationToken);
 
-                // Generate tokens
-                const { accessToken, refreshToken } = this.generateAuthTokens(user);
+                // Generate tokens using AuthHelpers
+                const tokens = AuthHelpers.generateAuthTokens(
+                    user._id.toString(),
+                    user.email,
+                    user.level,
+                    user.role
+                );
+
+                // Store refresh token in Redis
+                await AuthHelpers.storeRefreshToken(user._id.toString(), tokens.refreshToken);
 
                 // Log activity
                 await this.logActivity(user._id, 'user_registered', 'User', metadata);
 
                 return this.handleSuccess({
                     user: this.sanitizeUser(user),
-                    accessToken,
-                    refreshToken,
+                    accessToken: tokens.accessToken,
+                    refreshToken: tokens.refreshToken,
                     message: 'Registration successful. Please verify your email.'
                 });
             } catch (error) {
@@ -119,29 +130,20 @@ class AuthService extends BaseService {
             try {
                 this.validateRequiredFields(credentials, ['email', 'password']);
 
-                // Rate limiting check
-                await this.checkLoginRateLimit(credentials.email, metadata.ip);
+                // Check if account is locked using AuthHelpers
+                const isLocked = await AuthHelpers.isAccountLocked(credentials.email, this.MAX_LOGIN_ATTEMPTS);
+                if (isLocked) {
+                    throw new Error(`Account temporarily locked. Please try again in ${this.ACCOUNT_LOCK_DURATION} minutes.`);
+                }
 
                 const user = await this.repo('user').findByEmailWithPassword(credentials.email, { skipCache: true });
 
                 // Constant-time comparison to prevent timing attacks
                 const passwordHash = user?.password || '$2b$10$X/invalid/hash/that/will/never/match';
-                const isValid = await bcrypt.compare(credentials.password, passwordHash);
+                const isValid = await AuthHelpers.comparePassword(credentials.password, passwordHash);
 
-                if (!user) {
-                    await this.incrementLoginAttempts(credentials.email, metadata.ip);
-                    throw new Error('Invalid email or password');
-                }
-
-                // Check account lock
-                if (user.lockedUntil && user.lockedUntil > new Date()) {
-                    const minutesLeft = Math.ceil((user.lockedUntil - new Date()) / 60000);
-                    throw new Error(`Account locked. Try again in ${minutesLeft} minutes.`);
-                }
-
-                if (!isValid) {
-                    await this.handleFailedLogin(user._id);
-                    await this.incrementLoginAttempts(credentials.email, metadata.ip);
+                if (!user || !isValid) {
+                    await AuthHelpers.recordFailedLogin(credentials.email);
                     throw new Error('Invalid email or password');
                 }
 
@@ -150,21 +152,24 @@ class AuthService extends BaseService {
                     throw new Error('Account is disabled');
                 }
 
-                // Reset failed attempts
-                if (user.loginAttempts > 0) {
-                    await this.repo('user').updateById(user._id, {
-                        loginAttempts: 0,
-                        lockedUntil: null
-                    });
-                }
+                // Clear failed login attempts on successful login
+                await AuthHelpers.clearFailedLoginAttempts(credentials.email);
 
                 // Update last login
                 await this.repo('user').updateById(user._id, {
                     lastLogin: new Date()
                 });
 
-                // Generate tokens
-                const { accessToken, refreshToken } = this.generateAuthTokens(user);
+                // Generate tokens using AuthHelpers
+                const tokens = AuthHelpers.generateAuthTokens(
+                    user._id.toString(),
+                    user.email,
+                    user.level,
+                    user.role
+                );
+
+                // Store refresh token in Redis
+                await AuthHelpers.storeRefreshToken(user._id.toString(), tokens.refreshToken);
 
                 // Log activity
                 await this.logActivity(user._id, 'user_login', 'User', metadata);
@@ -176,8 +181,8 @@ class AuthService extends BaseService {
 
                 return this.handleSuccess({
                     user: this.sanitizeUser(user),
-                    accessToken,
-                    refreshToken,
+                    accessToken: tokens.accessToken,
+                    refreshToken: tokens.refreshToken,
                     message
                 });
             } catch (error) {
@@ -210,9 +215,9 @@ class AuthService extends BaseService {
                     throw new Error('Candidate already registered for this event');
                 }
 
-                // Generate temporary password
-                const tempPassword = this.generateTempPassword();
-                const hashedPassword = await bcrypt.hash(tempPassword, 10);
+                // Generate temporary password using AuthHelpers
+                const tempPassword = AuthHelpers.generateTempPassword();
+                const hashedPassword = await AuthHelpers.hashPassword(tempPassword);
 
                 // Create candidate
                 const candidate = await this.repo('candidate').create({
@@ -257,8 +262,12 @@ class AuthService extends BaseService {
                     approvedAt: new Date()
                 });
 
-                // Generate verification token
-                const verificationToken = this.generateToken(candidate._id, candidate.email, 'candidate-email-verification', '7d');
+                // Generate and store verification token using AuthHelpers
+                const verificationToken = await AuthHelpers.generateAndStoreVerificationToken(
+                    candidate._id.toString(),
+                    candidate.email,
+                    true
+                );
                 const verificationUrl = `${config.get('app.url')}/candidate/verify-email?token=${verificationToken}`;
 
                 // Send approval email with verification link
@@ -292,17 +301,25 @@ class AuthService extends BaseService {
             try {
                 this.validateRequiredFields(credentials, ['email', 'password']);
 
+                // Check if account is locked using AuthHelpers
+                const isLocked = await AuthHelpers.isAccountLocked(credentials.email, this.MAX_LOGIN_ATTEMPTS);
+                if (isLocked) {
+                    throw new Error(`Account temporarily locked. Please try again in ${this.ACCOUNT_LOCK_DURATION} minutes.`);
+                }
+
                 const candidate = await this.repo('candidate').findOne({
                     email: credentials.email,
                     ...(credentials.eventId && { event: credentials.eventId })
                 }, { skipCache: true });
 
                 if (!candidate) {
+                    await AuthHelpers.recordFailedLogin(credentials.email);
                     throw new Error('Invalid credentials');
                 }
 
-                const isValid = await bcrypt.compare(credentials.password, candidate.password);
+                const isValid = await AuthHelpers.comparePassword(credentials.password, candidate.password);
                 if (!isValid) {
+                    await AuthHelpers.recordFailedLogin(credentials.email);
                     throw new Error('Invalid credentials');
                 }
 
@@ -311,13 +328,27 @@ class AuthService extends BaseService {
                     throw new Error('Candidate not approved yet');
                 }
 
+                // Clear failed login attempts
+                await AuthHelpers.clearFailedLoginAttempts(credentials.email);
+
                 // Update last login
                 await this.repo('candidate').updateById(candidate._id, {
                     lastLogin: new Date()
                 });
 
-                // Generate tokens (with cId claim for candidates)
-                const { accessToken, refreshToken } = this.generateCandidateTokens(candidate);
+                // Generate tokens using AuthHelpers
+                const accessToken = AuthHelpers.generateCandidateAccessToken(
+                    candidate._id.toString(),
+                    candidate.email,
+                    candidate.event.toString()
+                );
+                const refreshToken = AuthHelpers.generateRefreshToken(
+                    candidate._id.toString(),
+                    candidate.email
+                );
+
+                // Store refresh token in Redis
+                await AuthHelpers.storeRefreshToken(candidate._id.toString(), refreshToken);
 
                 const message = !candidate.emailVerified
                     ? 'Login successful. Please verify your email.'
@@ -347,11 +378,8 @@ class AuthService extends BaseService {
     async verifyUserEmail(token) {
         return this.runInContext({ action: 'verifyUserEmail' }, async () => {
             try {
-                const payload = this.verifyToken(token);
-                
-                if (payload.type !== 'email-verification') {
-                    throw new Error('Invalid verification token');
-                }
+                // Validate token using AuthHelpers
+                const payload = await AuthHelpers.validateVerificationToken(token);
 
                 const user = await this.repo('user').findById(payload.sub);
                 if (!user) {
@@ -370,6 +398,9 @@ class AuthService extends BaseService {
                 // Cancel scheduled reminder
                 await this.cancelVerificationReminder(user._id);
 
+                // Delete verification token from Redis
+                await AuthHelpers.deleteVerificationToken(user._id.toString());
+
                 return this.handleSuccess({ message: 'Email verified successfully' });
             } catch (error) {
                 return this.handleError(error, 'Email verification failed');
@@ -380,15 +411,18 @@ class AuthService extends BaseService {
     /**
      * Verify candidate email
      * @param {string} token - Verification token
+     * @param {string} [password] - Password (required for nominees setting up account)
+     * @param {Object} [metadata={}] - { ip, userAgent }
      * @returns {Promise<Object>}
      */
-    async verifyCandidateEmail(token) {
+    async verifyCandidateEmail(token, password = null, metadata = {}) {
         return this.runInContext({ action: 'verifyCandidateEmail' }, async () => {
             try {
-                const payload = this.verifyToken(token);
+                // Validate token using AuthHelpers
+                const payload = await AuthHelpers.validateVerificationToken(token);
                 
                 if (payload.type !== 'candidate-email-verification') {
-                    throw new Error('Invalid verification token');
+                    throw new Error('Invalid candidate verification token');
                 }
 
                 const candidate = await this.repo('candidate').findById(payload.sub);
@@ -397,18 +431,104 @@ class AuthService extends BaseService {
                 }
 
                 if (candidate.emailVerified) {
-                    return this.handleSuccess({ message: 'Email already verified' });
+                    // If already verified, just return success (idempotent)
+                    return this.handleSuccess({ 
+                        message: 'Email already verified',
+                        candidate: this.sanitizeCandidate(candidate)
+                    });
                 }
 
-                await this.repo('candidate').updateById(candidate._id, {
+                // Check if this is a nominated candidate requiring password setup
+                const isNominee = candidate.status === 'awaiting_verification';
+                
+                if (isNominee && !password) {
+                    throw new Error('Password is required for nominee account setup');
+                }
+
+                // Validate password strength for nominees
+                if (isNominee && password) {
+                    const passwordValidation = this.validatePassword(password);
+                    if (!passwordValidation.valid) {
+                        throw new Error(`Password validation failed: ${passwordValidation.errors.join(', ')}`);
+                    }
+                }
+
+                // Update candidate record
+                const updateData = {
                     emailVerified: true,
                     emailVerifiedAt: new Date()
-                });
+                };
+
+                // Hash password for nominees
+                if (isNominee && password) {
+                    updateData.password = await AuthHelpers.hashPassword(password);
+                    updateData.status = 'verified'; // Transition from awaiting_verification to verified
+                    updateData.verification = {
+                        status: 'verified',
+                        verifiedAt: new Date(),
+                        method: 'email'
+                    };
+                }
+
+                const updatedCandidate = await this.repo('candidate').updateById(candidate._id, updateData);
 
                 // Cancel scheduled reminder
                 await this.cancelVerificationReminder(candidate._id, 'candidate');
 
-                return this.handleSuccess({ message: 'Email verified successfully' });
+                // Delete verification token from Redis
+                await AuthHelpers.deleteVerificationToken(candidate._id.toString());
+
+                // Calculate initial profile completion for nominees
+                if (isNominee) {
+                    const completionPercentage = updatedCandidate.calculateProfileCompletion();
+                    
+                    // Queue welcome email with profile completion instructions
+                    await emailQueue.add('send-welcome-email', {
+                        email: updatedCandidate.email,
+                        name: updatedCandidate.name,
+                        profileCompletionPercentage: completionPercentage,
+                        isNominee: true,
+                        verificationUrl: null // Already verified
+                    });
+
+                    // Log activity
+                    await this.logActivity(
+                        updatedCandidate._id,
+                        'nominee_verified',
+                        'Candidate',
+                        metadata
+                    );
+
+                    // Generate tokens for immediate login
+                    const tokens = AuthHelpers.generateAuthTokens(
+                        updatedCandidate._id.toString(),
+                        updatedCandidate.email,
+                        null, // No level for candidates
+                        null, // No role for candidates
+                        true  // isCandidate flag
+                    );
+
+                    // Store refresh token in Redis
+                    await AuthHelpers.storeRefreshToken(
+                        updatedCandidate._id.toString(),
+                        tokens.refreshToken,
+                        'candidate'
+                    );
+
+                    return this.handleSuccess({
+                        message: 'Email verified and account activated successfully',
+                        candidate: this.sanitizeCandidate(updatedCandidate),
+                        accessToken: tokens.accessToken,
+                        refreshToken: tokens.refreshToken,
+                        profileCompletion: completionPercentage
+                    });
+                }
+
+                // Standard verification for self-registered candidates
+                return this.handleSuccess({ 
+                    message: 'Email verified successfully',
+                    candidate: this.sanitizeCandidate(updatedCandidate)
+                });
             } catch (error) {
                 return this.handleError(error, 'Email verification failed');
             }
@@ -436,8 +556,13 @@ class AuthService extends BaseService {
                     return this.handleSuccess({ message: 'Email already verified' });
                 }
 
-                const tokenType = type === 'user' ? 'email-verification' : 'candidate-email-verification';
-                const verificationToken = this.generateToken(entity._id, entity.email, tokenType, '7d');
+                // Generate and store verification token using AuthHelpers
+                const isCandidate = type === 'candidate';
+                const verificationToken = await AuthHelpers.generateAndStoreVerificationToken(
+                    entity._id.toString(),
+                    entity.email,
+                    isCandidate
+                );
                 const verificationUrl = `${config.get('app.url')}/${type}/verify-email?token=${verificationToken}`;
 
                 await emailService.sendVerificationEmail({
@@ -535,7 +660,11 @@ class AuthService extends BaseService {
                     return this.handleSuccess({ message: 'If an account exists, reset email sent' });
                 }
 
-                const resetToken = this.generateToken(entity._id, entity.email, 'password-reset', '1h');
+                // Generate and store reset token using AuthHelpers
+                const resetToken = await AuthHelpers.generateAndStoreResetToken(
+                    entity._id.toString(),
+                    entity.email
+                );
                 const resetUrl = `${config.get('app.url')}/${type}/reset-password?token=${resetToken}`;
 
                 await emailService.sendPasswordResetEmail({
@@ -561,11 +690,8 @@ class AuthService extends BaseService {
     async resetPassword(token, newPassword, type = 'user') {
         return this.runInContext({ action: 'resetPassword' }, async () => {
             try {
-                const payload = this.verifyToken(token);
-                
-                if (payload.type !== 'password-reset') {
-                    throw new Error('Invalid reset token');
-                }
+                // Validate reset token using AuthHelpers
+                const payload = await AuthHelpers.validateResetToken(token);
 
                 // Validate new password
                 const passwordValidation = this.validatePassword(newPassword);
@@ -580,14 +706,21 @@ class AuthService extends BaseService {
                     throw new Error('Account not found');
                 }
 
-                // Hash new password
-                const hashedPassword = await bcrypt.hash(newPassword, 10);
+                // Hash new password using AuthHelpers
+                const hashedPassword = await AuthHelpers.hashPassword(newPassword);
 
                 await repo.updateById(entity._id, {
                     password: hashedPassword,
                     loginAttempts: 0,
                     lockedUntil: null
                 });
+
+                // Delete reset token and all refresh tokens for security
+                await AuthHelpers.deleteResetToken(entity._id.toString());
+                await AuthHelpers.deleteAllRefreshTokens(entity._id.toString());
+
+                // Blacklist all existing tokens for security
+                await AuthHelpers.blacklistAllUserTokens(entity._id.toString());
 
                 // Send confirmation email
                 await emailService.sendPasswordChangedEmail({
@@ -620,14 +753,14 @@ class AuthService extends BaseService {
                     throw new Error('Account not found');
                 }
 
-                // Verify current password
-                const isValid = await bcrypt.compare(currentPassword, entity.password);
+                // Verify current password using AuthHelpers
+                const isValid = await AuthHelpers.comparePassword(currentPassword, entity.password);
                 if (!isValid) {
                     throw new Error('Current password is incorrect');
                 }
 
                 // Check if new password is different
-                const isSame = await bcrypt.compare(newPassword, entity.password);
+                const isSame = await AuthHelpers.comparePassword(newPassword, entity.password);
                 if (isSame) {
                     throw new Error('New password must be different from current password');
                 }
@@ -638,9 +771,12 @@ class AuthService extends BaseService {
                     throw new Error(passwordValidation.errors.join(', '));
                 }
 
-                // Hash and update
-                const hashedPassword = await bcrypt.hash(newPassword, 10);
+                // Hash and update using AuthHelpers
+                const hashedPassword = await AuthHelpers.hashPassword(newPassword);
                 await repo.updateById(userId, { password: hashedPassword });
+
+                // Delete all refresh tokens for security
+                await AuthHelpers.deleteAllRefreshTokens(userId.toString());
 
                 return this.handleSuccess({ message: 'Password changed successfully' });
             } catch (error) {
@@ -650,125 +786,9 @@ class AuthService extends BaseService {
     }
 
     // ================================
-    // TOKEN MANAGEMENT
+    // TOKEN MANAGEMENT (Delegated to AuthHelpers)
     // ================================
-
-    /**
-     * Generate JWT token
-     * @param {string} id - User/Candidate ID
-     * @param {string} email - Email
-     * @param {string} [type='access'] - Token type
-     * @param {string} [expiresIn] - Expiration time
-     * @returns {string} JWT token
-     */
-    generateToken(id, email, type = 'access', expiresIn = null) {
-        const payload = {
-            sub: id,
-            email,
-            type,
-            iat: Math.floor(Date.now() / 1000)
-        };
-
-        return jwt.sign(payload, this.JWT_SECRET, {
-            expiresIn: expiresIn || this.JWT_EXPIRES_IN,
-            issuer: this.JWT_ISSUER,
-            audience: this.JWT_AUDIENCE
-        });
-    }
-
-    /**
-     * Generate auth tokens for user
-     * @param {Object} user - User object
-     * @returns {Object} { accessToken, refreshToken }
-     */
-    generateAuthTokens(user) {
-        const accessToken = jwt.sign(
-            {
-                sub: user._id.toString(),
-                userId: user._id.toString(),
-                email: user.email,
-                level: user.level,
-                role: user.role
-            },
-            this.JWT_SECRET,
-            {
-                expiresIn: this.JWT_EXPIRES_IN,
-                issuer: this.JWT_ISSUER,
-                audience: this.JWT_AUDIENCE
-            }
-        );
-
-        const refreshToken = jwt.sign(
-            {
-                sub: user._id.toString(),
-                userId: user._id.toString(),
-                type: 'refresh'
-            },
-            this.JWT_SECRET,
-            {
-                expiresIn: this.JWT_REFRESH_EXPIRES_IN,
-                issuer: this.JWT_ISSUER,
-                audience: this.JWT_AUDIENCE
-            }
-        );
-
-        return { accessToken, refreshToken };
-    }
-
-    /**
-     * Generate auth tokens for candidate
-     * @param {Object} candidate - Candidate object
-     * @returns {Object} { accessToken, refreshToken }
-     */
-    generateCandidateTokens(candidate) {
-        const accessToken = jwt.sign(
-            {
-                sub: candidate._id.toString(),
-                cId: candidate._id.toString(),
-                candidateId: candidate._id.toString(),
-                email: candidate.email,
-                eventId: candidate.event
-            },
-            this.JWT_SECRET,
-            {
-                expiresIn: this.JWT_EXPIRES_IN,
-                issuer: this.JWT_ISSUER,
-                audience: this.JWT_AUDIENCE
-            }
-        );
-
-        const refreshToken = jwt.sign(
-            {
-                sub: candidate._id.toString(),
-                cId: candidate._id.toString(),
-                type: 'refresh'
-            },
-            this.JWT_SECRET,
-            {
-                expiresIn: this.JWT_REFRESH_EXPIRES_IN,
-                issuer: this.JWT_ISSUER,
-                audience: this.JWT_AUDIENCE
-            }
-        );
-
-        return { accessToken, refreshToken };
-    }
-
-    /**
-     * Verify JWT token
-     * @param {string} token - JWT token
-     * @returns {Object} Decoded payload
-     */
-    verifyToken(token) {
-        try {
-            return jwt.verify(token, this.JWT_SECRET, {
-                issuer: this.JWT_ISSUER,
-                audience: this.JWT_AUDIENCE
-            });
-        } catch (error) {
-            throw new Error('Invalid or expired token');
-        }
-    }
+    // All token generation, verification, and management now handled by AuthHelpers utility
 
     /**
      * Refresh access token
@@ -810,12 +830,24 @@ class AuthService extends BaseService {
                     throw new Error('Account is disabled');
                 }
 
-                // Generate new tokens
-                const tokens = isCandidate 
-                    ? this.generateCandidateTokens(entity)
-                    : this.generateAuthTokens(entity);
+                // Generate new access token using AuthHelpers
+                const accessToken = isCandidate
+                    ? AuthHelpers.generateCandidateAccessToken(
+                        entity._id.toString(),
+                        entity.email,
+                        entity.event.toString()
+                      )
+                    : AuthHelpers.generateUserAccessToken(
+                        entity._id.toString(),
+                        entity.email,
+                        entity.level,
+                        entity.role
+                      );
 
-                return this.handleSuccess(tokens);
+                return this.handleSuccess({
+                    accessToken,
+                    refreshToken
+                });
             } catch (error) {
                 return this.handleError(error, 'Token refresh failed');
             }
@@ -823,78 +855,10 @@ class AuthService extends BaseService {
     }
 
     // ================================
-    // SECURITY HELPERS
+    // SECURITY HELPERS (Delegated to AuthHelpers)
     // ================================
-
-    /**
-     * Check login rate limit
-     * @private
-     */
-    async checkLoginRateLimit(email, ip) {
-        const key = `login_attempts:${ip}:${email}`;
-        
-        if (this.hasRepo('settings')) {
-            const attempts = await this.repo('settings').getValue(key);
-            if (attempts && parseInt(attempts) >= this.MAX_LOGIN_ATTEMPTS) {
-                throw new Error('Too many login attempts. Try again in 15 minutes.');
-            }
-        }
-    }
-
-    /**
-     * Increment login attempts
-     * @private
-     */
-    async incrementLoginAttempts(email, ip) {
-        const key = `login_attempts:${ip}:${email}`;
-        
-        if (this.hasRepo('settings')) {
-            const current = await this.repo('settings').getValue(key, 0);
-            await this.repo('settings').upsertSetting({
-                key,
-                value: parseInt(current) + 1,
-                category: 'security',
-                expiresAt: this.addDays(new Date(), 0.01) // 15 minutes
-            });
-        }
-    }
-
-    /**
-     * Handle failed login
-     * @private
-     */
-    async handleFailedLogin(userId) {
-        const user = await this.repo('user').findById(userId);
-        const attempts = (user.loginAttempts || 0) + 1;
-
-        const updates = { loginAttempts: attempts };
-
-        if (attempts >= this.MAX_LOGIN_ATTEMPTS) {
-            updates.lockedUntil = new Date(Date.now() + this.ACCOUNT_LOCK_DURATION * 60000);
-            
-            // Send account locked email
-            await emailService.sendAccountLockedEmail({
-                email: user.email,
-                name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-                duration: this.ACCOUNT_LOCK_DURATION
-            });
-        }
-
-        await this.repo('user').updateById(userId, updates);
-    }
-
-    /**
-     * Generate temporary password
-     * @private
-     */
-    generateTempPassword() {
-        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-        let password = '';
-        for (let i = 0; i < 12; i++) {
-            password += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return password;
-    }
+    // All login attempt tracking, rate limiting, and account locking now handled by AuthHelpers utility using Redis
+    // generateTempPassword is also available in AuthHelpers
 
     /**
      * Sanitize user object (remove sensitive data)

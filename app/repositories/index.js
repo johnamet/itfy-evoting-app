@@ -26,6 +26,7 @@ import RoleRepository from './RoleRepository.js';
 import SlideRepository from './SlideRepository.js';
 import VoteBundleRepository from './VoteBundleRepository.js';
 import FormsRepository from './FormsRepository.js';
+import NominationRepository from './NominationRepository.js';
 
 // Create singleton instances
 const userRepository = new UserRepository();
@@ -44,6 +45,7 @@ const roleRepository = new RoleRepository();
 const slideRepository = new SlideRepository();
 const voteBundleRepository = new VoteBundleRepository();
 const formsRepository = new FormsRepository();
+const nominationRepository = new NominationRepository();
 
 // Export instances (recommended approach for consistency)
 export {
@@ -63,6 +65,7 @@ export {
     slideRepository,
     voteBundleRepository,
     formsRepository,
+    nominationRepository,
 };
 
 // Export classes for custom instantiation if needed
@@ -83,6 +86,7 @@ export {
     SlideRepository,
     VoteBundleRepository,
     FormsRepository,
+    NominationRepository,
 };
 
 // Default export with all repositories
@@ -103,4 +107,5 @@ export default {
     slideRepository,
     voteBundleRepository,
     formsRepository,
+    nominationRepository,
 };
