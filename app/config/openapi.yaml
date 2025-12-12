@@ -1,0 +1,2155 @@
+openapi: 3.0.0
+info:
+  title: ITFY E-Voting System API
+  version: 1.0.0
+  description: |
+    Comprehensive API documentation for the ITFY E-Voting Platform backend system.
+    
+    A production-ready backend system for electronic voting built with Node.js, Express.js, and MongoDB. 
+    Features real-time voting, payment integration, advanced analytics, role-based access control, and comprehensive audit trails.
+    
+    ## Features
+    - Real-time voting with WebSocket support
+    - JWT-based authentication with refresh tokens
+    - Role-based access control (RBAC) with 4 permission levels
+    - Paystack payment gateway integration
+    - Comprehensive analytics and reporting
+    - Anonymous and authenticated voting options
+    
+  contact:
+    name: John Ametepe Agboku
+    email: support@itfy.com
+  license:
+    name: ISC
+    url: https://opensource.org/licenses/ISC
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Development server
+  - url: https://api.itfy.com/api/v1
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization operations
+  - name: Users
+    description: User management and profile operations
+  - name: Events
+    description: Voting event management and operations
+  - name: Candidates
+    description: Candidate management for voting events
+  - name: Nominations
+    description: Candidate nomination operations
+  - name: Voting
+    description: Vote casting and vote bundle management
+  - name: Payments
+    description: Payment processing and verification
+  - name: Analytics
+    description: Analytics and reporting operations
+  - name: Coupons
+    description: Discount coupon management
+  - name: Settings
+    description: System configuration and settings
+  - name: Notifications
+    description: Notification management
+  - name: Slides
+    description: Event slide management
+  - name: Health
+    description: System health and status monitoring
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from login endpoint
+
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      description: Page number for pagination
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    
+    LimitParam:
+      name: limit
+      in: query
+      description: Number of items per page
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    
+    SearchParam:
+      name: search
+      in: query
+      description: Search query string
+      schema:
+        type: string
+    
+    SortParam:
+      name: sort
+      in: query
+      description: Sort field and order (e.g., 'createdAt:desc')
+      schema:
+        type: string
+
+  responses:
+    SuccessResponse:
+      description: Operation completed successfully
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+                example: true
+              message:
+                type: string
+                example: Operation completed successfully
+              timestamp:
+                type: string
+                format: date-time
+              data:
+                type: object
+
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error: Validation error
+            details:
+              field: email
+              message: Invalid email format
+            timestamp: '2025-12-12T07:19:47.125Z'
+
+    UnauthorizedError:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error: Unauthorized
+            message: Authentication token is required
+            timestamp: '2025-12-12T07:19:47.125Z'
+
+    ForbiddenError:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error: Forbidden
+            message: Insufficient permissions to access this resource
+            timestamp: '2025-12-12T07:19:47.125Z'
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error: Not found
+            message: The requested resource was not found
+            timestamp: '2025-12-12T07:19:47.125Z'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 100
+        pages:
+          type: integer
+          example: 5
+        hasNext:
+          type: boolean
+          example: true
+        hasPrev:
+          type: boolean
+          example: false
+
+    User:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+          example: 507f1f77bcf86cd799439011
+        username:
+          type: string
+          example: john_doe
+        email:
+          type: string
+          format: email
+          example: john@example.com
+        firstName:
+          type: string
+          example: John
+        lastName:
+          type: string
+          example: Doe
+        role:
+          $ref: '#/components/schemas/UserRole'
+        status:
+          type: string
+          enum: [active, inactive, suspended, pending]
+          example: active
+        avatar:
+          type: string
+          example: /uploads/avatars/user123.jpg
+        emailVerified:
+          type: boolean
+          example: true
+        lastLogin:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UserRole:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+        name:
+          type: string
+          enum: [voter, moderator, event_manager, admin, super_admin]
+          example: voter
+        level:
+          type: integer
+          minimum: 1
+          maximum: 4
+          description: Permission level (1=Reader, 2=Editor, 3=Creator, 4=Admin)
+          example: 1
+        permissions:
+          type: array
+          items:
+            type: string
+          example: [read]
+
+    Event:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+        title:
+          type: string
+          example: Student Council Elections 2024
+        description:
+          type: string
+          example: Annual elections for student council positions
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [draft, upcoming, active, completed, cancelled]
+          example: active
+        banner:
+          type: string
+          example: /uploads/events/banner123.jpg
+        location:
+          type: object
+          properties:
+            venue:
+              type: string
+            address:
+              type: string
+            city:
+              type: string
+            coordinates:
+              type: object
+              properties:
+                lat:
+                  type: number
+                lng:
+                  type: number
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+        settings:
+          type: object
+          properties:
+            allowAnonymousVoting:
+              type: boolean
+            requirePayment:
+              type: boolean
+            maxVotesPerUser:
+              type: integer
+            votingMethod:
+              type: string
+              enum: [single, multiple, ranked]
+        gallery:
+          type: array
+          items:
+            type: string
+        sponsors:
+          type: array
+          items:
+            type: object
+        createdBy:
+          type: string
+          format: objectid
+        totalVotes:
+          type: integer
+        participantCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Category:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+        name:
+          type: string
+          example: President
+        description:
+          type: string
+          example: Student Council President position
+        eventId:
+          type: string
+          format: objectid
+        maxVotes:
+          type: integer
+          description: Maximum votes a user can cast in this category
+          example: 1
+        minVotes:
+          type: integer
+          description: Minimum votes required in this category
+          example: 1
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/Candidate'
+        voteCount:
+          type: integer
+        order:
+          type: integer
+          description: Display order
+        createdAt:
+          type: string
+          format: date-time
+
+    Candidate:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+        name:
+          type: string
+          example: Jane Smith
+        description:
+          type: string
+          example: Experienced leader with vision for change
+        bio:
+          type: string
+        image:
+          type: string
+          example: /uploads/candidates/jane_smith.jpg
+        manifesto:
+          type: string
+        socialMedia:
+          type: object
+          properties:
+            twitter:
+              type: string
+            facebook:
+              type: string
+            instagram:
+              type: string
+        categoryId:
+          type: string
+          format: objectid
+        eventId:
+          type: string
+          format: objectid
+        nominationId:
+          type: string
+          format: objectid
+        voteCount:
+          type: integer
+          example: 42
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+          example: approved
+        order:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Vote:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+        candidateId:
+          type: string
+          format: objectid
+        categoryId:
+          type: string
+          format: objectid
+        eventId:
+          type: string
+          format: objectid
+        voterId:
+          type: string
+          format: objectid
+          description: Optional - for authenticated votes
+        voterEmail:
+          type: string
+          format: email
+          description: For anonymous votes
+        bundleId:
+          type: string
+          format: objectid
+        paymentId:
+          type: string
+          format: objectid
+        ipAddress:
+          type: string
+        userAgent:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+
+    VoteBundle:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+        name:
+          type: string
+          example: Premium Vote Package
+        description:
+          type: string
+        voteCount:
+          type: integer
+          example: 10
+        price:
+          type: number
+          format: float
+          example: 5.00
+        currency:
+          type: string
+          example: USD
+        eventId:
+          type: string
+          format: objectid
+        categoryId:
+          type: string
+          format: objectid
+        isActive:
+          type: boolean
+        isArchived:
+          type: boolean
+        features:
+          type: array
+          items:
+            type: string
+        validFrom:
+          type: string
+          format: date-time
+        validUntil:
+          type: string
+          format: date-time
+        purchaseCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    Payment:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+        reference:
+          type: string
+          example: TXN_1234567890
+        amount:
+          type: number
+          format: float
+          example: 10.00
+        currency:
+          type: string
+          example: USD
+        status:
+          type: string
+          enum: [pending, success, failed, cancelled]
+          example: success
+        paymentMethod:
+          type: string
+          example: card
+        gatewayResponse:
+          type: object
+        userId:
+          type: string
+          format: objectid
+        email:
+          type: string
+          format: email
+        bundleId:
+          type: string
+          format: objectid
+        eventId:
+          type: string
+          format: objectid
+        couponId:
+          type: string
+          format: objectid
+        discountAmount:
+          type: number
+        metadata:
+          type: object
+        paidAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    Coupon:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+        code:
+          type: string
+          example: EARLYBIRD2024
+        description:
+          type: string
+        discountType:
+          type: string
+          enum: [percentage, fixed]
+          example: percentage
+        discountValue:
+          type: number
+          example: 20
+        maxUses:
+          type: integer
+        usedCount:
+          type: integer
+        eventId:
+          type: string
+          format: objectid
+        categoryId:
+          type: string
+          format: objectid
+        validFrom:
+          type: string
+          format: date-time
+        validUntil:
+          type: string
+          format: date-time
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    Nomination:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+        candidateName:
+          type: string
+        candidateEmail:
+          type: string
+          format: email
+        categoryId:
+          type: string
+          format: objectid
+        eventId:
+          type: string
+          format: objectid
+        nominatorId:
+          type: string
+          format: objectid
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        reviewedBy:
+          type: string
+          format: objectid
+        reviewNotes:
+          type: string
+        submittedData:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: objectid
+        title:
+          type: string
+        message:
+          type: string
+        type:
+          type: string
+          enum: [info, success, warning, error]
+        category:
+          type: string
+          enum: [system, event, voting, payment]
+        recipients:
+          type: array
+          items:
+            type: object
+            properties:
+              userId:
+                type: string
+                format: objectid
+              read:
+                type: boolean
+              readAt:
+                type: string
+                format: date-time
+        targetRole:
+          type: string
+        isGlobal:
+          type: boolean
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        expiresAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    Analytics:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: objectid
+        totalVotes:
+          type: integer
+        uniqueVoters:
+          type: integer
+        votesByCategory:
+          type: object
+        votesByCandidate:
+          type: object
+        votingTimeline:
+          type: array
+          items:
+            type: object
+        participationRate:
+          type: number
+          format: float
+        geographicData:
+          type: object
+        paymentStats:
+          type: object
+        anomalies:
+          type: array
+          items:
+            type: object
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ==================
+  # Authentication Endpoints
+  # ==================
+  /auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: Register new user
+      description: Create a new user account
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - email
+                - password
+                - firstName
+                - lastName
+              properties:
+                username:
+                  type: string
+                  example: john_doe
+                email:
+                  type: string
+                  format: email
+                  example: john@example.com
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  example: SecurePass123!
+                firstName:
+                  type: string
+                  example: John
+                lastName:
+                  type: string
+                  example: Doe
+                role:
+                  type: string
+                  enum: [voter, moderator, event_manager]
+                  default: voter
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
+                      token:
+                        type: string
+                      refreshToken:
+                        type: string
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and receive JWT token
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: john@example.com
+                password:
+                  type: string
+                  format: password
+                  example: SecurePass123!
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
+                      token:
+                        type: string
+                      refreshToken:
+                        type: string
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Invalidate current session
+      operationId: logout
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh access token
+      description: Get new access token using refresh token
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      token:
+                        type: string
+                      refreshToken:
+                        type: string
+
+  /auth/forgot-password:
+    post:
+      tags:
+        - Authentication
+      summary: Request password reset
+      description: Send password reset link to email
+      operationId: forgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+
+  /auth/reset-password:
+    post:
+      tags:
+        - Authentication
+      summary: Reset password
+      description: Reset password using token from email
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+                - password
+              properties:
+                token:
+                  type: string
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+
+  /auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current user profile
+      description: Retrieve authenticated user's profile
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: User profile retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/change-password:
+    put:
+      tags:
+        - Authentication
+      summary: Change password
+      description: Change authenticated user's password
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - currentPassword
+                - newPassword
+              properties:
+                currentPassword:
+                  type: string
+                  format: password
+                newPassword:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # ==================
+  # User Endpoints
+  # ==================
+  /users:
+    get:
+      tags:
+        - Users
+      summary: List all users
+      description: Retrieve paginated list of users (Admin only)
+      operationId: getAllUsers
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/SearchParam'
+        - name: role
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, suspended, pending]
+      responses:
+        '200':
+          description: Users retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /users/{id}:
+    get:
+      tags:
+        - Users
+      summary: Get user by ID
+      description: Retrieve specific user details (Admin only)
+      operationId: getUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/User'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags:
+        - Users
+      summary: Update user
+      description: Update user information
+      operationId: updateUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                username:
+                  type: string
+                avatar:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags:
+        - Users
+      summary: Delete user
+      description: Soft delete user account (Admin only)
+      operationId: deleteUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /users/{id}/role:
+    put:
+      tags:
+        - Users
+      summary: Update user role
+      description: Change user's role (Super Admin only)
+      operationId: updateUserRole
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - roleId
+              properties:
+                roleId:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /users/{id}/status:
+    put:
+      tags:
+        - Users
+      summary: Update user status
+      description: Change user's account status (Admin only)
+      operationId: updateUserStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [active, inactive, suspended]
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /users/{id}/activity:
+    get:
+      tags:
+        - Users
+      summary: Get user activity log
+      description: Retrieve user's activity history
+      operationId: getUserActivity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Activity log retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      type: object
+
+  # ==================
+  # Event Endpoints
+  # ==================
+  /events:
+    get:
+      tags:
+        - Events
+      summary: List all events
+      description: Get paginated list of events
+      operationId: getAllEvents
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, upcoming, active, completed, cancelled]
+        - $ref: '#/components/parameters/SearchParam'
+      responses:
+        '200':
+          description: Events retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+
+    post:
+      tags:
+        - Events
+      summary: Create new event
+      description: Create a new voting event (Event Manager only)
+      operationId: createEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+                - description
+                - startDate
+                - endDate
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                startDate:
+                  type: string
+                  format: date-time
+                endDate:
+                  type: string
+                  format: date-time
+                banner:
+                  type: string
+                location:
+                  type: object
+                settings:
+                  type: object
+      responses:
+        '201':
+          description: Event created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Event'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /events/active:
+    get:
+      tags:
+        - Events
+      summary: Get active events
+      description: Retrieve list of currently active events
+      operationId: getActiveEvents
+      security:
+        - BearerAuth: []
+        - {}
+      responses:
+        '200':
+          description: Active events retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+
+  /events/{id}:
+    get:
+      tags:
+        - Events
+      summary: Get event by ID
+      description: Retrieve detailed event information
+      operationId: getEventById
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Event'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags:
+        - Events
+      summary: Update event
+      description: Update event information (Event Manager only)
+      operationId: updateEvent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                startDate:
+                  type: string
+                  format: date-time
+                endDate:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags:
+        - Events
+      summary: Delete event
+      description: Soft delete event (Admin only)
+      operationId: deleteEvent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /events/{id}/categories:
+    get:
+      tags:
+        - Events
+      summary: Get event categories
+      description: Retrieve all categories for an event
+      operationId: getEventCategories
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Categories retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+
+    post:
+      tags:
+        - Events
+      summary: Create event category
+      description: Add new category to event (Event Manager only)
+      operationId: createCategory
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - maxVotes
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                maxVotes:
+                  type: integer
+                minVotes:
+                  type: integer
+      responses:
+        '201':
+          description: Category created successfully
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /events/{id}/results:
+    get:
+      tags:
+        - Events
+      summary: Get event results
+      description: Retrieve voting results for event
+      operationId: getEventResults
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Results retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      totalVotes:
+                        type: integer
+                      categories:
+                        type: array
+                        items:
+                          type: object
+
+  /events/{id}/statistics:
+    get:
+      tags:
+        - Events
+      summary: Get event statistics
+      description: Retrieve comprehensive event statistics (Event Manager only)
+      operationId: getEventStatistics
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Statistics retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+
+  /events/{id}/status:
+    put:
+      tags:
+        - Events
+      summary: Update event status
+      description: Change event status (Event Manager only)
+      operationId: updateEventStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [draft, upcoming, active, completed, cancelled]
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+
+  # ==================
+  # Voting Endpoints
+  # ==================
+  /voting/cast:
+    post:
+      tags:
+        - Voting
+      summary: Cast vote
+      description: Cast vote for candidate (requires vote bundle)
+      operationId: castVote
+      security:
+        - BearerAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - candidateId
+                - categoryId
+                - eventId
+                - bundleId
+              properties:
+                candidateId:
+                  type: string
+                categoryId:
+                  type: string
+                eventId:
+                  type: string
+                bundleId:
+                  type: string
+                voterEmail:
+                  type: string
+                  format: email
+      responses:
+        '201':
+          description: Vote cast successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /voting/bulk:
+    post:
+      tags:
+        - Voting
+      summary: Cast multiple votes
+      description: Cast votes for multiple candidates in one request
+      operationId: bulkCastVotes
+      security:
+        - BearerAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - votes
+                - bundleId
+              properties:
+                votes:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      candidateId:
+                        type: string
+                      categoryId:
+                        type: string
+                bundleId:
+                  type: string
+                eventId:
+                  type: string
+                voterEmail:
+                  type: string
+      responses:
+        '201':
+          description: Votes cast successfully
+
+  /voting/status:
+    get:
+      tags:
+        - Voting
+      summary: Check vote status
+      description: Check if email has voted
+      operationId: checkVoteStatus
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+        - name: eventId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Vote status retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      hasVoted:
+                        type: boolean
+
+  /voting/bundles/active:
+    get:
+      tags:
+        - Voting
+      summary: Get active vote bundles
+      description: Retrieve list of currently active vote bundles
+      operationId: getActiveVoteBundles
+      security:
+        - BearerAuth: []
+        - {}
+      responses:
+        '200':
+          description: Vote bundles retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VoteBundle'
+
+  /voting/bundles/event/{eventId}:
+    get:
+      tags:
+        - Voting
+      summary: Get event vote bundles
+      description: Get vote bundles for specific event
+      operationId: getEventVoteBundles
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event bundles retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VoteBundle'
+
+  /voting/bundles:
+    post:
+      tags:
+        - Voting
+      summary: Create vote bundle
+      description: Create new vote bundle (Event Manager only)
+      operationId: createVoteBundle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - voteCount
+                - price
+                - eventId
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                voteCount:
+                  type: integer
+                price:
+                  type: number
+                currency:
+                  type: string
+                eventId:
+                  type: string
+                categoryId:
+                  type: string
+                validFrom:
+                  type: string
+                  format: date-time
+                validUntil:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Vote bundle created
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /voting/event/{eventId}:
+    get:
+      tags:
+        - Voting
+      summary: Get event votes
+      description: Retrieve all votes for event (Event Manager only)
+      operationId: getEventVotes
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Votes retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Vote'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /voting/analytics/{eventId}:
+    get:
+      tags:
+        - Voting
+      summary: Get vote analytics
+      description: Get voting analytics for event (Event Manager only)
+      operationId: getVoteAnalytics
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Analytics retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Analytics'
+
+  # ==================
+  # Payment Endpoints
+  # ==================
+  /payments/initialize:
+    post:
+      tags:
+        - Payments
+      summary: Initialize payment
+      description: Initialize payment transaction via Paystack
+      operationId: initializePayment
+      security:
+        - BearerAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - amount
+                - bundleId
+              properties:
+                email:
+                  type: string
+                  format: email
+                amount:
+                  type: number
+                bundleId:
+                  type: string
+                couponCode:
+                  type: string
+                metadata:
+                  type: object
+      responses:
+        '200':
+          description: Payment initialized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      authorizationUrl:
+                        type: string
+                      reference:
+                        type: string
+
+  /payments/verify/{reference}:
+    get:
+      tags:
+        - Payments
+      summary: Verify payment
+      description: Verify payment transaction
+      operationId: verifyPayment
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: reference
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Payment'
+
+  /payments/webhook:
+    post:
+      tags:
+        - Payments
+      summary: Payment webhook
+      description: Paystack webhook endpoint for payment notifications
+      operationId: paymentWebhook
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed
+
+  # ==================
+  # Analytics Endpoints
+  # ==================
+  /analytics/dashboard:
+    get:
+      tags:
+        - Analytics
+      summary: Get dashboard analytics
+      description: Retrieve comprehensive dashboard analytics (Admin only)
+      operationId: getDashboardAnalytics
+      responses:
+        '200':
+          description: Dashboard analytics retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      totalEvents:
+                        type: integer
+                      activeEvents:
+                        type: integer
+                      totalVotes:
+                        type: integer
+                      totalRevenue:
+                        type: number
+                      userStats:
+                        type: object
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ==================
+  # Coupon Endpoints
+  # ==================
+  /coupons:
+    get:
+      tags:
+        - Coupons
+      summary: List coupons
+      description: Get list of coupons (Admin only)
+      operationId: listCoupons
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Coupons retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Coupon'
+
+    post:
+      tags:
+        - Coupons
+      summary: Create coupon
+      description: Create new discount coupon (Admin only)
+      operationId: createCoupon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+                - discountType
+                - discountValue
+              properties:
+                code:
+                  type: string
+                description:
+                  type: string
+                discountType:
+                  type: string
+                  enum: [percentage, fixed]
+                discountValue:
+                  type: number
+                maxUses:
+                  type: integer
+                eventId:
+                  type: string
+                validFrom:
+                  type: string
+                  format: date-time
+                validUntil:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Coupon created
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /coupons/validate/{code}:
+    post:
+      tags:
+        - Coupons
+      summary: Validate coupon
+      description: Check if coupon code is valid
+      operationId: validateCoupon
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eventId:
+                  type: string
+                amount:
+                  type: number
+      responses:
+        '200':
+          description: Coupon validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      isValid:
+                        type: boolean
+                      coupon:
+                        $ref: '#/components/schemas/Coupon'
+                      discountAmount:
+                        type: number
+
+  # ==================
+  # Health Endpoint
+  # ==================
+  /health:
+    get:
+      tags:
+        - Health
+      summary: API health check
+      description: Check API health status
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  version:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+                  uptime:
+                    type: number
