@@ -18,8 +18,8 @@
 import mongoose from 'mongoose';
 import pRetry from 'p-retry';
 import _ from 'lodash';
-import { mainCacheManager } from '../utils/engine/CacheManager.js';
-import logger from '../utils/Logger.js';
+import { mainCacheManager } from './utils/engine/CacheManager.js';
+import logger from './utils/Logger.js';
 
 /**
  * Base Repository Class

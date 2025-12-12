@@ -1,6 +1,6 @@
 import BaseRepository from '../BaseRepository.js';
-import VoteBundle from '../../models/VoteBundle.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import VoteBundle from '../models/VoteBundle.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 /**
  * VoteBundleRepository

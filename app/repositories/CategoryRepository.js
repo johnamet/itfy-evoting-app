@@ -1,6 +1,6 @@
 import BaseRepository from '../BaseRepository.js';
-import Category from '../../models/Category.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Category from '../models/Category.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 /**
  * CategoryRepository

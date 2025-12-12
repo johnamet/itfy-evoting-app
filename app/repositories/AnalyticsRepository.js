@@ -1,6 +1,6 @@
 import BaseRepository from '../BaseRepository.js';
-import Analytics from '../../models/Analytics.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Analytics from '../models/Analytics.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 /**
  * AnalyticsRepository

@@ -1,6 +1,6 @@
 import BaseRepository from '../BaseRepository.js';
-import Notification from '../../models/Notification.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Notification from '../models/Notification.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 /**
  * NotificationRepository

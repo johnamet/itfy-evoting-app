@@ -1,5 +1,5 @@
 import queueManager from '../services/QueueManager.js';
-import logger from '../utils/logger.js';
+import logger from '../utils/Logger.js';
 
 class QueueController {
     // Get queue dashboard statistics

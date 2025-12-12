@@ -9,8 +9,8 @@
  */
 
 import BaseRepository from '../BaseRepository.js';
-import Payment from '../../models/Payment.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Payment from '../models/Payment.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 class PaymentRepository extends BaseRepository {
     constructor() {

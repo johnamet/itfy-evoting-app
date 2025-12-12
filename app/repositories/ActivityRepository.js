@@ -1,6 +1,6 @@
 import BaseRepository from '../BaseRepository.js';
-import Activity from '../../models/Activity.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Activity from '../models/Activity.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 /**
  * ActivityRepository

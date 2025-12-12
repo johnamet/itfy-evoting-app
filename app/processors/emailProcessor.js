@@ -1,6 +1,6 @@
 import { emailQueue } from '../config/queue.js';
 import EmailService from '../services/EmailService.js';
-import logger from '../utils/logger.js';
+import logger from '../utils/Logger.js';
 
 // Email job processor
 emailQueue.process('send-welcome-email', async (job) => {

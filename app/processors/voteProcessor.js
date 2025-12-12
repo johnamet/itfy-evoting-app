@@ -1,7 +1,7 @@
 import { voteProcessingQueue } from '../config/queue.js';
 import VoteService from '../services/VoteService.js';
 import AnalyticsService from '../services/AnalyticsService.js';
-import logger from '../utils/logger.js';
+import logger from '../utils/Logger.js';
 
 // Vote processing job processor
 voteProcessingQueue.process('process-vote', async (job) => {

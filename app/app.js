@@ -139,7 +139,7 @@ app.use('/api', cacheMiddleware({
 }));
 
 // Mount API routes
-app.use('/api/v1', apiRoutes);
+app.use('/api', apiRoutes);
 
 // Swagger API Documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs, {

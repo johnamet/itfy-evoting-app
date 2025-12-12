@@ -9,8 +9,8 @@
  */
 
 import BaseRepository from '../BaseRepository.js';
-import Candidate from '../../models/Candidate.js';
-import { mainCacheManager } from '../../utils/engine/CacheManager.js';
+import Candidate from '../models/Candidate.js';
+import { mainCacheManager } from '../utils/engine/CacheManager.js';
 
 class CandidateRepository extends BaseRepository {
     constructor() {
